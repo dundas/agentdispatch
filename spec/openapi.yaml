@@ -1,0 +1,273 @@
+openapi: 3.1.0
+info:
+  title: Agent Dispatch Messaging Protocol (ADMP) — HTTP Inbox API
+  version: 1.0-draft
+  description: >
+    Core HTTP binding for ADMP. Provides per-agent inboxes and at-least-once delivery semantics.
+    Supports Bearer (JWT) or HMAC (X-Agent-* headers) authentication.
+
+servers:
+  - url: https://dispatch.example.com
+
+security:
+  - BearerAuth: []
+  - HmacAuth: []
+
+paths:
+  /v1/agents/{agentId}/messages:
+    post:
+      summary: SEND — enqueue a message into the target agent's inbox
+      operationId: sendMessage
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageEnvelope' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SendResponse' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/agents/{agentId}/inbox/pull:
+    post:
+      summary: PULL — lease one available message
+      operationId: pullMessage
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - name: visibility_timeout
+          in: query
+          required: false
+          schema: { type: integer, default: 60, minimum: 1, maximum: 3600 }
+      responses:
+        '200':
+          description: Message leased
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageRecord' }
+        '204':
+          description: No content (inbox empty)
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /v1/agents/{agentId}/messages/{messageId}/ack:
+    post:
+      summary: ACK — acknowledge successful processing (deletes from inbox)
+      operationId: ackMessage
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/MessageId'
+      responses:
+        '200': { description: Acked }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/agents/{agentId}/messages/{messageId}/nack:
+    post:
+      summary: NACK — reject or extend lease
+      operationId: nackMessage
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/MessageId'
+        - name: extend
+          in: query
+          required: false
+          description: Seconds to extend the current lease (if provided)
+          schema: { type: integer, minimum: 1, maximum: 3600 }
+      responses:
+        '200': { description: Nacked or lease extended }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/agents/{agentId}/messages/{messageId}/reply:
+    post:
+      summary: REPLY — send a correlated response to the original sender
+      operationId: replyMessage
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/MessageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/ReplySuccess'
+                - $ref: '#/components/schemas/ReplyError'
+      responses:
+        '200': { description: Reply accepted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/messages/{messageId}/status:
+    get:
+      summary: Query message delivery/processing status
+      operationId: getMessageStatus
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Status' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/agents/{agentId}/inbox/stats:
+    get:
+      summary: Inbox statistics
+      operationId: inboxStats
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200':
+          description: Stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InboxStats' }
+
+  /v1/agents/{agentId}/inbox/reclaim:
+    post:
+      summary: Reclaim expired leases back to ready queue
+      operationId: reclaimLeases
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200': { description: Reclaim complete }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    HmacAuth:
+      type: apiKey
+      in: header
+      name: X-Agent-Id
+      description: >
+        HMAC auth via headers:
+        - X-Agent-Id
+        - X-Timestamp (ISO8601)
+        - X-Signature (base64 HMAC-SHA256 over canonical body)
+        Server enforces ±5m clock skew; shared secret per agent.
+
+  parameters:
+    AgentId:
+      name: agentId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-zA-Z0-9._-]+$' }
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    MessageEnvelope:
+      type: object
+      required: [version, id, type, from, to, subject, body, timestamp]
+      properties:
+        version: { type: string, enum: ['1.0'] }
+        id: { type: string, format: uuid }
+        type: { type: string, enum: ['task.request','task.result','task.error','event'] }
+        from: { type: string, example: 'agent://auth.backend' }
+        to: { type: string, example: 'agent://storage.pg' }
+        subject: { type: string, example: 'create_user' }
+        correlation_id: { type: string }
+        headers: { type: object, additionalProperties: true }
+        body: { type: object, additionalProperties: true }
+        ttl_sec: { type: integer, default: 86400 }
+        timestamp: { type: string, format: date-time }
+        signature:
+          type: object
+          required: [alg, kid, sig]
+          properties:
+            alg: { type: string, enum: ['ed25519','hmac-sha256'] }
+            kid: { type: string }
+            sig: { type: string, description: 'base64 signature' }
+    MessageRecord:
+      allOf:
+        - $ref: '#/components/schemas/MessageEnvelope'
+        - type: object
+          properties:
+            status:
+              type: string
+              enum: ['queued','sent','delivered','leased','acked','failed','dead']
+            lease_until: { type: string, format: date-time, nullable: true }
+            attempts: { type: integer }
+            delivered_at: { type: string, format: date-time, nullable: true }
+            acked_at: { type: string, format: date-time, nullable: true }
+            reply: { type: object, nullable: true, additionalProperties: true }
+    ReplySuccess:
+      type: object
+      required: [result]
+      properties:
+        result: { type: object, additionalProperties: true }
+        error: { type: 'null' }
+    ReplyError:
+      type: object
+      required: [error]
+      properties:
+        result: { type: 'null' }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+    SendResponse:
+      type: object
+      properties:
+        message_id: { type: string, format: uuid }
+    Status:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ['queued','sent','delivered','leased','acked','failed','dead']
+        delivered_at: { type: string, format: date-time, nullable: true }
+        acked_at: { type: string, format: date-time, nullable: true }
+    InboxStats:
+      type: object
+      properties:
+        ready: { type: integer }
+        leased: { type: integer }
+        dead: { type: integer }
+        oldest_age_sec: { type: integer }
+
+  responses:
+    Forbidden:
+      description: Forbidden (policy/auth)
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    Conflict:
+      description: Duplicate idempotency key
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    PayloadTooLarge:
+      description: Payload too large
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    Unprocessable:
+      description: Unprocessable (schema)
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+    NotFound:
+      description: Not found
+      content:
+        application/json: { schema: { $ref: '#/components/schemas/Error' } }
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        message: { type: string }
+```
+
+---

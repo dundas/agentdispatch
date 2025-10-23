@@ -1,0 +1,53 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: admp-postgres
+    environment:
+      POSTGRES_DB: admp
+      POSTGRES_USER: admp
+      POSTGRES_PASSWORD: admp_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  relay:
+    build:
+      context: ../packages/core
+      dockerfile: Dockerfile
+    container_name: admp-relay
+    environment:
+      NODE_ENV: development
+      PORT: 3030
+      DATABASE_URL: postgresql://admp:admp_dev_password@postgres:5432/admp
+      LOG_LEVEL: info
+      API_KEY: dev-key-admp-local
+    ports:
+      - "3030:3030"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../packages/core/src:/app/src
+    command: npm run dev
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3030/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  default:
+    name: admp-network
