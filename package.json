@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "agentbootup": "file:../agentbootup"
+  }
+}
