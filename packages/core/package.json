@@ -2,6 +2,7 @@
   "name": "@agent-dispatch/core",
   "version": "1.0.0",
   "description": "ADMP Core Relay Server - HTTP API and PostgreSQL inbox implementation",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

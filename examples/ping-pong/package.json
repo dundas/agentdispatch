@@ -1,0 +1,17 @@
+{
+  "name": "admp-example-ping-pong",
+  "version": "1.0.0",
+  "description": "ADMP Ping-Pong Example - Basic message send and receive",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "example": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@agent-dispatch/client": "file:../../packages/client-js"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

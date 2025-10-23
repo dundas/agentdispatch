@@ -20,10 +20,9 @@ services:
       retries: 5
 
   relay:
-    build:
-      context: ../packages/core
-      dockerfile: Dockerfile
+    image: node:20-alpine
     container_name: admp-relay
+    working_dir: /app
     environment:
       NODE_ENV: development
       PORT: 3030
@@ -36,8 +35,8 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ../packages/core/src:/app/src
-    command: npm run dev
+      - ../packages/core:/app
+    command: sh -c "npm install && npm run dev"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3030/health"]
       interval: 10s
