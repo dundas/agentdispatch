@@ -8,6 +8,7 @@ ADMP provides a standardized messaging infrastructure for AI agents to communica
 
 - ✅ **Agent Registration** - Ed25519 keypair generation
 - ✅ **Inbox Operations** - SEND, PULL, ACK, NACK, REPLY
+- ✅ **Webhook Push Delivery** - Real-time message push to webhook URLs
 - ✅ **Heartbeat** - Session liveness with automatic offline detection
 - ✅ **Message Leasing** - At-least-once delivery with visibility timeouts
 - ✅ **Signature Verification** - Ed25519 authentication on all messages
@@ -95,7 +96,9 @@ POST /api/agents/register
   "metadata": {
     "project_name": "my-project",
     "working_directory": "/path/to/project"
-  }
+  },
+  "webhook_url": "https://myagent.com/webhook",  // Optional: for push delivery
+  "webhook_secret": "secret123"                   // Optional: auto-generated if omitted
 }
 ```
 
@@ -106,6 +109,8 @@ POST /api/agents/register
   "agent_type": "claude_session",
   "public_key": "base64-encoded-public-key",
   "secret_key": "base64-encoded-secret-key",
+  "webhook_url": "https://myagent.com/webhook",
+  "webhook_secret": "auto-generated-secret",
   "heartbeat": {
     "last_heartbeat": 1699999999,
     "status": "online",
@@ -115,7 +120,7 @@ POST /api/agents/register
 }
 ```
 
-**⚠️ Save the `secret_key` - it's only returned on registration!**
+**⚠️ Save the `secret_key` and `webhook_secret` - they're only returned on registration!**
 
 ---
 
@@ -378,7 +383,63 @@ DELETE /api/agents/{agentId}/trusted/{trustedAgentId}
 
 ---
 
-#### 11. System Stats
+#### 11. Webhook Configuration
+
+**Configure webhook for push delivery:**
+
+```bash
+POST /api/agents/{agentId}/webhook
+
+{
+  "webhook_url": "https://myagent.com/webhook",
+  "webhook_secret": "optional-custom-secret"
+}
+```
+
+**Response:**
+```json
+{
+  "agent_id": "agent://agent-abc123",
+  "webhook_url": "https://myagent.com/webhook",
+  "webhook_secret": "auto-generated-or-custom-secret"
+}
+```
+
+**Get webhook configuration:**
+```bash
+GET /api/agents/{agentId}/webhook
+```
+
+**Response:**
+```json
+{
+  "webhook_url": "https://myagent.com/webhook",
+  "webhook_configured": true
+}
+```
+
+**Remove webhook:**
+```bash
+DELETE /api/agents/{agentId}/webhook
+```
+
+**Response:**
+```json
+{
+  "message": "Webhook removed",
+  "webhook_configured": false
+}
+```
+
+**💡 When webhook is configured:**
+- Messages are **pushed immediately** to your webhook URL
+- No polling needed
+- Webhook delivery has automatic retry (3 attempts with exponential backoff)
+- If webhook fails, message stays queued for polling (fallback)
+
+---
+
+#### 12. System Stats
 
 **Get server statistics:**
 
@@ -496,6 +557,196 @@ setInterval(async () => {
     body: JSON.stringify({ result: { status: 'processed' } })
   });
 }, 60000);
+```
+
+## Webhook Push Delivery
+
+**Webhooks provide real-time message push instead of polling.**
+
+### Benefits
+
+- ⚡ **Instant delivery** - Messages pushed immediately (no polling delay)
+- 📉 **Lower latency** - Sub-second delivery instead of up to 60s polling interval
+- 🔋 **Reduced load** - No constant polling requests to server
+- ♻️ **Automatic retry** - 3 attempts with exponential backoff (1s, 2s, 4s)
+- 🛡️ **Fallback to polling** - If webhook fails, message stays queued
+
+### How It Works
+
+```
+1. Agent registers with webhook_url
+   ↓
+2. Message sent to agent
+   ↓
+3. ADMP server immediately POSTs to webhook_url
+   ↓
+4. If webhook returns 200 OK → Success ✓
+   If webhook fails → Retry with backoff
+   If all retries fail → Message stays in queue for polling
+```
+
+### Example: Webhook Receiver
+
+**1. Start webhook receiver:**
+
+```bash
+node examples/webhook-receiver.js
+# Listening on http://localhost:3000/webhook
+```
+
+**2. Register agent with webhook:**
+
+```javascript
+const agent = await fetch('http://localhost:8080/api/agents/register', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    agent_type: 'my_agent',
+    webhook_url: 'http://localhost:3000/webhook',
+    webhook_secret: 'my-secret-key'
+  })
+});
+
+const { webhook_secret } = await agent.json();
+// Save webhook_secret to verify incoming webhooks
+```
+
+**3. Implement webhook endpoint:**
+
+```javascript
+import express from 'express';
+import crypto from 'crypto';
+
+const app = express();
+app.use(express.json());
+
+app.post('/webhook', async (req, res) => {
+  const payload = req.body;
+
+  // Verify signature
+  const signature = payload.signature;
+  const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
+  hmac.update(JSON.stringify({ ...payload, signature: undefined }));
+  const expected = hmac.digest('hex');
+
+  if (signature !== expected) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  // Extract message
+  const { envelope } = payload;
+  console.log('Received message:', envelope.subject);
+
+  // Process message
+  await processMessage(envelope);
+
+  // Acknowledge with 200 OK
+  res.json({ ok: true });
+});
+```
+
+**4. Send message (will be pushed immediately):**
+
+```javascript
+await fetch('http://localhost:8080/api/agents/agent://my_agent/messages', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    version: '1.0',
+    from: 'agent://sender',
+    to: 'agent://my_agent',
+    subject: 'task',
+    body: { command: 'run tests' },
+    timestamp: new Date().toISOString(),
+    signature: {...}
+  })
+});
+
+// Webhook will receive message within milliseconds!
+```
+
+### Webhook Payload
+
+When a message arrives, ADMP POSTs this payload to your webhook:
+
+```json
+{
+  "event": "message.received",
+  "message_id": "msg-abc123",
+  "envelope": {
+    "version": "1.0",
+    "from": "agent://sender",
+    "to": "agent://recipient",
+    "subject": "task",
+    "body": {...},
+    "timestamp": "2025-11-14T10:00:00Z",
+    "signature": {...}
+  },
+  "delivered_at": 1699999999000,
+  "signature": "hmac-sha256-signature"  // If webhook_secret configured
+}
+```
+
+### Webhook Headers
+
+```
+POST /webhook HTTP/1.1
+Host: myagent.com
+Content-Type: application/json
+User-Agent: ADMP-Server/1.0
+X-ADMP-Event: message.received
+X-ADMP-Message-ID: msg-abc123
+X-ADMP-Delivery-Attempt: 1
+```
+
+### Retry Behavior
+
+| Attempt | Delay | Total Time |
+|---------|-------|------------|
+| 1       | 0s    | 0s         |
+| 2       | 1s    | 1s         |
+| 3       | 2s    | 3s         |
+| Failed  | -     | Give up    |
+
+After 3 failed attempts, message stays `queued` for polling.
+
+### Webhook vs Polling
+
+| Feature | Webhook | Polling |
+|---------|---------|---------|
+| **Latency** | <100ms | Up to 60s |
+| **Server load** | Low (push only) | Higher (constant polling) |
+| **Reliability** | Requires reachable endpoint | Always works |
+| **Setup** | Configure webhook URL | No setup needed |
+| **Fallback** | Falls back to polling | N/A |
+
+### Best Practices
+
+✅ **Do:**
+- Return 200 OK quickly (process async if needed)
+- Verify webhook signature
+- Use HTTPS in production
+- Log failed webhook deliveries
+- Keep webhook endpoint highly available
+
+❌ **Don't:**
+- Block webhook response waiting for long processing
+- Expose webhook without signature verification
+- Use HTTP in production (security risk)
+- Rely solely on webhooks (always support polling fallback)
+
+### Examples
+
+**Try it:**
+```bash
+# Terminal 1: Start ADMP server
+npm start
+
+# Terminal 2: Start webhook receiver
+node examples/webhook-receiver.js
+
+# Terminal 3: Run webhook example
+node examples/webhook-push.js
 ```
 
 ## Deployment

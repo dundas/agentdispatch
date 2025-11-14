@@ -7,6 +7,7 @@ import { v4 as uuid } from 'uuid';
 import { storage } from '../storage/memory.js';
 import { verifySignature, fromBase64 } from '../utils/crypto.js';
 import { agentService } from './agent.service.js';
+import { webhookService } from './webhook.service.js';
 
 export class InboxService {
   /**
@@ -52,7 +53,42 @@ export class InboxService {
       attempts: 0
     };
 
-    return await storage.createMessage(message);
+    const created = await storage.createMessage(message);
+
+    // Try webhook delivery if configured (don't block on it)
+    if (recipient.webhook_url) {
+      // Fire and forget - webhook delivery happens in background
+      this.deliverViaWebhook(recipient, created).catch(err => {
+        // Webhook failed, message stays in queue for polling
+        console.error(`Webhook delivery failed for ${created.id}:`, err.message);
+      });
+    }
+
+    return created;
+  }
+
+  /**
+   * Deliver message via webhook (async, non-blocking)
+   * @param {Object} agent - Recipient agent
+   * @param {Object} message - Message to deliver
+   */
+  async deliverViaWebhook(agent, message) {
+    const result = await webhookService.deliverWithRetry(agent, message);
+
+    if (result.success) {
+      // Webhook delivered successfully - optionally auto-lease or mark as delivered
+      // For now, keep it queued so agent can still pull if needed
+      await storage.updateMessage(message.id, {
+        webhook_delivered: true,
+        webhook_delivered_at: Date.now()
+      });
+    } else if (result.will_retry) {
+      // Schedule retry
+      const delay = Math.pow(2, result.attempts) * 1000;
+      webhookService.scheduleRetry(agent, message, delay);
+    }
+
+    return result;
   }
 
   /**

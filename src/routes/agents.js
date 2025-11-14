@@ -15,12 +15,14 @@ const router = express.Router();
  */
 router.post('/register', async (req, res) => {
   try {
-    const { agent_id, agent_type, metadata } = req.body;
+    const { agent_id, agent_type, metadata, webhook_url, webhook_secret } = req.body;
 
     const agent = await agentService.register({
       agent_id,
       agent_type,
-      metadata
+      metadata,
+      webhook_url,
+      webhook_secret
     });
 
     res.status(201).json({
@@ -28,6 +30,8 @@ router.post('/register', async (req, res) => {
       agent_type: agent.agent_type,
       public_key: agent.public_key,
       secret_key: agent.secret_key,  // Only returned on registration
+      webhook_url: agent.webhook_url,
+      webhook_secret: agent.webhook_secret,  // Only returned on registration
       heartbeat: agent.heartbeat
     });
   } catch (error) {
@@ -161,6 +165,73 @@ router.delete('/:agentId/trusted/:trustedAgentId', authenticateAgent, async (req
   } catch (error) {
     res.status(400).json({
       error: 'REMOVE_TRUSTED_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/agents/:agentId/webhook
+ * Configure webhook for agent
+ */
+router.post('/:agentId/webhook', authenticateAgent, async (req, res) => {
+  try {
+    const { webhook_url, webhook_secret } = req.body;
+
+    if (!webhook_url) {
+      return res.status(400).json({
+        error: 'WEBHOOK_URL_REQUIRED',
+        message: 'webhook_url is required'
+      });
+    }
+
+    const config = await agentService.configureWebhook(
+      req.params.agentId,
+      webhook_url,
+      webhook_secret
+    );
+
+    res.json(config);
+  } catch (error) {
+    res.status(400).json({
+      error: 'WEBHOOK_CONFIG_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/agents/:agentId/webhook
+ * Get webhook configuration
+ */
+router.get('/:agentId/webhook', authenticateAgent, async (req, res) => {
+  try {
+    const config = await agentService.getWebhookConfig(req.params.agentId);
+
+    res.json(config);
+  } catch (error) {
+    res.status(400).json({
+      error: 'GET_WEBHOOK_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /api/agents/:agentId/webhook
+ * Remove webhook configuration
+ */
+router.delete('/:agentId/webhook', authenticateAgent, async (req, res) => {
+  try {
+    await agentService.removeWebhook(req.params.agentId);
+
+    res.json({
+      message: 'Webhook removed',
+      webhook_configured: false
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: 'REMOVE_WEBHOOK_FAILED',
       message: error.message
     });
   }

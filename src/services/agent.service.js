@@ -14,9 +14,11 @@ export class AgentService {
    * @param {string} params.agent_id - Optional custom agent ID
    * @param {string} params.agent_type - Type of agent (e.g., 'claude_session')
    * @param {Object} params.metadata - Agent metadata
+   * @param {string} params.webhook_url - Optional webhook URL for push delivery
+   * @param {string} params.webhook_secret - Optional webhook secret for signing
    * @returns {Object} Agent with keypair
    */
-  async register({ agent_id, agent_type = 'generic', metadata = {} }) {
+  async register({ agent_id, agent_type = 'generic', metadata = {}, webhook_url, webhook_secret }) {
     // Generate agent_id if not provided
     if (!agent_id) {
       agent_id = `agent://agent-${uuid()}`;
@@ -31,11 +33,18 @@ export class AgentService {
     // Generate Ed25519 keypair
     const keypair = generateKeypair();
 
+    // Generate webhook secret if URL provided but no secret
+    if (webhook_url && !webhook_secret) {
+      webhook_secret = toBase64(generateKeypair().publicKey).substring(0, 32);
+    }
+
     const agent = {
       agent_id,
       agent_type,
       public_key: toBase64(keypair.publicKey),
       metadata,
+      webhook_url: webhook_url || null,
+      webhook_secret: webhook_secret || null,
       heartbeat: {
         last_heartbeat: Date.now(),
         status: 'online',
@@ -201,6 +210,70 @@ export class AgentService {
     if (!agent) return false;
 
     return agent.trusted_agents.includes(senderId);
+  }
+
+  /**
+   * Configure webhook for agent
+   * @param {string} agentId - Agent ID
+   * @param {string} webhook_url - Webhook URL
+   * @param {string} webhook_secret - Optional webhook secret (auto-generated if not provided)
+   * @returns {Object} Updated agent with webhook_secret
+   */
+  async configureWebhook(agentId, webhook_url, webhook_secret) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+
+    // Generate webhook secret if not provided
+    if (!webhook_secret && webhook_url) {
+      webhook_secret = toBase64(generateKeypair().publicKey).substring(0, 32);
+    }
+
+    const updated = await storage.updateAgent(agentId, {
+      webhook_url: webhook_url || null,
+      webhook_secret: webhook_secret || null
+    });
+
+    return {
+      agent_id: updated.agent_id,
+      webhook_url: updated.webhook_url,
+      webhook_secret: updated.webhook_secret  // Return secret so agent can verify
+    };
+  }
+
+  /**
+   * Remove webhook configuration
+   * @param {string} agentId - Agent ID
+   * @returns {Object} Updated agent
+   */
+  async removeWebhook(agentId) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+
+    return await storage.updateAgent(agentId, {
+      webhook_url: null,
+      webhook_secret: null
+    });
+  }
+
+  /**
+   * Get webhook configuration
+   * @param {string} agentId - Agent ID
+   * @returns {Object} Webhook config
+   */
+  async getWebhookConfig(agentId) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+
+    return {
+      webhook_url: agent.webhook_url,
+      webhook_configured: !!agent.webhook_url
+    };
   }
 }
 
