@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  admp-server:
+    build: .
+    container_name: admp-server
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - PORT=8080
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - API_KEY_REQUIRED=${API_KEY_REQUIRED:-false}
+      - MASTER_API_KEY=${MASTER_API_KEY:-}
+      - HEARTBEAT_INTERVAL_MS=${HEARTBEAT_INTERVAL_MS:-60000}
+      - HEARTBEAT_TIMEOUT_MS=${HEARTBEAT_TIMEOUT_MS:-300000}
+      - MESSAGE_TTL_SEC=${MESSAGE_TTL_SEC:-86400}
+      - CLEANUP_INTERVAL_MS=${CLEANUP_INTERVAL_MS:-60000}
+      - MAX_MESSAGE_SIZE_KB=${MAX_MESSAGE_SIZE_KB:-256}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8080/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
