@@ -1,0 +1,48 @@
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Development files
+.env
+.env.*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Documentation
+README.md
+CLAUDE.md
+PR_DESCRIPTION.md
+discovery/
+whitepaper/
+tasks/
+ai-dev-tasks/
+.windsurf/
+.claude/
+
+# Examples
+examples/
+
+# Tests
+*.test.js
+test/
+coverage/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Misc
+*.md
+.DS_Store

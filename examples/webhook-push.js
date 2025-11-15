@@ -137,7 +137,7 @@ async function registerAgent(name, metadata, webhook_url) {
 }
 
 async function sendHeartbeat(agentId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/heartbeat`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/heartbeat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -165,7 +165,7 @@ async function sendMessage(sender, recipientId, message) {
   const secretKey = fromBase64(sender.secret_key);
   envelope.signature = signMessage(envelope, secretKey);
 
-  const res = await fetch(`${API_URL}/agents/${recipientId}/messages`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(recipientId)}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(envelope)
@@ -180,7 +180,7 @@ async function sendMessage(sender, recipientId, message) {
 }
 
 async function pullMessage(agentId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/inbox/pull`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/inbox/pull`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ visibility_timeout: 60 })
@@ -194,7 +194,7 @@ async function pullMessage(agentId) {
 }
 
 async function ackMessage(agentId, messageId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/messages/${messageId}/ack`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/messages/${messageId}/ack`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ result: { status: 'processed' } })
@@ -209,12 +209,12 @@ async function getMessageStatus(messageId) {
 }
 
 async function getWebhookConfig(agentId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/webhook`);
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/webhook`);
   return await res.json();
 }
 
 async function updateWebhook(agentId, webhook_url) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/webhook`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/webhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ webhook_url })
@@ -224,7 +224,7 @@ async function updateWebhook(agentId, webhook_url) {
 }
 
 async function removeWebhook(agentId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/webhook`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/webhook`, {
     method: 'DELETE'
   });
 

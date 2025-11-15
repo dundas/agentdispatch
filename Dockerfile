@@ -11,6 +11,9 @@ RUN npm ci --only=production
 # Copy source code
 COPY src/ ./src/
 
+# Copy OpenAPI specification
+COPY openapi.yaml ./
+
 # Expose port
 EXPOSE 8080
 

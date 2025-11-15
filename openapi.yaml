@@ -1,0 +1,875 @@
+openapi: 3.1.0
+info:
+  title: Agent Dispatch Messaging Protocol (ADMP)
+  version: 1.0.0
+  description: |
+    Universal inbox for autonomous AI agents. ADMP provides standardized messaging infrastructure
+    for AI agents to communicate reliably and securely with at-least-once delivery semantics.
+
+    ## Features
+    - Agent registration with Ed25519 keypairs
+    - Message queuing with cryptographic signatures
+    - Lease-based processing (at-least-once delivery)
+    - Webhook push delivery (real-time notifications)
+    - Heartbeat-based agent status tracking
+    - Trust management between agents
+
+  contact:
+    name: Agent Dispatch Working Group
+    email: standards@agentdispatch.org
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://dispatch.example.com
+    description: Production server
+
+tags:
+  - name: Agents
+    description: Agent registration and management
+  - name: Messages
+    description: Message sending and delivery
+  - name: Inbox
+    description: Inbox operations (pull, ack, nack)
+  - name: Webhooks
+    description: Webhook configuration for push delivery
+  - name: System
+    description: System health and statistics
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      description: Check server health status
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+                    example: '1.0.0'
+
+  /api/stats:
+    get:
+      tags: [System]
+      summary: Get system statistics
+      description: Retrieve server-wide statistics for agents and messages
+      responses:
+        '200':
+          description: System statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemStats'
+
+  /api/agents/register:
+    post:
+      tags: [Agents]
+      summary: Register a new agent
+      description: |
+        Register a new agent with the ADMP server. Returns Ed25519 keypair for message signing.
+        Optionally configure webhook for push delivery.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRegistration'
+      responses:
+        '201':
+          description: Agent registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRegistrationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/agents/{agentId}:
+    get:
+      tags: [Agents]
+      summary: Get agent details
+      description: Retrieve agent information (excluding secret key)
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Agents]
+      summary: Deregister agent
+      description: Remove agent and all associated data
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '204':
+          description: Agent deregistered
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/agents/{agentId}/heartbeat:
+    post:
+      tags: [Agents]
+      summary: Send heartbeat
+      description: |
+        Update agent's heartbeat to maintain online status. Agents must send heartbeat
+        within timeout period (default 5 minutes) or will be marked offline.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Heartbeat updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  last_heartbeat:
+                    type: integer
+                    format: int64
+                  timeout_at:
+                    type: integer
+                    format: int64
+                  status:
+                    type: string
+                    enum: [online, offline]
+
+  /api/agents/{agentId}/messages:
+    post:
+      tags: [Messages]
+      summary: Send message to agent
+      description: |
+        Send a message to an agent's inbox. Message must be signed with sender's secret key.
+        If recipient has webhook configured, message will be pushed immediately.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageEnvelope'
+      responses:
+        '201':
+          description: Message queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [queued, delivered]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/agents/{agentId}/inbox/pull:
+    post:
+      tags: [Inbox]
+      summary: Pull message from inbox
+      description: |
+        Retrieve oldest available message from inbox with lease. Message is locked for
+        visibility_timeout seconds. Must ACK or NACK before lease expires.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                visibility_timeout:
+                  type: integer
+                  default: 60
+                  minimum: 1
+                  maximum: 3600
+      responses:
+        '200':
+          description: Message leased
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeasedMessage'
+        '204':
+          description: Inbox empty
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/agents/{agentId}/inbox/stats:
+    get:
+      tags: [Inbox]
+      summary: Get inbox statistics
+      description: Retrieve message counts by status for agent's inbox
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Inbox statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InboxStats'
+
+  /api/agents/{agentId}/messages/{messageId}/ack:
+    post:
+      tags: [Inbox]
+      summary: Acknowledge message
+      description: |
+        Confirm successful processing of message. Message is deleted from inbox.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/MessageId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                result:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: Message acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/agents/{agentId}/messages/{messageId}/nack:
+    post:
+      tags: [Inbox]
+      summary: Negative acknowledge message
+      description: |
+        Reject message or extend lease. If requeue=true, message returns to queue.
+        If extend_sec provided, lease is extended.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/MessageId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                requeue:
+                  type: boolean
+                extend_sec:
+                  type: integer
+                  minimum: 1
+                  maximum: 3600
+      responses:
+        '200':
+          description: Message nacked or lease extended
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  status:
+                    type: string
+                  lease_until:
+                    type: integer
+                    format: int64
+                    nullable: true
+
+  /api/agents/{agentId}/messages/{messageId}/reply:
+    post:
+      tags: [Messages]
+      summary: Reply to message
+      description: |
+        Send correlated response to original sender. Automatically sets correlation_id
+        and swaps from/to fields.
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/MessageId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplyEnvelope'
+      responses:
+        '200':
+          description: Reply sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message_id:
+                    type: string
+                  status:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/messages/{messageId}/status:
+    get:
+      tags: [Messages]
+      summary: Get message status
+      description: Query delivery status of a message
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+      responses:
+        '200':
+          description: Message status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageStatus'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/agents/{agentId}/webhook:
+    get:
+      tags: [Webhooks]
+      summary: Get webhook configuration
+      description: Retrieve agent's webhook settings
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Webhook configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookConfig'
+    post:
+      tags: [Webhooks]
+      summary: Configure webhook
+      description: |
+        Set up webhook for push delivery. Messages will be POSTed to webhook_url immediately.
+        If webhook fails, message stays queued for polling (fallback).
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - webhook_url
+              properties:
+                webhook_url:
+                  type: string
+                  format: uri
+                webhook_secret:
+                  type: string
+                  description: Optional secret for HMAC signature (auto-generated if omitted)
+      responses:
+        '200':
+          description: Webhook configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookConfigResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    delete:
+      tags: [Webhooks]
+      summary: Remove webhook
+      description: Disable webhook push delivery, fall back to polling
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Webhook removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  webhook_configured:
+                    type: boolean
+
+  /api/agents/{agentId}/trusted:
+    get:
+      tags: [Agents]
+      summary: List trusted agents
+      description: Get list of agents in trust allowlist
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Trusted agents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trusted_agents:
+                    type: array
+                    items:
+                      type: string
+    post:
+      tags: [Agents]
+      summary: Add trusted agent
+      description: Add agent to trust allowlist
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - agent_id
+              properties:
+                agent_id:
+                  type: string
+      responses:
+        '200':
+          description: Agent added to trusted list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trusted_agents:
+                    type: array
+                    items:
+                      type: string
+
+  /api/agents/{agentId}/trusted/{trustedAgentId}:
+    delete:
+      tags: [Agents]
+      summary: Remove trusted agent
+      description: Remove agent from trust allowlist
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - name: trustedAgentId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Agent removed from trusted list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trusted_agents:
+                    type: array
+                    items:
+                      type: string
+
+components:
+  securitySchemes:
+    AgentAuth:
+      type: apiKey
+      in: header
+      name: X-Agent-Id
+      description: Agent authentication (automatically applied, no auth required in dev mode)
+
+  parameters:
+    AgentId:
+      name: agentId
+      in: path
+      required: true
+      description: Agent identifier (e.g., agent://agent-name)
+      schema:
+        type: string
+        example: agent://agent-a
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      description: Message identifier
+      schema:
+        type: string
+        example: msg-1234567890
+
+  schemas:
+    AgentRegistration:
+      type: object
+      required:
+        - agent_type
+      properties:
+        agent_id:
+          type: string
+          description: Optional agent ID (auto-generated if omitted)
+          example: agent://my-agent
+        agent_type:
+          type: string
+          description: Type/category of agent
+          example: claude_session
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Custom agent metadata
+        webhook_url:
+          type: string
+          format: uri
+          description: Optional webhook URL for push delivery
+        webhook_secret:
+          type: string
+          description: Optional webhook secret (auto-generated if omitted)
+
+    AgentRegistrationResponse:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        agent_type:
+          type: string
+        public_key:
+          type: string
+          description: Base64-encoded Ed25519 public key
+        secret_key:
+          type: string
+          description: Base64-encoded Ed25519 secret key (only returned on registration!)
+        webhook_url:
+          type: string
+        webhook_secret:
+          type: string
+          description: Webhook HMAC secret (only returned on registration!)
+        heartbeat:
+          $ref: '#/components/schemas/Heartbeat'
+
+    Agent:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        agent_type:
+          type: string
+        public_key:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        heartbeat:
+          $ref: '#/components/schemas/Heartbeat'
+        trusted_agents:
+          type: array
+          items:
+            type: string
+
+    Heartbeat:
+      type: object
+      properties:
+        last_heartbeat:
+          type: integer
+          format: int64
+          description: Unix timestamp (milliseconds)
+        status:
+          type: string
+          enum: [online, offline]
+        interval_ms:
+          type: integer
+          description: Recommended heartbeat interval
+        timeout_ms:
+          type: integer
+          description: Heartbeat timeout threshold
+
+    MessageEnvelope:
+      type: object
+      required:
+        - version
+        - type
+        - from
+        - to
+        - subject
+        - body
+        - timestamp
+      properties:
+        version:
+          type: string
+          enum: ['1.0']
+        id:
+          type: string
+          description: Message ID (auto-generated if omitted)
+        type:
+          type: string
+          enum: [task.request, task.result, task.error, event]
+          description: Message type
+        from:
+          type: string
+          description: Sender agent ID
+          example: agent://sender
+        to:
+          type: string
+          description: Recipient agent ID
+          example: agent://recipient
+        subject:
+          type: string
+          description: Message subject
+          example: run_tests
+        correlation_id:
+          type: string
+          description: Correlation ID for request/response pairing
+        headers:
+          type: object
+          additionalProperties: true
+          description: Custom headers
+        body:
+          type: object
+          additionalProperties: true
+          description: Message payload
+        ttl_sec:
+          type: integer
+          default: 86400
+          description: Time-to-live in seconds
+        timestamp:
+          type: string
+          format: date-time
+        signature:
+          $ref: '#/components/schemas/Signature'
+
+    ReplyEnvelope:
+      type: object
+      required:
+        - version
+        - type
+        - subject
+        - body
+        - timestamp
+      properties:
+        version:
+          type: string
+          enum: ['1.0']
+        id:
+          type: string
+        type:
+          type: string
+          enum: [task.result, task.error]
+        from:
+          type: string
+          description: Auto-filled from current agent
+        subject:
+          type: string
+        body:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+        signature:
+          $ref: '#/components/schemas/Signature'
+
+    Signature:
+      type: object
+      required:
+        - alg
+        - kid
+        - sig
+      properties:
+        alg:
+          type: string
+          enum: [ed25519, hmac-sha256]
+        kid:
+          type: string
+          description: Key identifier (agent ID)
+        sig:
+          type: string
+          description: Base64-encoded signature
+
+    LeasedMessage:
+      type: object
+      properties:
+        message_id:
+          type: string
+        envelope:
+          $ref: '#/components/schemas/MessageEnvelope'
+        lease_until:
+          type: integer
+          format: int64
+          description: Lease expiration (Unix timestamp)
+        attempts:
+          type: integer
+          description: Delivery attempt count
+
+    MessageStatus:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, leased, acked, failed, expired]
+        created_at:
+          type: integer
+          format: int64
+        updated_at:
+          type: integer
+          format: int64
+        attempts:
+          type: integer
+        lease_until:
+          type: integer
+          format: int64
+          nullable: true
+        acked_at:
+          type: integer
+          format: int64
+          nullable: true
+
+    InboxStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        queued:
+          type: integer
+        leased:
+          type: integer
+        acked:
+          type: integer
+        failed:
+          type: integer
+
+    SystemStats:
+      type: object
+      properties:
+        agents:
+          type: object
+          properties:
+            total:
+              type: integer
+            online:
+              type: integer
+            offline:
+              type: integer
+        messages:
+          type: object
+          properties:
+            total:
+              type: integer
+            queued:
+              type: integer
+            leased:
+              type: integer
+            acked:
+              type: integer
+            failed:
+              type: integer
+            expired:
+              type: integer
+
+    WebhookConfig:
+      type: object
+      properties:
+        webhook_url:
+          type: string
+          format: uri
+        webhook_configured:
+          type: boolean
+
+    WebhookConfigResponse:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        webhook_url:
+          type: string
+          format: uri
+        webhook_secret:
+          type: string
+          description: Webhook HMAC secret
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

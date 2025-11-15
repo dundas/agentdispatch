@@ -9,6 +9,10 @@ import helmet from 'helmet';
 import pino from 'pino';
 import pinoHttp from 'pino-http';
 import { config } from 'dotenv';
+import swaggerUi from 'swagger-ui-express';
+import YAML from 'yamljs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 import agentRoutes from './routes/agents.js';
 import inboxRoutes from './routes/inbox.js';
@@ -16,6 +20,10 @@ import { requireApiKey } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
 import { storage } from './storage/memory.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const projectRoot = join(__dirname, '..');
 
 // Load environment variables
 config();
@@ -44,6 +52,21 @@ if (process.env.API_KEY_REQUIRED === 'true') {
   logger.info('API key authentication enabled');
   app.use('/api', requireApiKey);
 }
+
+// Load OpenAPI spec
+const openapiSpec = YAML.load(join(projectRoot, 'openapi.yaml'));
+
+// API Documentation
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'ADMP API Documentation',
+  customfavIcon: '/favicon.ico'
+}));
+
+// Serve OpenAPI spec as JSON
+app.get('/openapi.json', (req, res) => {
+  res.json(openapiSpec);
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -174,7 +197,9 @@ const server = app.listen(PORT, () => {
     heartbeat_interval: process.env.HEARTBEAT_INTERVAL_MS || 60000,
     heartbeat_timeout: process.env.HEARTBEAT_TIMEOUT_MS || 300000,
     message_ttl: process.env.MESSAGE_TTL_SEC || 86400,
-    cleanup_interval: CLEANUP_INTERVAL_MS
+    cleanup_interval: CLEANUP_INTERVAL_MS,
+    api_docs: `http://localhost:${PORT}/docs`,
+    openapi_spec: `http://localhost:${PORT}/openapi.json`
   }, 'Server configuration');
 
   startBackgroundJobs();
