@@ -129,7 +129,7 @@ async function registerAgent(name, metadata) {
 }
 
 async function sendHeartbeat(agentId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/heartbeat`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/heartbeat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -157,7 +157,7 @@ async function sendMessage(sender, recipientId, message) {
   const secretKey = fromBase64(sender.secret_key);
   envelope.signature = signMessage(envelope, secretKey);
 
-  const res = await fetch(`${API_URL}/agents/${recipientId}/messages`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(recipientId)}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(envelope)
@@ -172,7 +172,7 @@ async function sendMessage(sender, recipientId, message) {
 }
 
 async function pullMessage(agentId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/inbox/pull`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/inbox/pull`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ visibility_timeout: 60 })
@@ -186,7 +186,7 @@ async function pullMessage(agentId) {
 }
 
 async function ackMessage(agentId, messageId, result) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/messages/${messageId}/ack`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/messages/${messageId}/ack`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ result })
@@ -200,6 +200,7 @@ async function replyToMessage(sender, originalMessageId, reply) {
     version: '1.0',
     id: `reply-${Date.now()}`,
     type: reply.type,
+    from: sender.agent_id,
     subject: reply.subject,
     body: reply.body,
     timestamp: new Date().toISOString()
@@ -209,7 +210,7 @@ async function replyToMessage(sender, originalMessageId, reply) {
   const secretKey = fromBase64(sender.secret_key);
   envelope.signature = signMessage(envelope, secretKey);
 
-  const res = await fetch(`${API_URL}/agents/${sender.agent_id}/messages/${originalMessageId}/reply`, {
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(sender.agent_id)}/messages/${originalMessageId}/reply`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(envelope)
@@ -219,7 +220,7 @@ async function replyToMessage(sender, originalMessageId, reply) {
 }
 
 async function getInboxStats(agentId) {
-  const res = await fetch(`${API_URL}/agents/${agentId}/inbox/stats`);
+  const res = await fetch(`${API_URL}/agents/${encodeURIComponent(agentId)}/inbox/stats`);
   return await res.json();
 }
 

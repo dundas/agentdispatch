@@ -4,6 +4,7 @@
  */
 
 import { signMessage } from '../utils/crypto.js';
+import crypto from 'crypto';
 import pino from 'pino';
 
 const logger = pino();
@@ -155,7 +156,6 @@ export class WebhookService {
    * @returns {string} HMAC signature
    */
   signWebhook(payload, secret) {
-    const crypto = await import('crypto');
     const hmac = crypto.createHmac('sha256', secret);
     hmac.update(JSON.stringify(payload));
     return hmac.digest('hex');
@@ -168,8 +168,8 @@ export class WebhookService {
    * @param {string} secret - Webhook secret
    * @returns {boolean}
    */
-  async verifyWebhookSignature(payload, signature, secret) {
-    const expected = await this.signWebhook(payload, secret);
+  verifyWebhookSignature(payload, signature, secret) {
+    const expected = this.signWebhook(payload, secret);
     return signature === expected;
   }
 

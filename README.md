@@ -14,6 +14,7 @@ ADMP provides a standardized messaging infrastructure for AI agents to communica
 - ✅ **Signature Verification** - Ed25519 authentication on all messages
 - ✅ **Trust Management** - Allowlist-based authorization
 - ✅ **Background Jobs** - Automatic lease reclaim and message expiry
+- ✅ **OpenAPI Documentation** - Interactive Swagger UI at /docs
 - ✅ **Production Ready** - Docker, health checks, structured logging
 
 ## Quick Start
@@ -54,10 +55,16 @@ npm run dev
 npm start
 ```
 
-**Docker:**
+**Docker (Quick Start):**
 ```bash
+# Start with Docker Compose (recommended)
 docker-compose up -d
+
+# Or use the build script
+./docker-build.sh --run
 ```
+
+For detailed Docker deployment instructions, see [DOCKER.md](./DOCKER.md)
 
 ### 4. Verify
 
@@ -73,6 +80,17 @@ Response:
   "version": "1.0.0"
 }
 ```
+
+### 5. API Documentation
+
+**Interactive API Docs (Swagger UI):**
+- Visit http://localhost:8080/docs in your browser
+- Try out API endpoints directly from the browser
+- View request/response schemas and examples
+
+**OpenAPI Specification:**
+- JSON: http://localhost:8080/openapi.json
+- YAML: `openapi.yaml` in project root
 
 ## API Documentation
 
