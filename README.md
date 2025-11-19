@@ -92,6 +92,54 @@ Response:
 - JSON: http://localhost:8080/openapi.json
 - YAML: `openapi.yaml` in project root
 
+### 6. Run Tests
+
+**Run the full test suite locally:**
+
+```bash
+npm test
+```
+
+This uses Node's built-in `node:test` runner (requires Node.js ≥18) to run integration tests.
+
+**Test Coverage:**
+
+The test suite includes:
+- ✅ Server boot, health checks, and stats endpoints
+- ✅ Agent registration, heartbeat, and retrieval
+- ✅ Message lifecycle: send → pull → ack → status flows
+- ✅ Signature verification and timestamp validation
+- ✅ Error cases: invalid signatures, expired timestamps, unknown recipients
+
+**Test Output:**
+
+Successful test run shows:
+```
+# tests 8
+# pass 8
+# fail 0
+```
+
+**CI/CD Integration:**
+
+For GitHub Actions, add to your workflow:
+
+```yaml
+- name: Install dependencies
+  run: npm install
+
+- name: Run tests
+  run: npm test
+```
+
+For other CI systems, ensure Node.js ≥18 is available and run:
+```bash
+npm install && npm test
+```
+
+**Test Files:**
+- `src/server.test.js` - Integration tests for HTTP API endpoints
+
 ## API Documentation
 
 ### Base URL

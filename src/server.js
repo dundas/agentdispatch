@@ -19,7 +19,7 @@ import inboxRoutes from './routes/inbox.js';
 import { requireApiKey } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
-import { storage } from './storage/memory.js';
+import { storage } from './storage/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -170,39 +170,6 @@ function stopBackgroundJobs() {
   logger.info('Background jobs stopped');
 }
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  stopBackgroundJobs();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  stopBackgroundJobs();
-  server.close(() => {
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
-
-// Start server
-const server = app.listen(PORT, () => {
-  logger.info(`ADMP server listening on port ${PORT}`);
-  logger.info({
-    env: process.env.NODE_ENV || 'development',
-    heartbeat_interval: process.env.HEARTBEAT_INTERVAL_MS || 60000,
-    heartbeat_timeout: process.env.HEARTBEAT_TIMEOUT_MS || 300000,
-    message_ttl: process.env.MESSAGE_TTL_SEC || 86400,
-    cleanup_interval: CLEANUP_INTERVAL_MS,
-    api_docs: `http://localhost:${PORT}/docs`,
-    openapi_spec: `http://localhost:${PORT}/openapi.json`
-  }, 'Server configuration');
-
-  startBackgroundJobs();
-});
-
+// Export app and lifecycle functions for testing and production use
 export default app;
+export { startBackgroundJobs, stopBackgroundJobs, logger, PORT };
