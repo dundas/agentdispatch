@@ -44,6 +44,13 @@ router.post('/:agentId/messages', async (req, res) => {
       });
     }
 
+    if (error.message.includes('timestamp')) {
+      return res.status(400).json({
+        error: 'INVALID_TIMESTAMP',
+        message: error.message
+      });
+    }
+
     res.status(400).json({
       error: 'SEND_FAILED',
       message: error.message

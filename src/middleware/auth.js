@@ -2,7 +2,7 @@
  * Authentication middleware
  */
 
-import { storage } from '../storage/memory.js';
+import { storage } from '../storage/index.js';
 
 /**
  * Verify agent exists

@@ -4,8 +4,8 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import { storage } from '../storage/memory.js';
-import { verifySignature, fromBase64 } from '../utils/crypto.js';
+import { storage } from '../storage/index.js';
+import { verifySignature, fromBase64, validateTimestamp } from '../utils/crypto.js';
 import { agentService } from './agent.service.js';
 import { webhookService } from './webhook.service.js';
 
@@ -27,6 +27,10 @@ export class InboxService {
     const recipient = await storage.getAgent(toAgentId);
     if (!recipient) {
       throw new Error(`Recipient agent ${toAgentId} not found`);
+    }
+
+    if (recipient.trusted_agents && recipient.trusted_agents.length > 0 && !recipient.trusted_agents.includes(envelope.from)) {
+      throw new Error(`Sender ${envelope.from} is not trusted by recipient ${toAgentId}`);
     }
 
     // Verify signature if sender public key is available
@@ -177,7 +181,10 @@ export class InboxService {
 
     // Extend lease
     if (options.extend_sec) {
-      const newLeaseUntil = Date.now() + (options.extend_sec * 1000);
+      const base = message.lease_until && message.lease_until > Date.now()
+        ? message.lease_until
+        : Date.now();
+      const newLeaseUntil = base + (options.extend_sec * 1000);
       return await storage.updateMessage(messageId, {
         lease_until: newLeaseUntil
       });
@@ -287,6 +294,10 @@ export class InboxService {
     const timestamp = new Date(envelope.timestamp);
     if (isNaN(timestamp.getTime())) {
       throw new Error('Invalid timestamp format');
+    }
+
+    if (!validateTimestamp(envelope.timestamp)) {
+      throw new Error('Invalid timestamp (outside allowed window)');
     }
 
     return true;

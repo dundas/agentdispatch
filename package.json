@@ -2,12 +2,12 @@
   "name": "agent-dispatch",
   "version": "1.0.0",
   "description": "Agent Dispatch Messaging Protocol (ADMP) - Universal inbox for autonomous agents",
-  "main": "src/server.js",
+  "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "test": "node --test src/**/*.test.js"
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test src/server.test.js"
   },
   "keywords": [
     "admp",
@@ -31,7 +31,8 @@
     "yamljs": "^0.3.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.4"
   },
   "engines": {
     "node": ">=18.0.0"

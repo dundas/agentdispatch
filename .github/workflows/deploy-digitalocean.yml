@@ -1,0 +1,103 @@
+name: Deploy to Digital Ocean
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  APP_NAME: admp-server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+
+      - name: Check if app exists
+        id: check_app
+        run: |
+          APP_ID=$(doctl apps list --format ID,Spec.Name --no-header | grep "$APP_NAME" | awk '{print $1}' || echo "")
+          echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+          if [ -n "$APP_ID" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create new app
+        if: steps.check_app.outputs.exists == 'false'
+        run: |
+          echo "Creating new app $APP_NAME..."
+          doctl apps create --spec .do/app.yaml --wait
+
+      - name: Update existing app
+        if: steps.check_app.outputs.exists == 'true'
+        run: |
+          echo "Updating app $APP_NAME (ID: ${{ steps.check_app.outputs.app_id }})..."
+          doctl apps update ${{ steps.check_app.outputs.app_id }} --spec .do/app.yaml
+
+      - name: Create deployment
+        if: steps.check_app.outputs.exists == 'true'
+        run: |
+          echo "Creating new deployment..."
+          doctl apps create-deployment ${{ steps.check_app.outputs.app_id }} --wait
+
+      - name: Get app info
+        id: app_info
+        run: |
+          APP_ID=${{ steps.check_app.outputs.app_id }}
+          if [ -z "$APP_ID" ]; then
+            APP_ID=$(doctl apps list --format ID,Spec.Name --no-header | grep "$APP_NAME" | awk '{print $1}')
+          fi
+
+          LIVE_URL=$(doctl apps get $APP_ID --format LiveURL --no-header)
+          echo "live_url=$LIVE_URL" >> $GITHUB_OUTPUT
+          echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+
+      - name: Run health check
+        run: |
+          echo "Waiting for app to be ready..."
+          sleep 30
+
+          echo "Running health check..."
+          curl -f ${{ steps.app_info.outputs.live_url }}/health || exit 1
+
+          echo "Health check passed!"
+
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Successful! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**App ID:** ${{ steps.app_info.outputs.app_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Live URL:** ${{ steps.app_info.outputs.live_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dashboard:** https://cloud.digitalocean.com/apps/${{ steps.app_info.outputs.app_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Endpoints" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health:** ${{ steps.app_info.outputs.live_url }}/health" >> $GITHUB_STEP_SUMMARY
+          echo "- **API Docs:** ${{ steps.app_info.outputs.live_url }}/docs" >> $GITHUB_STEP_SUMMARY
+          echo "- **OpenAPI Spec:** ${{ steps.app_info.outputs.live_url }}/openapi.json" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "## Deployment Failed ❌" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the logs above for details." >> $GITHUB_STEP_SUMMARY

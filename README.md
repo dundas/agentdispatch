@@ -41,6 +41,32 @@ NODE_ENV=development
 HEARTBEAT_INTERVAL_MS=60000
 HEARTBEAT_TIMEOUT_MS=300000
 MESSAGE_TTL_SEC=86400
+
+# Storage Backend (optional)
+STORAGE_BACKEND=memory  # or "mech" for persistent storage
+```
+
+#### Storage Backend Options
+
+**Memory (Default):**
+- Fast in-memory storage
+- Data lost on server restart
+- Ideal for development and testing
+- No external dependencies
+
+**Mech (Persistent):**
+- Cloud-based persistent storage
+- Data persists across restarts
+- Requires Mech credentials (sign up at mechdna.net)
+- ~35x slower than memory (network overhead)
+- Performance optimizations planned (see `PERFORMANCE-ROADMAP.md`)
+
+```env
+# To use Mech storage:
+STORAGE_BACKEND=mech
+MECH_APP_ID=your_app_id
+MECH_API_KEY=your_api_key
+MECH_API_SECRET=your_api_secret
 ```
 
 ### 3. Run Server
@@ -91,6 +117,54 @@ Response:
 **OpenAPI Specification:**
 - JSON: http://localhost:8080/openapi.json
 - YAML: `openapi.yaml` in project root
+
+### 6. Run Tests
+
+**Run the full test suite locally:**
+
+```bash
+npm test
+```
+
+This uses Node's built-in `node:test` runner (requires Node.js ≥18) to run integration tests.
+
+**Test Coverage:**
+
+The test suite includes:
+- ✅ Server boot, health checks, and stats endpoints
+- ✅ Agent registration, heartbeat, and retrieval
+- ✅ Message lifecycle: send → pull → ack → status flows
+- ✅ Signature verification and timestamp validation
+- ✅ Error cases: invalid signatures, expired timestamps, unknown recipients
+
+**Test Output:**
+
+Successful test run shows:
+```
+# tests 8
+# pass 8
+# fail 0
+```
+
+**CI/CD Integration:**
+
+For GitHub Actions, add to your workflow:
+
+```yaml
+- name: Install dependencies
+  run: npm install
+
+- name: Run tests
+  run: npm test
+```
+
+For other CI systems, ensure Node.js ≥18 is available and run:
+```bash
+npm install && npm test
+```
+
+**Test Files:**
+- `src/server.test.js` - Integration tests for HTTP API endpoints
 
 ## API Documentation
 
