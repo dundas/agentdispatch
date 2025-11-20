@@ -15,7 +15,9 @@ This guide covers deploying the Agent Dispatch Messaging Protocol (ADMP) server 
 - **App Name:** agentdispatch
 - **Region:** Dallas, TX (dfw)
 - **Current URL:** https://agentdispatch.fly.dev
-- **Custom Domain:** agentdispatch.dev (DNS configuration required)
+- **Custom Domains:**
+  - agentdispatch.dev (DNS configuration required)
+  - api.agentdispatch.dev (DNS configuration required)
 - **Status:** Running (1 machine)
 - **Health Check:** ✅ Passing
 
@@ -39,9 +41,9 @@ flyctl logs
 flyctl open
 ```
 
-### 2. Configure Custom Domain
+### 2. Configure Custom Domains
 
-The app is configured to use **agentdispatch.dev** as the custom domain.
+The app is configured to use **agentdispatch.dev** and **api.agentdispatch.dev** as custom domains.
 
 #### DNS Configuration Required
 
@@ -50,33 +52,56 @@ Add the following DNS records to your domain registrar:
 **Option 1: Direct Connection (Recommended)**
 
 ```
-A    @  →  66.241.124.13
-AAAA @  →  2a09:8280:1::b2:7cdb:0
+Type   Host   Target
+A      @      66.241.124.13
+AAAA   @      2a09:8280:1::b2:7cdb:0
+A      api    66.241.124.13
+AAAA   api    2a09:8280:1::b2:7cdb:0
 ```
 
-**Option 2: With CDN/Proxy (Cloudflare)**
+**Option 2: Using CNAME for api subdomain**
 
 ```
-AAAA @  →  2a09:8280:1::b2:7cdb:0  (proxied)
+Type   Host   Target
+A      @      66.241.124.13
+AAAA   @      2a09:8280:1::b2:7cdb:0
+CNAME  api    zjxr35x.agentdispatch.fly.dev
+```
+
+**Option 3: With CDN/Proxy (Cloudflare)**
+
+```
+Type   Host   Target                      Proxy
+AAAA   @      2a09:8280:1::b2:7cdb:0      Proxied
+AAAA   api    2a09:8280:1::b2:7cdb:0      Proxied
 ```
 
 **Optional: DNS Challenge (for instant SSL)**
 
 ```
-CNAME _acme-challenge.agentdispatch.dev  →  agentdispatch.dev.zjxr35x.flydns.net
+Type   Host                                        Target
+CNAME  _acme-challenge.agentdispatch.dev          agentdispatch.dev.zjxr35x.flydns.net
+CNAME  _acme-challenge.api.agentdispatch.dev      api.agentdispatch.dev.zjxr35x.flydns.net
 ```
 
-#### Verify SSL Certificate
+#### Verify SSL Certificates
 
 ```bash
-# Check certificate status
+# Check both certificates
+flyctl certs list
+
+# Check root domain
 flyctl certs check agentdispatch.dev
+
+# Check api subdomain
+flyctl certs check api.agentdispatch.dev
 
 # View certificate details
 flyctl certs show agentdispatch.dev
+flyctl certs show api.agentdispatch.dev
 ```
 
-Once DNS propagates (5-60 minutes), Fly.io will automatically provision a Let's Encrypt SSL certificate.
+Once DNS propagates (5-60 minutes), Fly.io will automatically provision Let's Encrypt SSL certificates for both domains.
 
 ---
 
@@ -460,7 +485,12 @@ flyctl auth token
 ### Health Check
 
 ```bash
+# Using Fly.io default domain
+curl https://agentdispatch.fly.dev/health
+
+# Using custom domains (after DNS configuration)
 curl https://agentdispatch.dev/health
+curl https://api.agentdispatch.dev/health
 ```
 
 **Expected Response:**
@@ -475,6 +505,10 @@ curl https://agentdispatch.dev/health
 ### Stats Endpoint
 
 ```bash
+# Using api subdomain (recommended for API calls)
+curl https://api.agentdispatch.dev/api/stats
+
+# Or using root domain
 curl https://agentdispatch.dev/api/stats
 ```
 
@@ -496,7 +530,8 @@ curl https://agentdispatch.dev/api/stats
 ### Register an Agent
 
 ```bash
-curl -X POST https://agentdispatch.dev/api/agents/register \
+# Using api subdomain (recommended)
+curl -X POST https://api.agentdispatch.dev/api/agents/register \
   -H "Content-Type: application/json" \
   -d '{
     "agent_id": "agent://test-agent",
@@ -549,7 +584,9 @@ flyctl secrets unset KEY
 # Certificates
 flyctl certs list
 flyctl certs create agentdispatch.dev
+flyctl certs create api.agentdispatch.dev
 flyctl certs check agentdispatch.dev
+flyctl certs check api.agentdispatch.dev
 flyctl certs delete agentdispatch.dev
 
 # SSH access
@@ -589,15 +626,21 @@ flyctl logs --limit 100 > fly-logs.txt
 - App: `agentdispatch`
 - Region: Dallas (dfw)
 - URL: https://agentdispatch.fly.dev
-- Custom Domain: agentdispatch.dev (requires DNS configuration)
+- Custom Domains:
+  - agentdispatch.dev (root domain)
+  - api.agentdispatch.dev (API subdomain)
 - Status: Running with health checks passing
 - Storage: Memory backend (default)
 
 **Next Steps:**
 
-1. Configure DNS records for agentdispatch.dev
+1. Configure DNS records for both domains
+   - agentdispatch.dev (A/AAAA records)
+   - api.agentdispatch.dev (A/AAAA or CNAME)
 2. Wait for SSL certificate provisioning (5-60 minutes)
-3. Test endpoints at https://agentdispatch.dev
+3. Test endpoints:
+   - https://agentdispatch.dev/health
+   - https://api.agentdispatch.dev/health
 4. Monitor logs and metrics
 5. Consider Mech backend for persistence (after optimization)
 
