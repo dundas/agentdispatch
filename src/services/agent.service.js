@@ -5,7 +5,7 @@
 
 import { v4 as uuid } from 'uuid';
 import { generateKeypair, toBase64 } from '../utils/crypto.js';
-import { storage } from '../storage/memory.js';
+import { storage } from '../storage/index.js';
 
 export class AgentService {
   /**

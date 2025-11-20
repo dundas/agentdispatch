@@ -1,0 +1,53 @@
+name: admp-server
+region: nyc
+
+services:
+  - name: web
+    github:
+      repo: dundas/agentdispatch
+      branch: main
+      deploy_on_push: true
+
+    dockerfile_path: Dockerfile
+
+    http_port: 8080
+
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 5
+      period_seconds: 30
+      timeout_seconds: 3
+      success_threshold: 1
+      failure_threshold: 3
+
+    instance_count: 1
+    instance_size_slug: basic-xxs  # 512MB RAM, $5/month
+
+    envs:
+      - key: NODE_ENV
+        value: "production"
+        scope: RUN_TIME
+      - key: PORT
+        value: "8080"
+        scope: RUN_TIME
+      - key: CORS_ORIGIN
+        value: "*"
+        scope: RUN_TIME
+      - key: HEARTBEAT_INTERVAL_MS
+        value: "60000"
+        scope: RUN_TIME
+      - key: HEARTBEAT_TIMEOUT_MS
+        value: "300000"
+        scope: RUN_TIME
+      - key: MESSAGE_TTL_SEC
+        value: "86400"
+        scope: RUN_TIME
+      - key: MAX_MESSAGE_SIZE_KB
+        value: "256"
+        scope: RUN_TIME
+      - key: MAX_MESSAGES_PER_AGENT
+        value: "1000"
+        scope: RUN_TIME
+
+    routes:
+      - path: /
