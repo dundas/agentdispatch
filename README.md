@@ -41,6 +41,32 @@ NODE_ENV=development
 HEARTBEAT_INTERVAL_MS=60000
 HEARTBEAT_TIMEOUT_MS=300000
 MESSAGE_TTL_SEC=86400
+
+# Storage Backend (optional)
+STORAGE_BACKEND=memory  # or "mech" for persistent storage
+```
+
+#### Storage Backend Options
+
+**Memory (Default):**
+- Fast in-memory storage
+- Data lost on server restart
+- Ideal for development and testing
+- No external dependencies
+
+**Mech (Persistent):**
+- Cloud-based persistent storage
+- Data persists across restarts
+- Requires Mech credentials (sign up at mechdna.net)
+- ~35x slower than memory (network overhead)
+- Performance optimizations planned (see `PERFORMANCE-ROADMAP.md`)
+
+```env
+# To use Mech storage:
+STORAGE_BACKEND=mech
+MECH_APP_ID=your_app_id
+MECH_API_KEY=your_api_key
+MECH_API_SECRET=your_api_secret
 ```
 
 ### 3. Run Server
