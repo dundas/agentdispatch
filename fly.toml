@@ -1,0 +1,44 @@
+# fly.toml app configuration file for Agent Dispatch (ADMP)
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'agentdispatch'
+primary_region = 'dfw'
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  CORS_ORIGIN = "*"
+  API_KEY_REQUIRED = "false"
+  HEARTBEAT_INTERVAL_MS = "60000"
+  HEARTBEAT_TIMEOUT_MS = "300000"
+  MESSAGE_TTL_SEC = "86400"
+  CLEANUP_INTERVAL_MS = "60000"
+  MAX_MESSAGE_SIZE_KB = "256"
+  MAX_MESSAGES_PER_AGENT = "1000"
+  STORAGE_BACKEND = "memory"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
