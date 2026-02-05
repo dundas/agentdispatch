@@ -197,6 +197,17 @@ export class GroupService {
    * @returns {Object} Updated group
    */
   async leave(groupId, agentId) {
+    const group = await this.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    // Check if agent is the owner - owners cannot leave without transferring ownership
+    const member = group.members?.find(m => m.agent_id === agentId);
+    if (member?.role === 'owner') {
+      throw new Error('Owner cannot leave group. Transfer ownership first or delete the group.');
+    }
+
     return await this.removeMember(groupId, agentId, agentId);
   }
 

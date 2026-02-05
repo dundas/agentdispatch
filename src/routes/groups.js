@@ -301,6 +301,23 @@ router.post('/:groupId/messages', authenticateAgent, async (req, res) => {
       });
     }
 
+    // Input size limits
+    if (typeof subject !== 'string' || subject.length > 200) {
+      return res.status(400).json({
+        error: 'INVALID_SUBJECT',
+        message: 'subject must be a string of 200 characters or less'
+      });
+    }
+
+    // Body size limit (1MB for JSON)
+    const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+    if (bodyStr.length > 1048576) {
+      return res.status(400).json({
+        error: 'BODY_TOO_LARGE',
+        message: 'message body must be less than 1MB'
+      });
+    }
+
     const envelope = {
       version: '1.0',
       from: req.agent.agent_id,
