@@ -466,6 +466,17 @@ export class MechStorage {
       m.group_id === groupId || m.envelope?.group_id === groupId
     );
 
+    // Deduplicate by group_message_id (each group post is fanned out to multiple recipients)
+    const seen = new Set();
+    messages = messages.filter(m => {
+      const groupMsgId = m.envelope?.group_message_id || m.group_message_id || m.id;
+      if (seen.has(groupMsgId)) {
+        return false;
+      }
+      seen.add(groupMsgId);
+      return true;
+    });
+
     // Sort by timestamp descending (newest first)
     messages.sort((a, b) => b.created_at - a.created_at);
 
@@ -476,7 +487,7 @@ export class MechStorage {
 
     // Return envelope data for history view
     return messages.map(m => ({
-      id: m.id,
+      id: m.envelope?.group_message_id || m.group_message_id || m.id,
       from: m.from_agent_id,
       subject: m.envelope?.subject,
       body: m.envelope?.body,

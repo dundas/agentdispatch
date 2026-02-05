@@ -133,6 +133,9 @@ export class GroupService {
     }
 
     const group = await this.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
 
     // Can't remove owner
     const member = group.members?.find(m => m.agent_id === agentId);
@@ -235,10 +238,12 @@ export class GroupService {
     const members = group.members || [];
     const membersSnapshot = members.map(m => m.agent_id);
 
-    // Create group message envelope
+    // Create group message envelope with stable group_message_id for history
+    const groupMessageId = envelope.id || uuid();
     const groupEnvelope = {
       ...envelope,
-      id: envelope.id || uuid(),
+      id: groupMessageId,
+      group_message_id: groupMessageId, // Preserved for history deduplication
       type: 'group.message',
       group_id: groupId,
       members_snapshot: membersSnapshot,
@@ -247,6 +252,7 @@ export class GroupService {
 
     // Fanout to all members (except sender)
     // Each member gets their own message ID to avoid storage collisions
+    // but group_message_id stays the same for history correlation
     const deliveries = [];
     for (const member of members) {
       if (member.agent_id === envelope.from) {
@@ -256,8 +262,9 @@ export class GroupService {
       try {
         const memberEnvelope = {
           ...groupEnvelope,
-          id: uuid(), // Generate unique ID per recipient
+          id: uuid(), // Generate unique ID per recipient for storage
           to: member.agent_id
+          // group_message_id is preserved from groupEnvelope
         };
 
         const message = await inboxService.send(memberEnvelope, {
