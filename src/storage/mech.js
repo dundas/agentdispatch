@@ -303,9 +303,11 @@ export class MechStorage {
   async getStats() {
     const { json: agentsJson } = await this.request('/nosql/documents?collection_name=admp_agents&limit=1000');
     const { json: messagesJson } = await this.request('/nosql/documents?collection_name=admp_messages&limit=1000');
+    const { json: groupsJson } = await this.request('/nosql/documents?collection_name=admp_groups&limit=1000');
 
     const agents = this.extractDocuments(agentsJson);
     const messages = this.extractDocuments(messagesJson);
+    const groups = this.extractDocuments(groupsJson);
 
     return {
       agents: {
@@ -320,8 +322,178 @@ export class MechStorage {
         acked: messages.filter(m => m.status === 'acked').length,
         failed: messages.filter(m => m.status === 'failed').length,
         expired: messages.filter(m => m.status === 'expired').length
+      },
+      groups: {
+        total: groups.length
       }
     };
+  }
+
+  // ============ GROUPS ============
+
+  async createGroup(group) {
+    const now = Date.now();
+    const stored = {
+      ...group,
+      created_at: now,
+      updated_at: now
+    };
+
+    await this.request('/nosql/documents', {
+      method: 'POST',
+      body: {
+        collection_name: 'admp_groups',
+        document_key: stored.id,
+        data: stored
+      }
+    });
+
+    return stored;
+  }
+
+  async getGroup(groupId) {
+    const { status, json } = await this.request(
+      `/nosql/documents/key/${encodeURIComponent(groupId)}?collection_name=admp_groups`,
+      { allow404: true }
+    );
+
+    if (status === 404) {
+      return null;
+    }
+
+    const groupDoc = json?.data;
+    const group = this.extractDocument(groupDoc);
+    return group || null;
+  }
+
+  async updateGroup(groupId, updates) {
+    const now = Date.now();
+    const patch = {
+      ...updates,
+      updated_at: now
+    };
+
+    await this.request(`/nosql/documents/admp_groups/${encodeURIComponent(groupId)}`, {
+      method: 'PUT',
+      body: {
+        data: patch
+      }
+    });
+
+    return this.getGroup(groupId);
+  }
+
+  async deleteGroup(groupId) {
+    const { status } = await this.request(
+      `/nosql/documents/admp_groups/${encodeURIComponent(groupId)}`,
+      { method: 'DELETE', allow404: true }
+    );
+
+    return status === 200 || status === 204;
+  }
+
+  async listGroups(filter = {}) {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_groups&limit=1000');
+    let groups = this.extractDocuments(json);
+
+    if (filter.member) {
+      groups = groups.filter(g => g.members?.some(m => m.agent_id === filter.member));
+    }
+
+    return groups;
+  }
+
+  // ============ GROUP MEMBERS ============
+
+  async addGroupMember(groupId, member) {
+    const group = await this.getGroup(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const members = group.members || [];
+
+    // Check if already a member
+    if (members.some(m => m.agent_id === member.agent_id)) {
+      throw new Error(`Agent ${member.agent_id} is already a member`);
+    }
+
+    const newMember = {
+      ...member,
+      joined_at: Date.now()
+    };
+
+    members.push(newMember);
+
+    return this.updateGroup(groupId, { members });
+  }
+
+  async removeGroupMember(groupId, agentId) {
+    const group = await this.getGroup(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const members = (group.members || []).filter(m => m.agent_id !== agentId);
+
+    return this.updateGroup(groupId, { members });
+  }
+
+  async getGroupMembers(groupId) {
+    const group = await this.getGroup(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    return group.members || [];
+  }
+
+  async isGroupMember(groupId, agentId) {
+    const group = await this.getGroup(groupId);
+    if (!group) {
+      return false;
+    }
+
+    return (group.members || []).some(m => m.agent_id === agentId);
+  }
+
+  // ============ GROUP MESSAGES ============
+
+  async getGroupMessages(groupId, options = {}) {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_messages&limit=1000');
+    // group_id is stored in the envelope, not at top level
+    let messages = this.extractDocuments(json).filter(m =>
+      m.group_id === groupId || m.envelope?.group_id === groupId
+    );
+
+    // Deduplicate by group_message_id (each group post is fanned out to multiple recipients)
+    const seen = new Set();
+    messages = messages.filter(m => {
+      const groupMsgId = m.envelope?.group_message_id || m.group_message_id || m.id;
+      if (seen.has(groupMsgId)) {
+        return false;
+      }
+      seen.add(groupMsgId);
+      return true;
+    });
+
+    // Sort by timestamp descending (newest first)
+    messages.sort((a, b) => b.created_at - a.created_at);
+
+    // Apply limit
+    if (options.limit) {
+      messages = messages.slice(0, options.limit);
+    }
+
+    // Return envelope data for history view
+    return messages.map(m => ({
+      id: m.envelope?.group_message_id || m.group_message_id || m.id,
+      from: m.from_agent_id,
+      subject: m.envelope?.subject,
+      body: m.envelope?.body,
+      timestamp: m.envelope?.timestamp || m.created_at,
+      group_id: m.envelope?.group_id || m.group_id
+    }));
   }
 }
 

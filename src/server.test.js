@@ -50,6 +50,10 @@ async function sendSignedMessage(sender, recipientId, options = {}) {
   return res;
 }
 
+function withAgentHeader(req, agentId) {
+  return req.set('X-Agent-ID', agentId);
+}
+
 const MECH_CONFIGURED =
   process.env.STORAGE_BACKEND === 'mech' &&
   !!process.env.MECH_APP_ID &&
@@ -610,4 +614,154 @@ test('webhook failure reports will_retry and pending retries', async () => {
 
   webhookService.clearAttempts(message.id);
   await new Promise(resolve => server.close(resolve));
+});
+
+test('groups: open group join → post fanout → history dedupe', async () => {
+  const owner = await registerAgent('group-owner');
+  const member = await registerAgent('group-member');
+
+  const groupName = `Test Group ${Date.now()}`;
+  const createRes = await withAgentHeader(request(app).post('/api/groups'), owner.agent_id).send({
+    name: groupName,
+    access: { type: 'open' },
+    settings: { history_visible: true, max_members: 10 }
+  });
+
+  assert.equal(createRes.status, 201);
+  assert.ok(createRes.body.id);
+  const groupId = createRes.body.id;
+
+  const joinRes = await withAgentHeader(
+    request(app).post(`/api/groups/${encodeURIComponent(groupId)}/join`),
+    member.agent_id
+  ).send({});
+
+  assert.equal(joinRes.status, 200);
+  assert.ok(joinRes.body.members.some(m => m.agent_id === member.agent_id));
+
+  const postRes = await withAgentHeader(
+    request(app).post(`/api/groups/${encodeURIComponent(groupId)}/messages`),
+    member.agent_id
+  ).send({
+    subject: 'hello-group',
+    body: { hello: 'world' },
+    correlation_id: 'thread-1'
+  });
+
+  assert.equal(postRes.status, 201);
+  assert.equal(postRes.body.group_id, groupId);
+  assert.ok(postRes.body.message_id);
+  assert.equal(postRes.body.delivered, 1);
+
+  const stableGroupMessageId = postRes.body.message_id;
+
+  // Owner should receive the message in their personal inbox
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(owner.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 200);
+  assert.ok(pullRes.body.envelope);
+  assert.equal(pullRes.body.envelope.type, 'group.message');
+  assert.equal(pullRes.body.envelope.group_id, groupId);
+  assert.equal(pullRes.body.envelope.group_message_id, stableGroupMessageId);
+
+  // History should dedupe fanout deliveries
+  const historyRes = await withAgentHeader(
+    request(app).get(`/api/groups/${encodeURIComponent(groupId)}/messages?limit=50`),
+    owner.agent_id
+  );
+
+  assert.equal(historyRes.status, 200);
+  assert.equal(historyRes.body.count, 1);
+  assert.ok(Array.isArray(historyRes.body.messages));
+  assert.equal(historyRes.body.messages[0].id, stableGroupMessageId);
+  assert.equal(historyRes.body.messages[0].group_id, groupId);
+});
+
+test('groups: key-protected join rejects wrong key and accepts correct key', async () => {
+  const owner = await registerAgent('kp-owner');
+  const joiner = await registerAgent('kp-joiner');
+
+  const createRes = await withAgentHeader(request(app).post('/api/groups'), owner.agent_id).send({
+    name: `Key Protected ${Date.now()}`,
+    access: { type: 'key-protected', join_key: 'super-secret' }
+  });
+
+  assert.equal(createRes.status, 201);
+  const groupId = createRes.body.id;
+
+  const wrongKeyRes = await withAgentHeader(
+    request(app).post(`/api/groups/${encodeURIComponent(groupId)}/join`),
+    joiner.agent_id
+  ).send({ key: 'wrong' });
+
+  assert.equal(wrongKeyRes.status, 403);
+
+  const correctKeyRes = await withAgentHeader(
+    request(app).post(`/api/groups/${encodeURIComponent(groupId)}/join`),
+    joiner.agent_id
+  ).send({ key: 'super-secret' });
+
+  assert.equal(correctKeyRes.status, 200);
+  assert.ok(correctKeyRes.body.members.some(m => m.agent_id === joiner.agent_id));
+});
+
+test('groups: invite-only groups reject join requests', async () => {
+  const owner = await registerAgent('io-owner');
+  const joiner = await registerAgent('io-joiner');
+
+  const createRes = await withAgentHeader(request(app).post('/api/groups'), owner.agent_id).send({
+    name: `Invite Only ${Date.now()}`,
+    access: { type: 'invite-only' }
+  });
+
+  assert.equal(createRes.status, 201);
+  const groupId = createRes.body.id;
+
+  const joinRes = await withAgentHeader(
+    request(app).post(`/api/groups/${encodeURIComponent(groupId)}/join`),
+    joiner.agent_id
+  ).send({});
+
+  assert.equal(joinRes.status, 403);
+});
+
+test('groups: owner can add member; non-member cannot add members', async () => {
+  const owner = await registerAgent('add-owner');
+  const nonMember = await registerAgent('add-nonmember');
+  const newMember = await registerAgent('add-member');
+
+  const createRes = await withAgentHeader(request(app).post('/api/groups'), owner.agent_id).send({
+    name: `Add Members ${Date.now()}`,
+    access: { type: 'invite-only' }
+  });
+
+  assert.equal(createRes.status, 201);
+  const groupId = createRes.body.id;
+
+  const forbiddenAddRes = await withAgentHeader(
+    request(app).post(`/api/groups/${encodeURIComponent(groupId)}/members`),
+    nonMember.agent_id
+  ).send({ agent_id: newMember.agent_id, role: 'member' });
+
+  assert.equal(forbiddenAddRes.status, 403);
+
+  const addRes = await withAgentHeader(
+    request(app).post(`/api/groups/${encodeURIComponent(groupId)}/members`),
+    owner.agent_id
+  ).send({ agent_id: newMember.agent_id, role: 'member' });
+
+  assert.equal(addRes.status, 200);
+  assert.ok(addRes.body.members.some(m => m.agent_id === newMember.agent_id));
+
+  const listRes = await withAgentHeader(
+    request(app).get(`/api/groups/${encodeURIComponent(groupId)}/members`),
+    newMember.agent_id
+  );
+
+  assert.equal(listRes.status, 200);
+  assert.ok(Array.isArray(listRes.body.members));
+  assert.ok(listRes.body.members.some(m => m.agent_id === owner.agent_id));
+  assert.ok(listRes.body.members.some(m => m.agent_id === newMember.agent_id));
 });

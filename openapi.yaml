@@ -34,6 +34,8 @@ tags:
     description: Message sending and delivery
   - name: Inbox
     description: Inbox operations (pull, ack, nack)
+  - name: Groups
+    description: Multi-party messaging via groups (membership + fanout + history)
   - name: Webhooks
     description: Webhook configuration for push delivery
   - name: System
@@ -532,6 +534,324 @@ paths:
                     items:
                       type: string
 
+  /api/agents/{agentId}/groups:
+    get:
+      tags: [Groups]
+      summary: List groups for an agent
+      description: List groups the agent is a member of
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Agent groups list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentGroupsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/groups:
+    post:
+      tags: [Groups]
+      summary: Create a group
+      description: Create a new group owned by the requesting agent
+      security:
+        - AgentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupCreateRequest'
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/groups/{groupId}:
+    get:
+      tags: [Groups]
+      summary: Get group info
+      description: Get group info. Members see full details; non-members see limited details.
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Group info
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Group'
+                  - $ref: '#/components/schemas/GroupPublicSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Groups]
+      summary: Update group
+      description: Update group name/settings (admin/owner only)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupUpdateRequest'
+      responses:
+        '200':
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Groups]
+      summary: Delete group
+      description: Delete group (owner only)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      responses:
+        '204':
+          description: Group deleted
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/groups/{groupId}/members:
+    get:
+      tags: [Groups]
+      summary: List group members
+      description: List group members (must be a group member)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Members list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GroupMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Groups]
+      summary: Add group member
+      description: Add a member to the group (admin/owner only)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupAddMemberRequest'
+      responses:
+        '200':
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/groups/{groupId}/members/{agentId}:
+    delete:
+      tags: [Groups]
+      summary: Remove group member
+      description: Remove a member (admin/owner) or remove self
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - $ref: '#/components/parameters/AgentId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/groups/{groupId}/join:
+    post:
+      tags: [Groups]
+      summary: Join group
+      description: Join an open or key-protected group
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupJoinRequest'
+      responses:
+        '200':
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/groups/{groupId}/leave:
+    post:
+      tags: [Groups]
+      summary: Leave group
+      description: Leave a group (owners cannot leave without deleting/transferring ownership)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Left group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  group_id:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/groups/{groupId}/messages:
+    post:
+      tags: [Groups]
+      summary: Post message to group
+      description: Fan out a message to all group members (except sender)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+      security:
+        - AgentAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupPostMessageRequest'
+      responses:
+        '201':
+          description: Group message accepted and fanned out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupPostMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags: [Groups]
+      summary: Get group message history
+      description: Get group message history (if enabled)
+      parameters:
+        - $ref: '#/components/parameters/GroupId'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      security:
+        - AgentAuth: []
+      responses:
+        '200':
+          description: Group history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupHistoryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   securitySchemes:
     AgentAuth:
@@ -557,6 +877,14 @@ components:
       schema:
         type: string
         example: msg-1234567890
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      description: Group identifier (URI-like, must be URL-encoded in paths)
+      schema:
+        type: string
+        example: group://my-group-1a2b3c4d
 
   schemas:
     AgentRegistration:
@@ -845,6 +1173,214 @@ components:
         webhook_secret:
           type: string
           description: Webhook HMAC secret
+
+    AgentGroupsResponse:
+      type: object
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupSummary'
+
+    GroupSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, member]
+        member_count:
+          type: integer
+
+    GroupPublicSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        access_type:
+          type: string
+          enum: [open, invite-only, key-protected]
+        member_count:
+          type: integer
+
+    GroupAccess:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [open, invite-only, key-protected]
+        join_key_hash:
+          type: string
+          nullable: true
+
+    GroupSettings:
+      type: object
+      properties:
+        history_visible:
+          type: boolean
+        max_members:
+          type: integer
+        message_ttl_sec:
+          type: integer
+
+    GroupMember:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, member]
+        joined_at:
+          type: integer
+          format: int64
+
+    Group:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        created_by:
+          type: string
+        access:
+          $ref: '#/components/schemas/GroupAccess'
+        settings:
+          $ref: '#/components/schemas/GroupSettings'
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupMember'
+        created_at:
+          type: integer
+          format: int64
+        updated_at:
+          type: integer
+          format: int64
+
+    GroupCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Group display name
+        access:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [open, invite-only, key-protected]
+            join_key:
+              type: string
+              description: Join key for key-protected groups (never returned)
+        settings:
+          $ref: '#/components/schemas/GroupSettings'
+
+    GroupUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        settings:
+          $ref: '#/components/schemas/GroupSettings'
+
+    GroupAddMemberRequest:
+      type: object
+      required: [agent_id]
+      properties:
+        agent_id:
+          type: string
+        role:
+          type: string
+          enum: [owner, admin, member]
+
+    GroupJoinRequest:
+      type: object
+      properties:
+        key:
+          type: string
+
+    GroupPostMessageRequest:
+      type: object
+      required: [subject, body]
+      properties:
+        subject:
+          type: string
+        body:
+          type: object
+          additionalProperties: true
+        correlation_id:
+          type: string
+        reply_to:
+          type: string
+
+    GroupDelivery:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        message_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [delivered, failed]
+        error:
+          type: string
+          nullable: true
+
+    GroupPostMessageResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          description: Stable group message id
+        group_id:
+          type: string
+        deliveries:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupDelivery'
+        delivered:
+          type: integer
+        failed:
+          type: integer
+
+    GroupMessageHistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        from:
+          type: string
+        subject:
+          type: string
+        body:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+        group_id:
+          type: string
+
+    GroupHistoryResponse:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupMessageHistoryItem'
+        count:
+          type: integer
+        has_more:
+          type: boolean
 
     Error:
       type: object

@@ -8,12 +8,13 @@ import { storage } from '../storage/index.js';
  * Verify agent exists
  */
 export async function authenticateAgent(req, res, next) {
-  const agentId = req.params.agentId || req.params.agent_id;
+  // Check URL params first, then headers for routes without :agentId param
+  const agentId = req.params.agentId || req.params.agent_id || req.headers['x-agent-id'];
 
   if (!agentId) {
     return res.status(400).json({
       error: 'AGENT_ID_REQUIRED',
-      message: 'Agent ID is required'
+      message: 'Agent ID is required (provide in URL or X-Agent-ID header)'
     });
   }
 
