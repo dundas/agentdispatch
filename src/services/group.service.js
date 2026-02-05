@@ -4,6 +4,7 @@
  */
 
 import { v4 as uuid } from 'uuid';
+import { createHash } from 'node:crypto';
 import { storage } from '../storage/index.js';
 import { inboxService } from './inbox.service.js';
 
@@ -367,8 +368,7 @@ export class GroupService {
    * Hash a join key using SHA-256
    */
   hashKey(key) {
-    const crypto = require('crypto');
-    return crypto.createHash('sha256').update(key).digest('hex');
+    return createHash('sha256').update(key).digest('hex');
   }
 }
 
