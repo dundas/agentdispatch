@@ -5,6 +5,7 @@
 
 import express from 'express';
 import { agentService } from '../services/agent.service.js';
+import { groupService } from '../services/group.service.js';
 import { authenticateAgent } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -232,6 +233,30 @@ router.delete('/:agentId/webhook', authenticateAgent, async (req, res) => {
   } catch (error) {
     res.status(400).json({
       error: 'REMOVE_WEBHOOK_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/agents/:agentId/groups
+ * List groups the agent is a member of
+ */
+router.get('/:agentId/groups', authenticateAgent, async (req, res) => {
+  try {
+    const groups = await groupService.listForAgent(req.params.agentId);
+
+    res.json({
+      groups: groups.map(g => ({
+        id: g.id,
+        name: g.name,
+        role: g.members?.find(m => m.agent_id === req.params.agentId)?.role,
+        member_count: g.members?.length || 0
+      }))
+    });
+  } catch (error) {
+    res.status(400).json({
+      error: 'LIST_GROUPS_FAILED',
       message: error.message
     });
   }

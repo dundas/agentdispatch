@@ -8,6 +8,7 @@ export class MemoryStorage {
     this.agents = new Map();        // agent_id -> agent object
     this.messages = new Map();      // message_id -> message object
     this.inboxes = new Map();       // agent_id -> message_id[]
+    this.groups = new Map();        // group_id -> group object
   }
 
   // ============ AGENTS ============
@@ -190,6 +191,7 @@ export class MemoryStorage {
   async getStats() {
     const agents = Array.from(this.agents.values());
     const messages = Array.from(this.messages.values());
+    const groups = Array.from(this.groups.values());
 
     return {
       agents: {
@@ -204,8 +206,135 @@ export class MemoryStorage {
         acked: messages.filter(m => m.status === 'acked').length,
         failed: messages.filter(m => m.status === 'failed').length,
         expired: messages.filter(m => m.status === 'expired').length
+      },
+      groups: {
+        total: groups.length
       }
     };
+  }
+
+  // ============ GROUPS ============
+
+  async createGroup(group) {
+    const stored = {
+      ...group,
+      created_at: Date.now(),
+      updated_at: Date.now()
+    };
+    this.groups.set(group.id, stored);
+    return stored;
+  }
+
+  async getGroup(groupId) {
+    return this.groups.get(groupId) || null;
+  }
+
+  async updateGroup(groupId, updates) {
+    const group = this.groups.get(groupId);
+    if (!group) return null;
+
+    const updated = {
+      ...group,
+      ...updates,
+      updated_at: Date.now()
+    };
+    this.groups.set(groupId, updated);
+    return updated;
+  }
+
+  async deleteGroup(groupId) {
+    this.groups.delete(groupId);
+    return true;
+  }
+
+  async listGroups(filter = {}) {
+    let groups = Array.from(this.groups.values());
+
+    if (filter.member) {
+      groups = groups.filter(g => g.members?.some(m => m.agent_id === filter.member));
+    }
+
+    return groups;
+  }
+
+  // ============ GROUP MEMBERS ============
+
+  async addGroupMember(groupId, member) {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const members = group.members || [];
+
+    if (members.some(m => m.agent_id === member.agent_id)) {
+      throw new Error(`Agent ${member.agent_id} is already a member`);
+    }
+
+    const newMember = {
+      ...member,
+      joined_at: Date.now()
+    };
+
+    members.push(newMember);
+
+    return this.updateGroup(groupId, { members });
+  }
+
+  async removeGroupMember(groupId, agentId) {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    const members = (group.members || []).filter(m => m.agent_id !== agentId);
+
+    return this.updateGroup(groupId, { members });
+  }
+
+  async getGroupMembers(groupId) {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      throw new Error(`Group ${groupId} not found`);
+    }
+
+    return group.members || [];
+  }
+
+  async isGroupMember(groupId, agentId) {
+    const group = this.groups.get(groupId);
+    if (!group) {
+      return false;
+    }
+
+    return (group.members || []).some(m => m.agent_id === agentId);
+  }
+
+  // ============ GROUP MESSAGES ============
+
+  async getGroupMessages(groupId, options = {}) {
+    // Group messages are stored in regular messages with group_id in envelope
+    let messages = Array.from(this.messages.values()).filter(m =>
+      m.group_id === groupId || m.envelope?.group_id === groupId
+    );
+
+    // Sort by timestamp descending (newest first)
+    messages.sort((a, b) => b.created_at - a.created_at);
+
+    // Apply limit
+    if (options.limit) {
+      messages = messages.slice(0, options.limit);
+    }
+
+    // Return envelope data for history view
+    return messages.map(m => ({
+      id: m.id,
+      from: m.from_agent_id,
+      subject: m.envelope?.subject,
+      body: m.envelope?.body,
+      timestamp: m.envelope?.timestamp || m.created_at,
+      group_id: m.envelope?.group_id || m.group_id
+    }));
   }
 }
 
