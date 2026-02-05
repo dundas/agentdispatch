@@ -10,6 +10,36 @@ import { authenticateAgent } from '../middleware/auth.js';
 const router = express.Router();
 
 /**
+ * Map error messages to appropriate HTTP status codes
+ */
+function getErrorStatusCode(error) {
+  const message = error.message || '';
+
+  // 404 Not Found
+  if (message.includes('not found')) {
+    return 404;
+  }
+
+  // 403 Forbidden - permission/role issues
+  if (message.includes('not a member') ||
+      message.includes('Requires ') ||
+      message.includes('invite-only') ||
+      message.includes('Invalid join key') ||
+      message.includes('Cannot remove group owner')) {
+    return 403;
+  }
+
+  // 409 Conflict - already exists
+  if (message.includes('already a member') ||
+      message.includes('maximum members')) {
+    return 409;
+  }
+
+  // Default to 400 Bad Request
+  return 400;
+}
+
+/**
  * POST /api/groups
  * Create a new group
  */
@@ -17,15 +47,31 @@ router.post('/', authenticateAgent, async (req, res) => {
   try {
     const { name, access, settings } = req.body;
 
-    if (!name) {
+    // Validate name
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
       return res.status(400).json({
-        error: 'NAME_REQUIRED',
-        message: 'Group name is required'
+        error: 'INVALID_NAME',
+        message: 'Group name must be a non-empty string'
+      });
+    }
+
+    if (name.length > 100) {
+      return res.status(400).json({
+        error: 'NAME_TOO_LONG',
+        message: 'Group name must be 100 characters or less'
+      });
+    }
+
+    // Validate name doesn't contain problematic characters
+    if (!/^[\w\s\-\.]+$/.test(name)) {
+      return res.status(400).json({
+        error: 'INVALID_NAME_CHARS',
+        message: 'Group name can only contain letters, numbers, spaces, hyphens, underscores, and periods'
       });
     }
 
     const group = await groupService.create({
-      name,
+      name: name.trim(),
       created_by: req.agent.agent_id,
       access,
       settings
@@ -33,7 +79,8 @@ router.post('/', authenticateAgent, async (req, res) => {
 
     res.status(201).json(group);
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'CREATE_GROUP_FAILED',
       message: error.message
     });
@@ -70,7 +117,8 @@ router.get('/:groupId', authenticateAgent, async (req, res) => {
 
     res.json(group);
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'GET_GROUP_FAILED',
       message: error.message
     });
@@ -93,7 +141,8 @@ router.put('/:groupId', authenticateAgent, async (req, res) => {
 
     res.json(group);
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'UPDATE_GROUP_FAILED',
       message: error.message
     });
@@ -109,7 +158,8 @@ router.delete('/:groupId', authenticateAgent, async (req, res) => {
     await groupService.delete(req.params.groupId, req.agent.agent_id);
     res.status(204).send();
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'DELETE_GROUP_FAILED',
       message: error.message
     });
@@ -129,7 +179,8 @@ router.get('/:groupId/members', authenticateAgent, async (req, res) => {
 
     res.json({ members });
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'LIST_MEMBERS_FAILED',
       message: error.message
     });
@@ -160,7 +211,8 @@ router.post('/:groupId/members', authenticateAgent, async (req, res) => {
 
     res.json(group);
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'ADD_MEMBER_FAILED',
       message: error.message
     });
@@ -181,7 +233,8 @@ router.delete('/:groupId/members/:agentId', authenticateAgent, async (req, res) 
 
     res.json(group);
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'REMOVE_MEMBER_FAILED',
       message: error.message
     });
@@ -204,7 +257,8 @@ router.post('/:groupId/join', authenticateAgent, async (req, res) => {
 
     res.json(group);
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'JOIN_FAILED',
       message: error.message
     });
@@ -224,7 +278,8 @@ router.post('/:groupId/leave', authenticateAgent, async (req, res) => {
 
     res.json({ message: 'Left group', group_id: req.params.groupId });
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'LEAVE_FAILED',
       message: error.message
     });
@@ -260,7 +315,8 @@ router.post('/:groupId/messages', authenticateAgent, async (req, res) => {
 
     res.status(201).json(result);
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'POST_MESSAGE_FAILED',
       message: error.message
     });
@@ -287,7 +343,8 @@ router.get('/:groupId/messages', authenticateAgent, async (req, res) => {
       has_more: messages.length === limit
     });
   } catch (error) {
-    res.status(400).json({
+    const status = getErrorStatusCode(error);
+    res.status(status).json({
       error: 'GET_MESSAGES_FAILED',
       message: error.message
     });

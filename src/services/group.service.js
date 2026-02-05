@@ -246,6 +246,7 @@ export class GroupService {
     };
 
     // Fanout to all members (except sender)
+    // Each member gets their own message ID to avoid storage collisions
     const deliveries = [];
     for (const member of members) {
       if (member.agent_id === envelope.from) {
@@ -255,6 +256,7 @@ export class GroupService {
       try {
         const memberEnvelope = {
           ...groupEnvelope,
+          id: uuid(), // Generate unique ID per recipient
           to: member.agent_id
         };
 
@@ -268,6 +270,7 @@ export class GroupService {
           status: 'delivered'
         });
       } catch (error) {
+        console.error(`[GroupService] Fanout to ${member.agent_id} failed:`, error.message);
         deliveries.push({
           agent_id: member.agent_id,
           status: 'failed',
@@ -343,17 +346,11 @@ export class GroupService {
   }
 
   /**
-   * Hash a join key
+   * Hash a join key using SHA-256
    */
   hashKey(key) {
-    // Simple hash for demo - in production use proper crypto
-    let hash = 0;
-    for (let i = 0; i < key.length; i++) {
-      const char = key.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return hash.toString(16);
+    const crypto = require('crypto');
+    return crypto.createHash('sha256').update(key).digest('hex');
   }
 }
 

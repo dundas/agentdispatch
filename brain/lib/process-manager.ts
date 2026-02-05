@@ -167,6 +167,11 @@ export class ProcessManager {
 
       // Schedule next run
       if (this.running && state.status === 'running') {
+        // Clear any existing timer to prevent leaks
+        const existingTimer = this.timers.get(name);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
         const timer = setTimeout(runWithCatch, config.interval || 60000);
         this.timers.set(name, timer);
       }
@@ -206,6 +211,11 @@ export class ProcessManager {
         state.restarts++;
         state.status = 'running';
         console.log(`[ProcessManager] ${name} restarting in ${config.restartDelay}ms (attempt ${state.restarts}/${config.maxRestarts})...`);
+        // Clear any existing timer to prevent leaks
+        const existingTimer = this.timers.get(name);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
         const timer = setTimeout(() => this.runPersistentProcess(name, config, state), config.restartDelay || 5000);
         this.timers.set(name, timer);
       } else if (state.restarts >= (config.maxRestarts || 5)) {

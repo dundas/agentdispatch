@@ -5,7 +5,7 @@
  */
 
 import nacl from 'tweetnacl';
-import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
+import { encodeBase64, decodeUTF8, decodeBase64 } from 'tweetnacl-util';
 
 interface ADMPConfig {
   hubUrl: string;
@@ -530,9 +530,4 @@ interface GroupMessageResult {
  */
 export function createADMPClient(config: ADMPConfig): ADMPClient {
   return new ADMPClient(config);
-}
-
-// Re-export for convenience
-function decodeBase64(s: string): Uint8Array {
-  return Uint8Array.from(atob(s), c => c.charCodeAt(0));
 }
