@@ -8,6 +8,8 @@ import { fromBase64, signMessage } from './utils/crypto.js';
 import { createMechStorage } from './storage/mech.js';
 import { requireApiKey } from './middleware/auth.js';
 import { webhookService } from './services/webhook.service.js';
+import { outboxService } from './services/outbox.service.js';
+import { storage } from './storage/index.js';
 
 async function registerAgent(name, metadata = {}) {
   const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -951,4 +953,849 @@ test('groups: owner can add member; non-member cannot add members', async () => 
   assert.ok(Array.isArray(listRes.body.members));
   assert.ok(listRes.body.members.some(m => m.agent_id === owner.agent_id));
   assert.ok(listRes.body.members.some(m => m.agent_id === newMember.agent_id));
+});
+
+// ============ OUTBOX & DOMAIN TESTS ============
+
+test('outbox domain: GET returns 404 when no domain configured', async () => {
+  const agent = await registerAgent('outbox-nodomain');
+
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`);
+
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'NO_DOMAIN');
+});
+
+test('outbox domain: POST requires domain field', async () => {
+  const agent = await registerAgent('outbox-missing-domain');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`)
+    .send({});
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'DOMAIN_REQUIRED');
+});
+
+test('outbox domain: POST fails without MAILGUN_API_KEY', async () => {
+  const agent = await registerAgent('outbox-nokey');
+
+  // MAILGUN_API_KEY is not set in test env, so this should fail
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`)
+    .send({ domain: 'test.example.com' });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.message.includes('MAILGUN_API_KEY'));
+});
+
+test('outbox domain: DELETE returns 404 when no domain configured', async () => {
+  const agent = await registerAgent('outbox-del-nodomain');
+
+  const res = await request(app)
+    .delete(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`);
+
+  assert.equal(res.status, 404);
+});
+
+test('outbox domain: verify returns 404 when no domain configured', async () => {
+  const agent = await registerAgent('outbox-verify-nodomain');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain/verify`)
+    .send({});
+
+  assert.equal(res.status, 404);
+});
+
+test('outbox send: requires to field', async () => {
+  const agent = await registerAgent('outbox-send-noto');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+    .send({ subject: 'test', body: 'hello' });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'TO_REQUIRED');
+});
+
+test('outbox send: requires subject field', async () => {
+  const agent = await registerAgent('outbox-send-nosubj');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+    .send({ to: 'user@example.com', body: 'hello' });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'SUBJECT_REQUIRED');
+});
+
+test('outbox send: requires body or html field', async () => {
+  const agent = await registerAgent('outbox-send-nobody');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+    .send({ to: 'user@example.com', subject: 'test' });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'BODY_REQUIRED');
+});
+
+test('outbox send: fails when no domain configured', async () => {
+  const agent = await registerAgent('outbox-send-nodomain');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+    .send({ to: 'user@example.com', subject: 'test', body: 'hello' });
+
+  assert.equal(res.status, 404);
+  assert.ok(res.body.message.includes('no outbox domain configured'));
+});
+
+test('outbox send: fails when domain not verified', async () => {
+  const agent = await registerAgent('outbox-send-unverified');
+
+  // Manually set a domain config with pending status (bypassing Mailgun)
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'unverified.example.com',
+    status: 'pending',
+    dns_records: [],
+    mailgun_state: 'unverified'
+  });
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+    .send({ to: 'user@example.com', subject: 'test', body: 'hello' });
+
+  assert.equal(res.status, 403);
+  assert.ok(res.body.message.includes('not verified'));
+});
+
+test('outbox messages: returns empty list for agent with no outbox messages', async () => {
+  const agent = await registerAgent('outbox-empty');
+
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/messages`);
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.messages, []);
+  assert.equal(res.body.count, 0);
+});
+
+test('outbox messages: returns 404 for non-existent message', async () => {
+  const agent = await registerAgent('outbox-msg-404');
+
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/messages/nonexistent`);
+
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'OUTBOX_MESSAGE_NOT_FOUND');
+});
+
+test('outbox messages: prevents accessing another agent\'s message', async () => {
+  const agent1 = await registerAgent('outbox-owner');
+  const agent2 = await registerAgent('outbox-intruder');
+
+  // Create outbox message for agent1
+  await storage.createOutboxMessage({
+    id: 'outbox-cross-agent-test',
+    agent_id: agent1.agent_id,
+    to: 'someone@example.com',
+    from: 'test@example.com',
+    subject: 'private',
+    body: 'secret',
+    status: 'sent'
+  });
+
+  // agent2 tries to access it
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent2.agent_id)}/outbox/messages/outbox-cross-agent-test`);
+
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error, 'FORBIDDEN');
+});
+
+test('outbox storage: domain config CRUD via storage layer', async () => {
+  const agentId = 'storage-domain-test';
+
+  // Set
+  const config = await storage.setDomainConfig(agentId, {
+    domain: 'storage.example.com',
+    status: 'pending'
+  });
+  assert.equal(config.domain, 'storage.example.com');
+  assert.equal(config.agent_id, agentId);
+
+  // Get
+  const fetched = await storage.getDomainConfig(agentId);
+  assert.equal(fetched.domain, 'storage.example.com');
+
+  // Update
+  const updated = await storage.setDomainConfig(agentId, {
+    domain: 'storage.example.com',
+    status: 'verified'
+  });
+  assert.equal(updated.status, 'verified');
+  assert.equal(updated.created_at, config.created_at); // preserves created_at
+
+  // Delete
+  await storage.deleteDomainConfig(agentId);
+  const deleted = await storage.getDomainConfig(agentId);
+  assert.equal(deleted, null);
+});
+
+test('outbox storage: outbox message CRUD via storage layer', async () => {
+  const agentId = 'storage-outbox-test';
+
+  // Create
+  const msg = await storage.createOutboxMessage({
+    id: 'outbox-crud-test',
+    agent_id: agentId,
+    to: 'test@example.com',
+    from: 'agent@example.com',
+    subject: 'CRUD test',
+    body: 'hello',
+    status: 'queued'
+  });
+  assert.equal(msg.id, 'outbox-crud-test');
+  assert.ok(msg.created_at);
+
+  // Get
+  const fetched = await storage.getOutboxMessage('outbox-crud-test');
+  assert.equal(fetched.subject, 'CRUD test');
+
+  // Update
+  const updated = await storage.updateOutboxMessage('outbox-crud-test', {
+    status: 'sent',
+    mailgun_id: '<test@mailgun>'
+  });
+  assert.equal(updated.status, 'sent');
+  assert.equal(updated.mailgun_id, '<test@mailgun>');
+
+  // List
+  const messages = await storage.getOutboxMessages(agentId);
+  assert.ok(messages.length >= 1);
+  assert.ok(messages.some(m => m.id === 'outbox-crud-test'));
+
+  // List with status filter
+  const sent = await storage.getOutboxMessages(agentId, { status: 'sent' });
+  assert.ok(sent.some(m => m.id === 'outbox-crud-test'));
+
+  const queued = await storage.getOutboxMessages(agentId, { status: 'queued' });
+  assert.ok(!queued.some(m => m.id === 'outbox-crud-test'));
+});
+
+test('outbox webhook: mailgun webhook endpoint accepts events', async () => {
+  const res = await request(app)
+    .post('/api/webhooks/mailgun')
+    .send({
+      event_data: {
+        event: 'delivered',
+        message: { headers: { 'message-id': '<test@mailgun>' } }
+      }
+    });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, 'ok');
+});
+
+test('outbox webhook signature verification', () => {
+  // Test the signature verification method directly
+  const timestamp = '1234567890';
+  const token = 'test-token';
+
+  // Without signing key set, should return false
+  const result = outboxService.verifyWebhookSignature(timestamp, token, 'fake-sig');
+  assert.equal(result, false);
+});
+
+test('outbox send: happy path with verified domain creates outbox message', async () => {
+  const agent = await registerAgent('outbox-send-happy');
+
+  // Set up a verified domain config directly in storage (bypassing Mailgun API)
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'verified.example.com',
+    status: 'verified',
+    dns_records: [],
+    mailgun_state: 'active'
+  });
+
+  // Set MAILGUN_API_KEY so the service doesn't reject the send
+  const origKey = process.env.MAILGUN_API_KEY;
+  process.env.MAILGUN_API_KEY = 'test-key-for-send';
+
+  // Stub the outbox service _mailgunRequest to simulate Mailgun success
+  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
+  outboxService._mailgunRequest = async (path, opts) => {
+    if (path.includes('/messages') && opts?.method === 'POST') {
+      return { status: 200, ok: true, json: { id: '<mock-mailgun-id@mailgun>', message: 'Queued' }, text: '' };
+    }
+    return originalRequest(path, opts);
+  };
+
+  try {
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+      .send({
+        to: 'user@example.com',
+        subject: 'Hello from agent',
+        body: 'This is a test email',
+        html: '<p>This is a test email</p>'
+      });
+
+    assert.equal(res.status, 202);
+    assert.ok(res.body.id);
+    assert.equal(res.body.status, 'queued');
+    assert.equal(res.body.to, 'user@example.com');
+    assert.equal(res.body.subject, 'Hello from agent');
+    assert.ok(res.body.from.includes('verified.example.com'));
+    assert.equal(res.body.agent_id, agent.agent_id);
+    assert.equal(res.body.max_attempts, 3);
+    assert.ok(res.body.created_at);
+
+    // Wait briefly for async send to complete
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // Verify outbox message is stored and updated to 'sent'
+    const storedMsg = await storage.getOutboxMessage(res.body.id);
+    assert.ok(storedMsg);
+    assert.equal(storedMsg.status, 'sent');
+    assert.equal(storedMsg.mailgun_id, '<mock-mailgun-id@mailgun>');
+    assert.ok(storedMsg.sent_at);
+
+    // Verify it appears in the agent's outbox message list
+    const listRes = await request(app)
+      .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/messages`);
+
+    assert.equal(listRes.status, 200);
+    assert.ok(listRes.body.messages.some(m => m.id === res.body.id));
+
+    // Verify individual message fetch works
+    const getRes = await request(app)
+      .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/messages/${res.body.id}`);
+
+    assert.equal(getRes.status, 200);
+    assert.equal(getRes.body.id, res.body.id);
+    assert.equal(getRes.body.status, 'sent');
+  } finally {
+    // Restore original method and env var
+    outboxService._mailgunRequest = originalRequest;
+    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
+    else process.env.MAILGUN_API_KEY = origKey;
+  }
+});
+
+test('outbox send: constructs from address as agentId@domain', async () => {
+  const agent = await registerAgent('outbox-from-addr');
+
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'mail.example.com',
+    status: 'verified',
+    dns_records: [],
+    mailgun_state: 'active'
+  });
+
+  const origKey = process.env.MAILGUN_API_KEY;
+  process.env.MAILGUN_API_KEY = 'test-key-for-from';
+
+  // Stub the Mailgun send to succeed
+  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
+  outboxService._mailgunRequest = async (path, opts) => {
+    if (path.includes('/messages') && opts?.method === 'POST') {
+      return { status: 200, ok: true, json: { id: '<from-test@mailgun>' }, text: '' };
+    }
+    return originalRequest(path, opts);
+  };
+
+  try {
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+      .send({
+        to: 'dest@example.com',
+        subject: 'From test',
+        body: 'Testing from address'
+      });
+
+    assert.equal(res.status, 202);
+    // From should contain the domain
+    assert.ok(res.body.from.includes('@mail.example.com'));
+    // From should contain agent_id-derived local part
+    assert.ok(res.body.from.includes(agent.agent_id));
+  } finally {
+    outboxService._mailgunRequest = originalRequest;
+    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
+    else process.env.MAILGUN_API_KEY = origKey;
+  }
+});
+
+test('outbox send: from_name is sanitized to prevent header injection', async () => {
+  const agent = await registerAgent('outbox-from-sanitize');
+
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'sanitize.example.com',
+    status: 'verified',
+    dns_records: [],
+    mailgun_state: 'active'
+  });
+
+  const origKey = process.env.MAILGUN_API_KEY;
+  process.env.MAILGUN_API_KEY = 'test-key-for-sanitize';
+
+  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
+  outboxService._mailgunRequest = async (path, opts) => {
+    if (path.includes('/messages') && opts?.method === 'POST') {
+      return { status: 200, ok: true, json: { id: '<sanitize-test@mailgun>' }, text: '' };
+    }
+    return originalRequest(path, opts);
+  };
+
+  try {
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+      .send({
+        to: 'dest@example.com',
+        subject: 'Sanitize test',
+        body: 'Testing from_name sanitization',
+        from_name: 'Evil<script>\r\nBcc: victim@evil.com'
+      });
+
+    assert.equal(res.status, 202);
+    // Dangerous characters should be stripped from the from field
+    assert.ok(!res.body.from.includes('<script>'), 'Should strip angle brackets');
+    assert.ok(!res.body.from.includes('\r'), 'Should strip carriage return');
+    assert.ok(!res.body.from.includes('\n'), 'Should strip newline');
+    assert.ok(res.body.from.includes('sanitize.example.com'));
+  } finally {
+    outboxService._mailgunRequest = originalRequest;
+    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
+    else process.env.MAILGUN_API_KEY = origKey;
+  }
+});
+
+test('outbox send: rejects invalid email address in to field', async () => {
+  const agent = await registerAgent('outbox-bad-email');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+    .send({ to: 'not-an-email', subject: 'test', body: 'hello' });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'INVALID_EMAIL');
+});
+
+test('outbox send: Mailgun API failure triggers retry and eventually fails', async () => {
+  const agent = await registerAgent('outbox-retry');
+
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'retry.example.com',
+    status: 'verified',
+    dns_records: [],
+    mailgun_state: 'active'
+  });
+
+  const origKey = process.env.MAILGUN_API_KEY;
+  process.env.MAILGUN_API_KEY = 'test-key-for-retry';
+
+  // Stub Mailgun to always fail
+  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
+  let callCount = 0;
+  outboxService._mailgunRequest = async (path, opts) => {
+    if (path.includes('/messages') && opts?.method === 'POST') {
+      callCount++;
+      return { status: 500, ok: false, json: { message: 'Server Error' }, text: 'Server Error' };
+    }
+    return originalRequest(path, opts);
+  };
+
+  try {
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+      .send({
+        to: 'user@example.com',
+        subject: 'Retry test',
+        body: 'Should fail after retries'
+      });
+
+    assert.equal(res.status, 202);
+    assert.equal(res.body.status, 'queued');
+
+    // Wait for the first attempt to complete (including initial retry scheduling)
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // First attempt should have happened
+    assert.ok(callCount >= 1, `Expected at least 1 Mailgun call, got ${callCount}`);
+
+    // Check the outbox message has attempt count > 0
+    const msg = await storage.getOutboxMessage(res.body.id);
+    assert.ok(msg);
+    assert.ok(msg.attempts >= 1);
+    assert.ok(msg.error);
+  } finally {
+    outboxService._mailgunRequest = originalRequest;
+    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
+    else process.env.MAILGUN_API_KEY = origKey;
+  }
+});
+
+test('outbox webhook: delivered event updates outbox message status', async () => {
+  // Create a sent outbox message with a known mailgun_id
+  const mailgunId = '<webhook-delivered-test@mailgun>';
+  await storage.createOutboxMessage({
+    id: 'webhook-deliver-test',
+    agent_id: 'agent://webhook-agent',
+    to: 'someone@example.com',
+    from: 'agent@example.com',
+    subject: 'Webhook test',
+    body: 'hello',
+    status: 'sent',
+    mailgun_id: mailgunId,
+    attempts: 1,
+    max_attempts: 3,
+    error: null,
+    sent_at: Date.now()
+  });
+
+  // Send delivered webhook
+  const res = await request(app)
+    .post('/api/webhooks/mailgun')
+    .send({
+      event_data: {
+        event: 'delivered',
+        message: { headers: { 'message-id': mailgunId } }
+      }
+    });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.status, 'ok');
+
+  // Check that the outbox message was updated
+  const msg = await storage.getOutboxMessage('webhook-deliver-test');
+  assert.equal(msg.status, 'delivered');
+  assert.ok(msg.delivered_at);
+});
+
+test('outbox webhook: failed event updates outbox message status', async () => {
+  const mailgunId = '<webhook-failed-test@mailgun>';
+  await storage.createOutboxMessage({
+    id: 'webhook-fail-test',
+    agent_id: 'agent://webhook-fail-agent',
+    to: 'bounce@example.com',
+    from: 'agent@example.com',
+    subject: 'Will fail',
+    body: 'bounce test',
+    status: 'sent',
+    mailgun_id: mailgunId,
+    attempts: 1,
+    max_attempts: 3,
+    error: null,
+    sent_at: Date.now()
+  });
+
+  const res = await request(app)
+    .post('/api/webhooks/mailgun')
+    .send({
+      event_data: {
+        event: 'failed',
+        message: { headers: { 'message-id': mailgunId } },
+        reason: 'Mailbox not found'
+      }
+    });
+
+  assert.equal(res.status, 200);
+
+  const msg = await storage.getOutboxMessage('webhook-fail-test');
+  assert.equal(msg.status, 'failed');
+  assert.ok(msg.error.includes('Mailbox not found'));
+});
+
+test('outbox messages: list supports limit query param', async () => {
+  const agent = await registerAgent('outbox-limit');
+
+  // Create 3 outbox messages
+  for (let i = 0; i < 3; i++) {
+    await storage.createOutboxMessage({
+      id: `limit-test-${i}-${Date.now()}`,
+      agent_id: agent.agent_id,
+      to: `user${i}@example.com`,
+      from: 'agent@example.com',
+      subject: `Limit test ${i}`,
+      body: 'hello',
+      status: 'sent'
+    });
+  }
+
+  // List with limit=2
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/messages?limit=2`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.messages.length, 2);
+  assert.equal(res.body.count, 2);
+});
+
+test('outbox messages: list supports status query param', async () => {
+  const agent = await registerAgent('outbox-status-filter');
+
+  await storage.createOutboxMessage({
+    id: `status-sent-${Date.now()}`,
+    agent_id: agent.agent_id,
+    to: 'user@example.com',
+    from: 'agent@example.com',
+    subject: 'Sent msg',
+    body: 'hello',
+    status: 'sent'
+  });
+
+  await storage.createOutboxMessage({
+    id: `status-failed-${Date.now()}`,
+    agent_id: agent.agent_id,
+    to: 'user@example.com',
+    from: 'agent@example.com',
+    subject: 'Failed msg',
+    body: 'hello',
+    status: 'failed'
+  });
+
+  // Filter by status=sent
+  const sentRes = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/messages?status=sent`);
+
+  assert.equal(sentRes.status, 200);
+  assert.ok(sentRes.body.messages.every(m => m.status === 'sent'));
+  assert.ok(sentRes.body.messages.length >= 1);
+
+  // Filter by status=failed
+  const failedRes = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/messages?status=failed`);
+
+  assert.equal(failedRes.status, 200);
+  assert.ok(failedRes.body.messages.every(m => m.status === 'failed'));
+  assert.ok(failedRes.body.messages.length >= 1);
+});
+
+test('outbox domain: DELETE removes config and subsequent GET returns 404', async () => {
+  const agent = await registerAgent('outbox-del-flow');
+
+  // Set up domain config directly
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'delete-test.example.com',
+    status: 'pending',
+    dns_records: [],
+    mailgun_state: 'unverified'
+  });
+
+  // Verify domain exists
+  const getRes = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`);
+  assert.equal(getRes.status, 200);
+  assert.equal(getRes.body.domain, 'delete-test.example.com');
+
+  // Delete domain
+  const delRes = await request(app)
+    .delete(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`);
+  assert.equal(delRes.status, 204);
+
+  // Verify it's gone
+  const afterRes = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`);
+  assert.equal(afterRes.status, 404);
+});
+
+test('outbox send: Mailgun send uses correct API path (no /domains/ prefix)', async () => {
+  const agent = await registerAgent('outbox-path-check');
+
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'path-test.example.com',
+    status: 'verified',
+    dns_records: [],
+    mailgun_state: 'active'
+  });
+
+  const origKey = process.env.MAILGUN_API_KEY;
+  process.env.MAILGUN_API_KEY = 'test-key-for-path';
+
+  // Capture the URL path used in the Mailgun request
+  let capturedPath = null;
+  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
+  outboxService._mailgunRequest = async (path, opts) => {
+    if (opts?.method === 'POST' && path.includes('/messages')) {
+      capturedPath = path;
+      return { status: 200, ok: true, json: { id: '<path-test@mailgun>' }, text: '' };
+    }
+    return originalRequest(path, opts);
+  };
+
+  try {
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+      .send({
+        to: 'dest@example.com',
+        subject: 'Path test',
+        body: 'Testing URL path'
+      });
+
+    assert.equal(res.status, 202);
+
+    // Wait for async send
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    // The path should be /{domain}/messages, NOT /domains/{domain}/messages
+    assert.ok(capturedPath, 'Mailgun request path should have been captured');
+    assert.ok(capturedPath.startsWith('/path-test.example.com/messages'),
+      `Expected path to start with /path-test.example.com/messages, got: ${capturedPath}`);
+    assert.ok(!capturedPath.includes('/domains/'),
+      `Path should NOT include /domains/ prefix, got: ${capturedPath}`);
+  } finally {
+    outboxService._mailgunRequest = originalRequest;
+    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
+    else process.env.MAILGUN_API_KEY = origKey;
+  }
+});
+
+// ============ ISSUE 1: findOutboxMessageByMailgunId on storage backends ============
+
+test('storage: findOutboxMessageByMailgunId finds message by mailgun_id', async () => {
+  const mailgunId = '<find-by-mailgun-id-test@mailgun>';
+  const msgId = `find-mailgun-${Date.now()}`;
+
+  await storage.createOutboxMessage({
+    id: msgId,
+    agent_id: 'agent://find-test',
+    to: 'user@example.com',
+    from: 'agent@example.com',
+    subject: 'Find test',
+    body: 'hello',
+    status: 'sent',
+    mailgun_id: mailgunId
+  });
+
+  // The storage backend should have findOutboxMessageByMailgunId as a method
+  assert.equal(typeof storage.findOutboxMessageByMailgunId, 'function',
+    'storage must implement findOutboxMessageByMailgunId');
+
+  const found = await storage.findOutboxMessageByMailgunId(mailgunId);
+  assert.ok(found, 'Should find outbox message by mailgun_id');
+  assert.equal(found.id, msgId);
+  assert.equal(found.mailgun_id, mailgunId);
+});
+
+test('storage: findOutboxMessageByMailgunId returns null for unknown mailgun_id', async () => {
+  assert.equal(typeof storage.findOutboxMessageByMailgunId, 'function',
+    'storage must implement findOutboxMessageByMailgunId');
+
+  const result = await storage.findOutboxMessageByMailgunId('<nonexistent@mailgun>');
+  assert.equal(result, null);
+});
+
+test('outbox webhook: handleWebhook uses findOutboxMessageByMailgunId to locate message', async () => {
+  const mailgunId = '<webhook-find-method-test@mailgun>';
+  const msgId = `webhook-find-${Date.now()}`;
+
+  await storage.createOutboxMessage({
+    id: msgId,
+    agent_id: 'agent://webhook-find-agent',
+    to: 'someone@example.com',
+    from: 'agent@example.com',
+    subject: 'Webhook find test',
+    body: 'hello',
+    status: 'sent',
+    mailgun_id: mailgunId,
+    attempts: 1,
+    max_attempts: 3,
+    error: null,
+    sent_at: Date.now()
+  });
+
+  // Send delivered webhook
+  const res = await request(app)
+    .post('/api/webhooks/mailgun')
+    .send({
+      event_data: {
+        event: 'delivered',
+        message: { headers: { 'message-id': mailgunId } }
+      }
+    });
+
+  assert.equal(res.status, 200);
+
+  // The message should have been found and updated
+  const msg = await storage.getOutboxMessage(msgId);
+  assert.equal(msg.status, 'delivered');
+  assert.ok(msg.delivered_at);
+});
+
+// ============ ISSUE 2: Webhook signature bypass ============
+
+test('outbox webhook: rejects request when signing key is set but signature is missing', async () => {
+  const origKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+  process.env.MAILGUN_WEBHOOK_SIGNING_KEY = 'test-signing-key';
+
+  try {
+    // Send webhook WITHOUT signature field - should be rejected
+    const res = await request(app)
+      .post('/api/webhooks/mailgun')
+      .send({
+        event_data: {
+          event: 'delivered',
+          message: { headers: { 'message-id': '<bypass-test@mailgun>' } }
+        }
+        // Note: no signature field at all
+      });
+
+    assert.equal(res.status, 400, 'Should reject with 400 when signing key is set but signature is missing');
+    assert.equal(res.body.error, 'SIGNATURE_REQUIRED');
+  } finally {
+    if (origKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+    else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = origKey;
+  }
+});
+
+test('outbox webhook: rejects request when signing key is set and signature is invalid', async () => {
+  const origKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+  process.env.MAILGUN_WEBHOOK_SIGNING_KEY = 'test-signing-key';
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/mailgun')
+      .send({
+        signature: {
+          timestamp: '1234567890',
+          token: 'test-token',
+          signature: 'invalid-signature'
+        },
+        event_data: {
+          event: 'delivered',
+          message: { headers: { 'message-id': '<sig-invalid-test@mailgun>' } }
+        }
+      });
+
+    assert.equal(res.status, 403, 'Should reject with 403 for invalid signature');
+    assert.equal(res.body.error, 'INVALID_SIGNATURE');
+  } finally {
+    if (origKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+    else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = origKey;
+  }
+});
+
+test('outbox webhook: allows requests when signing key is NOT set (dev mode)', async () => {
+  const origKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+  delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/mailgun')
+      .send({
+        event_data: {
+          event: 'delivered',
+          message: { headers: { 'message-id': '<devmode-test@mailgun>' } }
+        }
+      });
+
+    assert.equal(res.status, 200, 'Should allow requests when no signing key is configured');
+    assert.equal(res.body.status, 'ok');
+  } finally {
+    if (origKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+    else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = origKey;
+  }
 });

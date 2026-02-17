@@ -9,6 +9,9 @@ export class MemoryStorage {
     this.messages = new Map();      // message_id -> message object
     this.inboxes = new Map();       // agent_id -> message_id[]
     this.groups = new Map();        // group_id -> group object
+    this.domains = new Map();       // agent_id -> domain config
+    this.outboxMessages = new Map(); // message_id -> outbox message
+    this.outboxes = new Map();      // agent_id -> message_id[]
   }
 
   // ============ AGENTS ============
@@ -371,6 +374,95 @@ export class MemoryStorage {
       timestamp: m.envelope?.timestamp || m.created_at,
       group_id: m.envelope?.group_id || m.group_id
     }));
+  }
+
+  // ============ DOMAINS ============
+
+  async setDomainConfig(agentId, config) {
+    const stored = {
+      ...config,
+      agent_id: agentId,
+      updated_at: Date.now()
+    };
+    if (!this.domains.has(agentId)) {
+      stored.created_at = Date.now();
+    } else {
+      stored.created_at = this.domains.get(agentId).created_at;
+    }
+    this.domains.set(agentId, stored);
+    return stored;
+  }
+
+  async getDomainConfig(agentId) {
+    return this.domains.get(agentId) || null;
+  }
+
+  async deleteDomainConfig(agentId) {
+    this.domains.delete(agentId);
+    return true;
+  }
+
+  // ============ OUTBOX ============
+
+  async createOutboxMessage(message) {
+    const stored = {
+      ...message,
+      created_at: Date.now(),
+      updated_at: Date.now()
+    };
+    this.outboxMessages.set(message.id, stored);
+
+    const outbox = this.outboxes.get(message.agent_id) || [];
+    outbox.push(message.id);
+    this.outboxes.set(message.agent_id, outbox);
+
+    return stored;
+  }
+
+  async getOutboxMessage(messageId) {
+    return this.outboxMessages.get(messageId) || null;
+  }
+
+  async updateOutboxMessage(messageId, updates) {
+    const message = this.outboxMessages.get(messageId);
+    if (!message) return null;
+
+    const updated = {
+      ...message,
+      ...updates,
+      updated_at: Date.now()
+    };
+    this.outboxMessages.set(messageId, updated);
+    return updated;
+  }
+
+  async findOutboxMessageByMailgunId(mailgunId) {
+    for (const msg of this.outboxMessages.values()) {
+      if (msg.mailgun_id === mailgunId) {
+        return msg;
+      }
+    }
+    return null;
+  }
+
+  async getOutboxMessages(agentId, options = {}) {
+    const messageIds = this.outboxes.get(agentId) || [];
+    let messages = messageIds
+      .map(id => this.outboxMessages.get(id))
+      .filter(m => m !== undefined);
+
+    if (options.status) {
+      messages = messages.filter(m => m.status === options.status);
+    }
+
+    // Sort newest first
+    messages.sort((a, b) => b.created_at - a.created_at);
+
+    if (options.limit) {
+      messages = messages.slice(0, options.limit);
+    }
+
+    return messages;
   }
 }
 

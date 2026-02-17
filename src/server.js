@@ -17,6 +17,7 @@ import { dirname, join } from 'path';
 import agentRoutes from './routes/agents.js';
 import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
+import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
 import { requireApiKey } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
@@ -31,6 +32,15 @@ config();
 
 const PORT = process.env.PORT || 8080;
 const CLEANUP_INTERVAL_MS = parseInt(process.env.CLEANUP_INTERVAL_MS) || 60000;
+
+// Warn about insecure outbox webhook configuration
+if (process.env.MAILGUN_API_KEY && !process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {
+  console.warn(
+    'WARNING: MAILGUN_API_KEY is set but MAILGUN_WEBHOOK_SIGNING_KEY is not. ' +
+    'Mailgun webhooks will accept unauthenticated requests. ' +
+    'Set MAILGUN_WEBHOOK_SIGNING_KEY for production use.'
+  );
+}
 
 // Initialize logger
 const logger = pino({
@@ -95,7 +105,9 @@ app.get('/api/stats', async (req, res) => {
 app.use('/api/agents', agentRoutes);
 app.use('/api/agents', inboxRoutes);
 app.use('/api/groups', groupRoutes);
+app.use('/api/agents', outboxRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
+app.use('/api', outboxWebhookRouter);  // For /api/webhooks/mailgun
 
 // 404 handler
 app.use((req, res) => {

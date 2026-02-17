@@ -524,6 +524,141 @@ export class MechStorage {
       group_id: m.envelope?.group_id || m.group_id
     }));
   }
+
+  // ============ DOMAINS ============
+
+  async setDomainConfig(agentId, config) {
+    const now = Date.now();
+    const existing = await this.getDomainConfig(agentId);
+
+    const stored = {
+      ...config,
+      agent_id: agentId,
+      created_at: existing?.created_at || now,
+      updated_at: now
+    };
+
+    if (existing) {
+      await this.request(`/nosql/documents/admp_domains/${encodeURIComponent(agentId)}`, {
+        method: 'PUT',
+        body: { data: stored }
+      });
+    } else {
+      await this.request('/nosql/documents', {
+        method: 'POST',
+        body: {
+          collection_name: 'admp_domains',
+          document_key: agentId,
+          data: stored
+        }
+      });
+    }
+
+    return stored;
+  }
+
+  async getDomainConfig(agentId) {
+    const { status, json } = await this.request(
+      `/nosql/documents/key/${encodeURIComponent(agentId)}?collection_name=admp_domains`,
+      { allow404: true }
+    );
+
+    if (status === 404) return null;
+
+    const doc = json?.data;
+    return this.extractDocument(doc) || null;
+  }
+
+  async deleteDomainConfig(agentId) {
+    const { status } = await this.request(
+      `/nosql/documents/admp_domains/${encodeURIComponent(agentId)}`,
+      { method: 'DELETE', allow404: true }
+    );
+    return status === 200 || status === 204;
+  }
+
+  // ============ OUTBOX ============
+
+  async createOutboxMessage(message) {
+    const now = Date.now();
+    const stored = {
+      ...message,
+      created_at: now,
+      updated_at: now
+    };
+
+    await this.request('/nosql/documents', {
+      method: 'POST',
+      body: {
+        collection_name: 'admp_outbox',
+        document_key: stored.id,
+        data: stored
+      }
+    });
+
+    return stored;
+  }
+
+  async getOutboxMessage(messageId) {
+    const { status, json } = await this.request(
+      `/nosql/documents/key/${encodeURIComponent(messageId)}?collection_name=admp_outbox`,
+      { allow404: true }
+    );
+
+    if (status === 404) return null;
+
+    const doc = json?.data;
+    return this.extractDocument(doc) || null;
+  }
+
+  async updateOutboxMessage(messageId, updates) {
+    // Fetch-then-merge to avoid losing fields on PUT (Mech replaces the document)
+    const existing = await this.getOutboxMessage(messageId);
+    if (!existing) return null;
+
+    const merged = {
+      ...existing,
+      ...updates,
+      updated_at: Date.now()
+    };
+
+    await this.request(`/nosql/documents/admp_outbox/${encodeURIComponent(messageId)}`, {
+      method: 'PUT',
+      body: { data: merged }
+    });
+
+    return merged;
+  }
+
+  async findOutboxMessageByMailgunId(mailgunId) {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_outbox&limit=1000');
+    const messages = this.extractDocuments(json);
+
+    for (const msg of messages) {
+      if (msg.mailgun_id === mailgunId) {
+        return msg;
+      }
+    }
+
+    return null;
+  }
+
+  async getOutboxMessages(agentId, options = {}) {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_outbox&limit=1000');
+    let messages = this.extractDocuments(json).filter(m => m.agent_id === agentId);
+
+    if (options.status) {
+      messages = messages.filter(m => m.status === options.status);
+    }
+
+    messages.sort((a, b) => b.created_at - a.created_at);
+
+    if (options.limit) {
+      messages = messages.slice(0, options.limit);
+    }
+
+    return messages;
+  }
 }
 
 export function createMechStorage() {
