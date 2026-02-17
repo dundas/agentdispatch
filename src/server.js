@@ -17,6 +17,7 @@ import { dirname, join } from 'path';
 import agentRoutes from './routes/agents.js';
 import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
+import outboxRoutes from './routes/outbox.js';
 import { requireApiKey } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
@@ -95,7 +96,9 @@ app.get('/api/stats', async (req, res) => {
 app.use('/api/agents', agentRoutes);
 app.use('/api/agents', inboxRoutes);
 app.use('/api/groups', groupRoutes);
+app.use('/api/agents', outboxRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
+app.use('/api', outboxRoutes);  // For /api/webhooks/mailgun
 
 // 404 handler
 app.use((req, res) => {
