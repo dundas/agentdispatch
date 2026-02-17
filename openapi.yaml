@@ -187,7 +187,23 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MessageEnvelope'
+              allOf:
+                - $ref: '#/components/schemas/MessageEnvelope'
+                - type: object
+                  properties:
+                    ephemeral:
+                      type: boolean
+                      default: false
+                      description: |
+                        When true, message body is purged from storage immediately on ack.
+                        Delivery metadata is preserved for audit trail.
+                    ttl:
+                      type: string
+                      description: |
+                        Ephemeral TTL — auto-purge after this duration regardless of ack status.
+                        Supports: "30m" (minutes), "1h" (hours), "7d" (days), or raw seconds as string.
+                        Combines with ephemeral: ack triggers early purge, TTL sets max lifetime.
+                      example: '24h'
       responses:
         '201':
           description: Message queued
@@ -382,6 +398,12 @@ paths:
                 $ref: '#/components/schemas/MessageStatus'
         '404':
           $ref: '#/components/responses/NotFound'
+        '410':
+          description: Message purged (ephemeral or TTL expired)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurgedMessageStatus'
 
   /api/agents/{agentId}/webhook:
     get:
@@ -988,8 +1010,11 @@ components:
           description: Message ID (auto-generated if omitted)
         type:
           type: string
-          enum: [task.request, task.result, task.error, event]
-          description: Message type
+          description: >
+            Message type (application-defined string). Common conventions include
+            task.request, task.result, task.error, event, and notification, but
+            any string value is accepted. Application-layer protocols define their
+            own type vocabularies in the message body.
         from:
           type: string
           description: Sender agent ID
@@ -1093,7 +1118,7 @@ components:
           type: string
         status:
           type: string
-          enum: [queued, leased, acked, failed, expired]
+          enum: [queued, leased, acked, failed, expired, purged]
         created_at:
           type: integer
           format: int64
@@ -1124,6 +1149,38 @@ components:
           type: integer
         failed:
           type: integer
+        purged:
+          type: integer
+
+    PurgedMessageStatus:
+      type: object
+      properties:
+        error:
+          type: string
+          example: MESSAGE_EXPIRED
+        message:
+          type: string
+          example: This message has been purged (ephemeral or TTL expired)
+        id:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [purged]
+        purged_at:
+          type: integer
+          format: int64
+        purge_reason:
+          type: string
+          enum: [acked, ttl_expired]
+        body:
+          type: 'null'
+          description: Always null — body has been purged
 
     SystemStats:
       type: object
@@ -1151,6 +1208,8 @@ components:
             failed:
               type: integer
             expired:
+              type: integer
+            purged:
               type: integer
 
     WebhookConfig:

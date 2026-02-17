@@ -300,6 +300,31 @@ export class MechStorage {
     return deleted;
   }
 
+  async purgeExpiredEphemeralMessages() {
+    const now = Date.now();
+    const { json } = await this.request('/nosql/documents?collection_name=admp_messages&limit=1000');
+    const messages = this.extractDocuments(json);
+
+    let purged = 0;
+
+    for (const message of messages) {
+      if (message.expires_at && message.expires_at < now && message.status !== 'purged') {
+        const purgedEnvelope = { ...message.envelope };
+        delete purgedEnvelope.body;
+
+        await this.updateMessage(message.id, {
+          status: 'purged',
+          envelope: purgedEnvelope,
+          purged_at: now,
+          purge_reason: 'ttl_expired'
+        });
+        purged++;
+      }
+    }
+
+    return purged;
+  }
+
   async getStats() {
     const { json: agentsJson } = await this.request('/nosql/documents?collection_name=admp_agents&limit=1000');
     const { json: messagesJson } = await this.request('/nosql/documents?collection_name=admp_messages&limit=1000');
@@ -321,7 +346,8 @@ export class MechStorage {
         leased: messages.filter(m => m.status === 'leased').length,
         acked: messages.filter(m => m.status === 'acked').length,
         failed: messages.filter(m => m.status === 'failed').length,
-        expired: messages.filter(m => m.status === 'expired').length
+        expired: messages.filter(m => m.status === 'expired').length,
+        purged: messages.filter(m => m.status === 'purged').length
       },
       groups: {
         total: groups.length

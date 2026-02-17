@@ -186,6 +186,30 @@ export class MemoryStorage {
     return deleted;
   }
 
+  async purgeExpiredEphemeralMessages() {
+    const now = Date.now();
+    let purged = 0;
+
+    for (const message of this.messages.values()) {
+      // Only purge messages with an expires_at that haven't been purged already
+      if (message.expires_at && message.expires_at < now && message.status !== 'purged') {
+        // Strip body from envelope
+        const purgedEnvelope = { ...message.envelope };
+        delete purgedEnvelope.body;
+
+        await this.updateMessage(message.id, {
+          status: 'purged',
+          envelope: purgedEnvelope,
+          purged_at: now,
+          purge_reason: 'ttl_expired'
+        });
+        purged++;
+      }
+    }
+
+    return purged;
+  }
+
   // ============ STATS ============
 
   async getStats() {
@@ -205,7 +229,8 @@ export class MemoryStorage {
         leased: messages.filter(m => m.status === 'leased').length,
         acked: messages.filter(m => m.status === 'acked').length,
         failed: messages.filter(m => m.status === 'failed').length,
-        expired: messages.filter(m => m.status === 'expired').length
+        expired: messages.filter(m => m.status === 'expired').length,
+        purged: messages.filter(m => m.status === 'purged').length
       },
       groups: {
         total: groups.length

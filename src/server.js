@@ -127,12 +127,14 @@ function startBackgroundJobs() {
       const leasesReclaimed = await inboxService.reclaimExpiredLeases();
       const messagesExpired = await storage.expireMessages();
       const messagesDeleted = await storage.cleanupExpiredMessages();
+      const ephemeralPurged = await inboxService.purgeExpiredEphemeralMessages();
 
-      if (leasesReclaimed > 0 || messagesExpired > 0 || messagesDeleted > 0) {
+      if (leasesReclaimed > 0 || messagesExpired > 0 || messagesDeleted > 0 || ephemeralPurged > 0) {
         logger.debug({
           leasesReclaimed,
           messagesExpired,
-          messagesDeleted
+          messagesDeleted,
+          ephemeralPurged
         }, 'Cleanup job completed');
       }
     } catch (error) {

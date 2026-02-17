@@ -43,9 +43,18 @@ async function sendSignedMessage(sender, recipientId, options = {}) {
     envelope.signature.sig = 'invalid-signature';
   }
 
+  // Build send body — envelope fields plus optional ephemeral/ttl
+  const sendBody = { ...envelope };
+  if (options.ephemeral !== undefined) {
+    sendBody.ephemeral = options.ephemeral;
+  }
+  if (options.ttl !== undefined) {
+    sendBody.ttl = options.ttl;
+  }
+
   const res = await request(app)
     .post(`/api/agents/${encodeURIComponent(recipientId)}/messages`)
-    .send(envelope);
+    .send(sendBody);
 
   return res;
 }
@@ -725,6 +734,184 @@ test('groups: invite-only groups reject join requests', async () => {
   ).send({});
 
   assert.equal(joinRes.status, 403);
+});
+
+// ============ EPHEMERAL MESSAGES ============
+
+test('ephemeral message: body purged on ack, metadata preserved', async () => {
+  const sender = await registerAgent('eph-sender');
+  const recipient = await registerAgent('eph-recipient');
+
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    subject: 'credentials',
+    body: { api_key: 'secret-key-12345' },
+    ephemeral: true
+  });
+
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Pull the message
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 200);
+  assert.equal(pullRes.body.message_id, messageId);
+  assert.deepEqual(pullRes.body.envelope.body, { api_key: 'secret-key-12345' });
+
+  // Ack the message
+  const ackRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages/${messageId}/ack`)
+    .send({ result: { status: 'processed' } });
+
+  assert.equal(ackRes.status, 200);
+
+  // Status should return 410 Gone with metadata but no body
+  const statusRes = await request(app)
+    .get(`/api/messages/${messageId}/status`);
+
+  assert.equal(statusRes.status, 410);
+  assert.equal(statusRes.body.error, 'MESSAGE_EXPIRED');
+  assert.equal(statusRes.body.status, 'purged');
+  assert.equal(statusRes.body.purge_reason, 'acked');
+  assert.equal(statusRes.body.from, sender.agent_id);
+  assert.equal(statusRes.body.subject, 'credentials');
+  assert.equal(statusRes.body.body, null);
+});
+
+test('ephemeral message with TTL: auto-purged after expiry', async () => {
+  const sender = await registerAgent('eph-ttl-sender');
+  const recipient = await registerAgent('eph-ttl-recipient');
+
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    subject: 'temp-data',
+    body: { token: 'expires-soon' },
+    ephemeral: true,
+    ttl: '1s'
+  });
+
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Wait for TTL to expire
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  // Trigger the purge sweep (simulating the background job)
+  const { inboxService } = await import('./services/inbox.service.js');
+  const purged = await inboxService.purgeExpiredEphemeralMessages();
+  assert.ok(purged >= 1);
+
+  // Status should return 410 Gone
+  const statusRes = await request(app)
+    .get(`/api/messages/${messageId}/status`);
+
+  assert.equal(statusRes.status, 410);
+  assert.equal(statusRes.body.error, 'MESSAGE_EXPIRED');
+  assert.equal(statusRes.body.purge_reason, 'ttl_expired');
+  assert.equal(statusRes.body.body, null);
+});
+
+test('ttl-only (without ephemeral) auto-purges after expiry', async () => {
+  const sender = await registerAgent('ttl-only-sender');
+  const recipient = await registerAgent('ttl-only-recipient');
+
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    subject: 'temp-notice',
+    body: { info: 'short-lived' },
+    ttl: '1s'
+  });
+
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Wait for TTL to expire
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  // Trigger purge sweep
+  const { inboxService } = await import('./services/inbox.service.js');
+  const purged = await inboxService.purgeExpiredEphemeralMessages();
+  assert.ok(purged >= 1);
+
+  // Status should return 410
+  const statusRes = await request(app)
+    .get(`/api/messages/${messageId}/status`);
+
+  assert.equal(statusRes.status, 410);
+  assert.equal(statusRes.body.purge_reason, 'ttl_expired');
+  assert.equal(statusRes.body.body, null);
+});
+
+test('expired ephemeral message cannot be pulled', async () => {
+  const sender = await registerAgent('eph-expired-sender');
+  const recipient = await registerAgent('eph-expired-recipient');
+
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    subject: 'secret-creds',
+    body: { key: 'should-not-be-readable' },
+    ephemeral: true,
+    ttl: '1s'
+  });
+
+  assert.equal(sendRes.status, 201);
+
+  // Wait for TTL to expire
+  await new Promise(resolve => setTimeout(resolve, 1500));
+
+  // Try to pull — should get 204 (empty), not the expired message
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 204);
+});
+
+test('rejects invalid TTL string', async () => {
+  const sender = await registerAgent('bad-ttl-sender');
+  const recipient = await registerAgent('bad-ttl-recipient');
+
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    subject: 'bad-ttl',
+    body: { test: true },
+    ttl: 'invalid'
+  });
+
+  assert.equal(sendRes.status, 400);
+  assert.equal(sendRes.body.error, 'SEND_FAILED');
+  assert.ok(sendRes.body.message.includes('Invalid TTL'));
+});
+
+test('non-ephemeral messages behave as before (backward compat)', async () => {
+  const sender = await registerAgent('non-eph-sender');
+  const recipient = await registerAgent('non-eph-recipient');
+
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    subject: 'normal-message',
+    body: { data: 'persistent' }
+  });
+
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Pull and ack
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 200);
+
+  const ackRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages/${messageId}/ack`)
+    .send({ result: { status: 'done' } });
+
+  assert.equal(ackRes.status, 200);
+
+  // Status should still return normally (not 410)
+  const statusRes = await request(app)
+    .get(`/api/messages/${messageId}/status`);
+
+  assert.equal(statusRes.status, 200);
+  assert.equal(statusRes.body.status, 'acked');
 });
 
 test('groups: owner can add member; non-member cannot add members', async () => {
