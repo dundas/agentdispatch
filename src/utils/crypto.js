@@ -108,3 +108,30 @@ export function validateTimestamp(timestamp) {
 
   return Math.abs(now - msgTime) <= FIVE_MINUTES;
 }
+
+/**
+ * Parse a human-readable TTL string into seconds
+ * Supports: "30m" (minutes), "1h" (hours), "7d" (days), "3600" (raw seconds)
+ * @param {string|number} ttl - TTL value
+ * @returns {number|null} seconds, or null if input is invalid/unparseable
+ */
+export function parseTTL(ttl) {
+  if (typeof ttl === 'number') return ttl > 0 ? ttl : null;
+  if (typeof ttl !== 'string') return null;
+
+  const match = ttl.match(/^(\d+)\s*(m|h|d|s)?$/i);
+  if (!match) return null;
+
+  const value = parseInt(match[1], 10);
+  if (value <= 0) return null;
+
+  const unit = (match[2] || 's').toLowerCase();
+
+  switch (unit) {
+    case 'm': return value * 60;
+    case 'h': return value * 3600;
+    case 'd': return value * 86400;
+    case 's': return value;
+    default: return value;
+  }
+}

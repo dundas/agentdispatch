@@ -5,7 +5,7 @@
 
 import { v4 as uuid } from 'uuid';
 import { storage } from '../storage/index.js';
-import { verifySignature, fromBase64, validateTimestamp } from '../utils/crypto.js';
+import { verifySignature, fromBase64, validateTimestamp, parseTTL } from '../utils/crypto.js';
 import { agentService } from './agent.service.js';
 import { webhookService } from './webhook.service.js';
 
@@ -45,6 +45,20 @@ export class InboxService {
       }
     }
 
+    // Parse ephemeral options (top-level on send body, not inside envelope)
+    // Note: `ephemeral` controls purge-on-ack behavior; `ttl` controls time-based
+    // auto-purge. Both are independent of envelope.ttl_sec which governs message
+    // expiration (queued → expired status). The ephemeral ttl purges the body but
+    // preserves the delivery log metadata.
+    const ephemeral = options.ephemeral || false;
+    let ephemeralTTLSec = null;
+    if (options.ttl) {
+      ephemeralTTLSec = parseTTL(options.ttl);
+      if (ephemeralTTLSec === null) {
+        throw new Error(`Invalid TTL value: ${options.ttl}`);
+      }
+    }
+
     // Create message record
     const message = {
       id: envelope.id || uuid(),
@@ -54,7 +68,10 @@ export class InboxService {
       status: 'queued',
       ttl_sec: envelope.ttl_sec || parseInt(process.env.MESSAGE_TTL_SEC) || 86400,
       lease_until: null,
-      attempts: 0
+      attempts: 0,
+      ephemeral,
+      ephemeral_ttl_sec: ephemeralTTLSec,
+      expires_at: ephemeralTTLSec ? Date.now() + (ephemeralTTLSec * 1000) : null
     };
 
     const created = await storage.createMessage(message);
@@ -106,7 +123,11 @@ export class InboxService {
     const visibility_timeout = options.visibility_timeout || 60;
 
     // Get available messages
-    const messages = await storage.getInbox(agentId, 'queued');
+    const now = Date.now();
+    let messages = await storage.getInbox(agentId, 'queued');
+
+    // Filter out messages past their ephemeral TTL (security: don't serve expired secrets)
+    messages = messages.filter(m => !m.expires_at || m.expires_at > now);
 
     if (messages.length === 0) {
       return null;
@@ -149,12 +170,26 @@ export class InboxService {
       throw new Error(`Message must be leased before ack (current status: ${message.status})`);
     }
 
-    // Mark as acked
-    await storage.updateMessage(messageId, {
-      status: 'acked',
-      result,
-      acked_at: Date.now()
-    });
+    // If ephemeral, ack and purge body in a single update (no extra fetch)
+    if (message.ephemeral) {
+      const purgedEnvelope = { ...message.envelope };
+      delete purgedEnvelope.body;
+
+      await storage.updateMessage(messageId, {
+        status: 'purged',
+        result,
+        acked_at: Date.now(),
+        envelope: purgedEnvelope,
+        purged_at: Date.now(),
+        purge_reason: 'acked'
+      });
+    } else {
+      await storage.updateMessage(messageId, {
+        status: 'acked',
+        result,
+        acked_at: Date.now()
+      });
+    }
 
     return true;
   }
@@ -224,6 +259,35 @@ export class InboxService {
   }
 
   /**
+   * Purge message body but preserve metadata (delivery log)
+   * @param {string} messageId
+   * @param {string} reason - Purge reason ('acked' | 'ttl_expired')
+   */
+  async purgeMessageBody(messageId, reason = 'acked') {
+    const message = await storage.getMessage(messageId);
+    if (!message) return;
+
+    // Strip body from envelope but keep metadata
+    const purgedEnvelope = { ...message.envelope };
+    delete purgedEnvelope.body;
+
+    await storage.updateMessage(messageId, {
+      status: 'purged',
+      envelope: purgedEnvelope,
+      purged_at: Date.now(),
+      purge_reason: reason
+    });
+  }
+
+  /**
+   * Purge ephemeral messages that have exceeded their TTL
+   * @returns {number} Number of messages purged
+   */
+  async purgeExpiredEphemeralMessages() {
+    return await storage.purgeExpiredEphemeralMessages();
+  }
+
+  /**
    * Get message status
    * @param {string} messageId
    * @returns {Object} Status info
@@ -233,6 +297,24 @@ export class InboxService {
 
     if (!message) {
       throw new Error(`Message ${messageId} not found`);
+    }
+
+    // Purged messages return limited info
+    if (message.status === 'purged') {
+      const err = new Error('MESSAGE_EXPIRED');
+      err.code = 'MESSAGE_EXPIRED';
+      err.statusCode = 410;
+      err.details = {
+        id: message.id,
+        from: message.from_agent_id,
+        to: message.to_agent_id,
+        subject: message.envelope?.subject,
+        status: 'purged',
+        purged_at: message.purged_at,
+        purge_reason: message.purge_reason,
+        body: null
+      };
+      throw err;
     }
 
     return {

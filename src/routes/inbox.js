@@ -16,14 +16,17 @@ const router = express.Router();
  */
 router.post('/:agentId/messages', async (req, res) => {
   try {
-    const envelope = req.body;
+    const { ephemeral, ttl, ...envelope } = req.body;
 
     // Ensure to field matches URL
     if (!envelope.to) {
       envelope.to = req.params.agentId;
     }
 
-    const message = await inboxService.send(envelope);
+    const message = await inboxService.send(envelope, {
+      ephemeral: ephemeral || false,
+      ttl: ttl || null
+    });
 
     res.status(201).json({
       message_id: message.id,
@@ -190,6 +193,14 @@ router.get('/messages/:messageId/status', async (req, res) => {
 
     res.json(status);
   } catch (error) {
+    if (error.code === 'MESSAGE_EXPIRED') {
+      return res.status(410).json({
+        error: 'MESSAGE_EXPIRED',
+        message: 'This message has been purged (ephemeral or TTL expired)',
+        ...error.details
+      });
+    }
+
     res.status(404).json({
       error: 'MESSAGE_NOT_FOUND',
       message: error.message
