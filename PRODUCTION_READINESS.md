@@ -1,8 +1,8 @@
 # Production Readiness Checklist - AgentDispatch ADMP Hub
 
 **Production URL:** https://agentdispatch.fly.dev
-**Date Generated:** 2026-02-17
-**Version:** 1.0.0
+**Date Updated:** 2026-02-17
+**Version:** 1.1.0 (added Outbox/Mailgun)
 **Status:** Pre-production review
 
 ---
@@ -246,6 +246,68 @@
 - [ ] When trust list is non-empty, only trusted agents can send messages
 - [ ] When trust list is empty, any agent can send messages (open by default)
 - [ ] Untrusted sender receives an error when attempting to send
+
+### 1.7 Outbox (Mailgun Email)
+
+**US-7.1: As an agent owner, I want to configure a custom domain for outbound email so that my agent can send emails transparently.**
+
+- [ ] `POST /api/agents/:agentId/outbox/domain` with `{ "domain": "example.com" }` creates domain config
+- [ ] Response includes DNS records required for verification (SPF, DKIM, MX)
+- [ ] Domain config stored with `status: "pending"` initially
+- [ ] Attempting to add a second domain returns 409 (already has domain)
+- [ ] Requires `MAILGUN_API_KEY` to be configured (returns error if missing)
+
+**US-7.2: As an agent owner, I want to verify my domain's DNS records so that emails are authenticated.**
+
+- [ ] `POST /api/agents/:agentId/outbox/domain/verify` triggers Mailgun DNS verification
+- [ ] Response includes updated `status` (`verified` or `pending`) and `mailgun_state`
+- [ ] DNS records refresh on each verification check
+- [ ] `verified_at` timestamp set when domain becomes active
+
+**US-7.3: As an agent owner, I want to view and manage my domain configuration.**
+
+- [ ] `GET /api/agents/:agentId/outbox/domain` returns current domain config, status, and DNS records
+- [ ] Returns 404 when no domain is configured
+- [ ] `DELETE /api/agents/:agentId/outbox/domain` removes domain config
+- [ ] DELETE returns 204 on success, 404 if no domain configured
+
+**US-7.4: As an agent, I want to send emails via Mailgun so that I can communicate externally.**
+
+- [ ] `POST /api/agents/:agentId/outbox/send` sends email through Mailgun API
+- [ ] Requires `to`, `subject`, and (`body` or `html`) fields
+- [ ] Rejects invalid email format in `to` field (400 INVALID_EMAIL)
+- [ ] Rejects when no domain configured (404)
+- [ ] Rejects when domain not verified (403)
+- [ ] From address constructed as `agentId@verified-domain`
+- [ ] Optional `from_name` sets display name (sanitized against header injection)
+- [ ] Returns 202 with queued outbox message record
+- [ ] Message includes `id`, `status`, `agent_id`, `to`, `from`, `subject`, `mailgun_id`
+
+**US-7.5: As an agent, I want email delivery to retry on failure with exponential backoff.**
+
+- [ ] Failed Mailgun sends are retried up to 3 times
+- [ ] Backoff schedule: 1s, 2s, 4s (exponential)
+- [ ] After max attempts, message status set to `failed` with error details
+- [ ] Successful send updates status to `sent` with `mailgun_id` and `sent_at`
+
+**US-7.6: As an agent, I want to view my sent messages and their delivery status.**
+
+- [ ] `GET /api/agents/:agentId/outbox/messages` lists sent messages (newest first)
+- [ ] Supports `?status=sent` and `?status=failed` query filters
+- [ ] Supports `?limit=N` for pagination
+- [ ] `GET /api/agents/:agentId/outbox/messages/:messageId` returns specific message details
+- [ ] Returns 404 for non-existent message
+- [ ] Returns 403 if message belongs to a different agent (cross-agent isolation)
+
+**US-7.7: As the system, I want to receive Mailgun delivery webhooks to track email status.**
+
+- [ ] `POST /api/webhooks/mailgun` accepts Mailgun delivery events
+- [ ] `delivered` event updates outbox message to `delivered` with timestamp
+- [ ] `failed`/`bounced` events update to `failed` with error reason
+- [ ] Webhook signature verification (HMAC-SHA256) when `MAILGUN_WEBHOOK_SIGNING_KEY` is set
+- [ ] Rejects requests with missing signature when signing key is configured (400)
+- [ ] Rejects requests with invalid signature (403)
+- [ ] Allows unsigned requests when signing key is not configured (dev mode)
 
 ---
 
@@ -661,7 +723,132 @@ curl -s -X DELETE https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-t
 
 - [ ] Webhook removed successfully
 
-### 2.10 Cleanup (Post-Smoke Test)
+### 2.10 Outbox (Mailgun Email)
+
+> **Prerequisites:** `MAILGUN_API_KEY`, `MAILGUN_API_URL`, and `MAILGUN_WEBHOOK_SIGNING_KEY` must be configured as Fly.io secrets. A verified domain must be available for testing.
+
+```bash
+# ST-35: Get domain config (expect 404 if not yet configured)
+curl -s -o /dev/null -w "%{http_code}" \
+  https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/domain
+# Expected: 404
+```
+
+- [ ] Domain config returns 404 when not configured
+
+```bash
+# ST-36: Configure domain (requires MAILGUN_API_KEY)
+curl -s -X POST https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/domain \
+  -H "Content-Type: application/json" \
+  -d '{ "domain": "YOUR_VERIFIED_DOMAIN" }' | jq .
+# Expected: 201 with domain config and DNS records
+```
+
+- [ ] Domain config created with `status: "pending"` (or `verified` if pre-configured in Mailgun)
+- [ ] Response includes `dns_records` array
+
+```bash
+# ST-37: Verify domain
+curl -s -X POST https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/domain/verify \
+  -H "Content-Type: application/json" | jq .
+# Expected: 200 with updated status
+```
+
+- [ ] Domain verification check succeeds
+- [ ] `mailgun_state` reflects current verification status
+
+```bash
+# ST-38: Get domain config
+curl -s https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/domain | jq .
+# Expected: 200 with full domain config
+```
+
+- [ ] Domain config returned with current status and DNS records
+
+```bash
+# ST-39: Send email (requires verified domain)
+curl -s -X POST https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/send \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "YOUR_TEST_EMAIL@example.com",
+    "subject": "ADMP Smoke Test",
+    "body": "Production smoke test email from AgentDispatch",
+    "html": "<p>Production smoke test email from <b>AgentDispatch</b></p>"
+  }' | jq .
+# Expected: 202 with queued outbox message
+```
+
+- [ ] Email send returns 202 with outbox message record
+- [ ] `from` address includes agent ID and verified domain
+- [ ] `status` is `queued` initially
+
+```bash
+# ST-40: Check outbox message status (replace OUTBOX_MSG_ID, wait ~5s for async send)
+sleep 5
+curl -s https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/messages/OUTBOX_MSG_ID | jq .
+# Expected: 200 with status "sent" and mailgun_id populated
+```
+
+- [ ] Outbox message status updated to `sent` after successful Mailgun delivery
+- [ ] `mailgun_id` populated
+- [ ] `sent_at` timestamp set
+
+```bash
+# ST-41: List outbox messages
+curl -s "https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/messages?limit=5" | jq .
+# Expected: 200 with messages array
+```
+
+- [ ] Outbox messages list returns sent messages
+- [ ] `count` matches number of messages returned
+
+```bash
+# ST-42: Send with invalid email (expect 400)
+curl -s -o /dev/null -w "%{http_code}" -X POST \
+  https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/send \
+  -H "Content-Type: application/json" \
+  -d '{ "to": "not-an-email", "subject": "test", "body": "test" }'
+# Expected: 400
+```
+
+- [ ] Invalid email format rejected with 400
+
+```bash
+# ST-43: Send without domain configured (use unconfigured agent)
+curl -s -o /dev/null -w "%{http_code}" -X POST \
+  https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-receiver/outbox/send \
+  -H "Content-Type: application/json" \
+  -d '{ "to": "test@example.com", "subject": "test", "body": "test" }'
+# Expected: 404
+```
+
+- [ ] Send without domain returns 404
+
+```bash
+# ST-44: Mailgun webhook endpoint (test with unsigned event)
+curl -s -X POST https://agentdispatch.fly.dev/api/webhooks/mailgun \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_data": {
+      "event": "delivered",
+      "message": { "headers": { "message-id": "<nonexistent@mailgun>" } }
+    }
+  }' | jq .
+# Expected: 200 (accepted) or 400 (if signing key is required)
+```
+
+- [ ] Webhook endpoint responds correctly based on signing key configuration
+
+```bash
+# ST-45: Remove domain config
+curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+  https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-test-sender/outbox/domain
+# Expected: 204
+```
+
+- [ ] Domain config removed successfully
+
+### 2.11 Cleanup (Post-Smoke Test)
 
 ```bash
 # ST-34: Deregister smoke test agents
@@ -729,7 +916,18 @@ curl -s -X DELETE https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-t
 - [ ] **Message Size Limits**: Group messages enforce 200-char subject and 1MB body limits
 - [ ] **TTL Parsing**: `parseTTL()` validates and sanitizes TTL input formats
 
-### 3.7 Security Gaps (Review Required)
+### 3.7 Outbox Security
+
+- [ ] **Webhook Signature Verification**: `MAILGUN_WEBHOOK_SIGNING_KEY` must be set for production
+- [ ] **Timing-Safe Comparison**: Webhook HMAC uses `crypto.timingSafeEqual` (not string equality)
+- [ ] **Signature Required**: When signing key is configured, requests without signature are rejected (400)
+- [ ] **From Header Sanitization**: `from_name` is sanitized to prevent RFC 5322 header injection
+- [ ] **Email Validation**: `to` field validated as email format before queueing
+- [ ] **Cross-Agent Isolation**: Agents can only view their own outbox messages (403 for others)
+- [ ] **Startup Warning**: Server logs warning when `MAILGUN_API_KEY` is set without `MAILGUN_WEBHOOK_SIGNING_KEY`
+- [ ] **Domain Verification**: Emails can only be sent from verified domains
+
+### 3.8 Security Gaps (Review Required)
 
 - [ ] **REVIEW**: `API_KEY_REQUIRED` is set to `false` in `fly.toml` -- consider enabling for production
 - [ ] **REVIEW**: `CORS_ORIGIN` is set to `*` -- restrict to known consumer origins
@@ -773,6 +971,9 @@ curl -s -X DELETE https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fsmoke-t
 | `MAX_MESSAGES_PER_AGENT` | [ ] Set | `1000` | Per-agent message limit |
 | `STORAGE_BACKEND` | [ ] Set | `mech` | Using Mech storage (external) |
 | `MECH_BASE_URL` | [ ] Set | `https://storage.mechdna.net` | External storage endpoint |
+| `MAILGUN_API_KEY` | [ ] Set | (secret) | Mailgun API key for outbound email |
+| `MAILGUN_API_URL` | [ ] Set | `https://api.mailgun.net/v3` | Mailgun API base URL (EU: `api.eu.mailgun.net`) |
+| `MAILGUN_WEBHOOK_SIGNING_KEY` | [ ] Set | (secret) | **Required for production** -- HMAC webhook verification |
 
 ### 4.3 Storage Backend
 
