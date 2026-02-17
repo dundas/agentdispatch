@@ -300,6 +300,9 @@ export class MechStorage {
     return deleted;
   }
 
+  // TODO: The limit=1000 cap applies to all message list operations (purge, expire,
+  // cleanup). Messages beyond the 1000th won't be processed in a single sweep.
+  // For high-volume deployments, implement pagination or storage-side filtering.
   async purgeExpiredEphemeralMessages() {
     const now = Date.now();
     const { json } = await this.request('/nosql/documents?collection_name=admp_messages&limit=1000');

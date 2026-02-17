@@ -46,11 +46,15 @@ export class InboxService {
     }
 
     // Parse ephemeral options (top-level on send body, not inside envelope)
+    // Note: `ephemeral` controls purge-on-ack behavior; `ttl` controls time-based
+    // auto-purge. Both are independent of envelope.ttl_sec which governs message
+    // expiration (queued → expired status). The ephemeral ttl purges the body but
+    // preserves the delivery log metadata.
     const ephemeral = options.ephemeral || false;
-    let ephemeralTTLSec = 0;
+    let ephemeralTTLSec = null;
     if (options.ttl) {
       ephemeralTTLSec = parseTTL(options.ttl);
-      if (ephemeralTTLSec <= 0) {
+      if (ephemeralTTLSec === null) {
         throw new Error(`Invalid TTL value: ${options.ttl}`);
       }
     }
@@ -66,7 +70,7 @@ export class InboxService {
       lease_until: null,
       attempts: 0,
       ephemeral,
-      ephemeral_ttl_sec: ephemeralTTLSec || null,
+      ephemeral_ttl_sec: ephemeralTTLSec,
       expires_at: ephemeralTTLSec ? Date.now() + (ephemeralTTLSec * 1000) : null
     };
 
@@ -166,18 +170,25 @@ export class InboxService {
       throw new Error(`Message must be leased before ack (current status: ${message.status})`);
     }
 
-    // Mark as acked
-    const ackUpdate = {
-      status: 'acked',
-      result,
-      acked_at: Date.now()
-    };
-
-    await storage.updateMessage(messageId, ackUpdate);
-
-    // If ephemeral, purge the message body immediately
+    // If ephemeral, ack and purge body in a single update (no extra fetch)
     if (message.ephemeral) {
-      await this.purgeMessageBody(messageId);
+      const purgedEnvelope = { ...message.envelope };
+      delete purgedEnvelope.body;
+
+      await storage.updateMessage(messageId, {
+        status: 'purged',
+        result,
+        acked_at: Date.now(),
+        envelope: purgedEnvelope,
+        purged_at: Date.now(),
+        purge_reason: 'acked'
+      });
+    } else {
+      await storage.updateMessage(messageId, {
+        status: 'acked',
+        result,
+        acked_at: Date.now()
+      });
     }
 
     return true;

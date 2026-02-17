@@ -1154,6 +1154,7 @@ components:
 
     PurgedMessageStatus:
       type: object
+      required: [error, id, status, purge_reason, purged_at, body]
       properties:
         error:
           type: string
