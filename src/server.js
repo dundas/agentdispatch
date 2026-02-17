@@ -33,6 +33,15 @@ config();
 const PORT = process.env.PORT || 8080;
 const CLEANUP_INTERVAL_MS = parseInt(process.env.CLEANUP_INTERVAL_MS) || 60000;
 
+// Warn about insecure outbox webhook configuration
+if (process.env.MAILGUN_API_KEY && !process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {
+  console.warn(
+    'WARNING: MAILGUN_API_KEY is set but MAILGUN_WEBHOOK_SIGNING_KEY is not. ' +
+    'Mailgun webhooks will accept unauthenticated requests. ' +
+    'Set MAILGUN_WEBHOOK_SIGNING_KEY for production use.'
+  );
+}
+
 // Initialize logger
 const logger = pino({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug'

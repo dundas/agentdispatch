@@ -7,7 +7,9 @@ import { Router } from 'express';
 import { authenticateAgent } from '../middleware/auth.js';
 import { outboxService } from '../services/outbox.service.js';
 
+// Agent-scoped routes (mounted at /api/agents, require authenticateAgent middleware)
 const router = Router();
+// Webhook routes (mounted at /api, no agent auth — called by Mailgun)
 const webhookRouter = Router();
 
 // ============ DOMAIN MANAGEMENT ============

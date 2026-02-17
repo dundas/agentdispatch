@@ -612,18 +612,22 @@ export class MechStorage {
   }
 
   async updateOutboxMessage(messageId, updates) {
-    const now = Date.now();
-    const patch = {
+    // Fetch-then-merge to avoid losing fields on PUT (Mech replaces the document)
+    const existing = await this.getOutboxMessage(messageId);
+    if (!existing) return null;
+
+    const merged = {
+      ...existing,
       ...updates,
-      updated_at: now
+      updated_at: Date.now()
     };
 
     await this.request(`/nosql/documents/admp_outbox/${encodeURIComponent(messageId)}`, {
       method: 'PUT',
-      body: { data: patch }
+      body: { data: merged }
     });
 
-    return this.getOutboxMessage(messageId);
+    return merged;
   }
 
   async findOutboxMessageByMailgunId(mailgunId) {
