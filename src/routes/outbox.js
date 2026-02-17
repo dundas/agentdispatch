@@ -8,6 +8,7 @@ import { authenticateAgent } from '../middleware/auth.js';
 import { outboxService } from '../services/outbox.service.js';
 
 const router = Router();
+const webhookRouter = Router();
 
 // ============ DOMAIN MANAGEMENT ============
 
@@ -115,6 +116,14 @@ router.post('/:agentId/outbox/send', authenticateAgent, async (req, res) => {
       });
     }
 
+    // Basic email format validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+      return res.status(400).json({
+        error: 'INVALID_EMAIL',
+        message: 'to field must be a valid email address'
+      });
+    }
+
     if (!subject) {
       return res.status(400).json({
         error: 'SUBJECT_REQUIRED',
@@ -155,7 +164,10 @@ router.get('/:agentId/outbox/messages', authenticateAgent, async (req, res) => {
   try {
     const options = {};
     if (req.query.status) options.status = req.query.status;
-    if (req.query.limit) options.limit = parseInt(req.query.limit, 10);
+    if (req.query.limit) {
+      const limit = parseInt(req.query.limit, 10);
+      if (limit > 0) options.limit = limit;
+    }
 
     const messages = await outboxService.getMessages(req.agent.agent_id, options);
 
@@ -205,7 +217,7 @@ router.get('/:agentId/outbox/messages/:messageId', authenticateAgent, async (req
  * POST /api/webhooks/mailgun
  * Receive delivery status updates from Mailgun
  */
-router.post('/webhooks/mailgun', async (req, res) => {
+webhookRouter.post('/webhooks/mailgun', async (req, res) => {
   try {
     const { signature, event_data } = req.body;
 
@@ -245,3 +257,4 @@ router.post('/webhooks/mailgun', async (req, res) => {
 });
 
 export default router;
+export { webhookRouter as outboxWebhookRouter };

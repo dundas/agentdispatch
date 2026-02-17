@@ -220,7 +220,9 @@ export class OutboxService {
 
     // Construct from address
     const fromLocal = agentId.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const displayName = from_name || agentId;
+    // Sanitize display name: strip characters that could corrupt RFC 5322 From header
+    const rawName = from_name || agentId;
+    const displayName = rawName.replace(/[<>\r\n"\\]/g, '').trim() || fromLocal;
     const fromAddress = `${displayName} <${fromLocal}@${domainConfig.domain}>`;
 
     // Create outbox message record
@@ -399,15 +401,6 @@ export class OutboxService {
       return storage.findOutboxMessageByMailgunId(mailgunId);
     }
 
-    // Fallback: iterate outboxMessages map if available (memory storage)
-    if (storage.outboxMessages) {
-      for (const msg of storage.outboxMessages.values()) {
-        if (msg.mailgun_id === mailgunId) {
-          return msg;
-        }
-      }
-    }
-
     return null;
   }
 
@@ -419,7 +412,14 @@ export class OutboxService {
     hmac.update(timestamp + token);
     const expected = hmac.digest('hex');
 
-    return signature === expected;
+    try {
+      return crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expected)
+      );
+    } catch {
+      return false;
+    }
   }
 
   // ============ MESSAGE QUERIES ============
