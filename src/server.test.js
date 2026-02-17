@@ -1329,6 +1329,61 @@ test('outbox send: constructs from address as agentId@domain', async () => {
   }
 });
 
+test('outbox send: from_name is sanitized to prevent header injection', async () => {
+  const agent = await registerAgent('outbox-from-sanitize');
+
+  await storage.setDomainConfig(agent.agent_id, {
+    domain: 'sanitize.example.com',
+    status: 'verified',
+    dns_records: [],
+    mailgun_state: 'active'
+  });
+
+  const origKey = process.env.MAILGUN_API_KEY;
+  process.env.MAILGUN_API_KEY = 'test-key-for-sanitize';
+
+  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
+  outboxService._mailgunRequest = async (path, opts) => {
+    if (path.includes('/messages') && opts?.method === 'POST') {
+      return { status: 200, ok: true, json: { id: '<sanitize-test@mailgun>' }, text: '' };
+    }
+    return originalRequest(path, opts);
+  };
+
+  try {
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+      .send({
+        to: 'dest@example.com',
+        subject: 'Sanitize test',
+        body: 'Testing from_name sanitization',
+        from_name: 'Evil<script>\r\nBcc: victim@evil.com'
+      });
+
+    assert.equal(res.status, 202);
+    // Dangerous characters should be stripped from the from field
+    assert.ok(!res.body.from.includes('<script>'), 'Should strip angle brackets');
+    assert.ok(!res.body.from.includes('\r'), 'Should strip carriage return');
+    assert.ok(!res.body.from.includes('\n'), 'Should strip newline');
+    assert.ok(res.body.from.includes('sanitize.example.com'));
+  } finally {
+    outboxService._mailgunRequest = originalRequest;
+    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
+    else process.env.MAILGUN_API_KEY = origKey;
+  }
+});
+
+test('outbox send: rejects invalid email address in to field', async () => {
+  const agent = await registerAgent('outbox-bad-email');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/send`)
+    .send({ to: 'not-an-email', subject: 'test', body: 'hello' });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'INVALID_EMAIL');
+});
+
 test('outbox send: Mailgun API failure triggers retry and eventually fails', async () => {
   const agent = await registerAgent('outbox-retry');
 

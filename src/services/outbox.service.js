@@ -395,12 +395,11 @@ export class OutboxService {
   }
 
   async _findOutboxMessageByMailgunId(mailgunId) {
-    // For memory storage, scan all outbox messages
-    // For production, this would use an indexed query
     if (typeof storage.findOutboxMessageByMailgunId === 'function') {
       return storage.findOutboxMessageByMailgunId(mailgunId);
     }
 
+    logger.warn('Storage backend does not implement findOutboxMessageByMailgunId — webhook status updates will be lost');
     return null;
   }
 
