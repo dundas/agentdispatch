@@ -1,0 +1,59 @@
+# AgentDispatch Brain - Fly.io Configuration
+#
+# Self-improving brain that monitors and enhances AgentDispatch
+
+app = 'agentdispatch-brain'
+primary_region = 'dfw'
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # Identity
+  BRAIN_NAME = "AgentDispatch Brain"
+  AGENT_ID = "agent://agentdispatch-brain"
+  PROJECT_PATH = "/app"
+
+  # Backend (AgentDispatch hub)
+  BACKEND_URL = "https://agentdispatch.fly.dev"
+  BACKEND_HEALTH_ENDPOINT = "/health"
+
+  # AgentDispatch Hub
+  ADMP_HUB_URL = "https://agentdispatch.fly.dev"
+
+  # Webhooks
+  WEBHOOK_PORT = "8080"
+  WEBHOOK_PATH = "/webhook"
+
+  # Tools
+  TELEPORTATION_RELAY_URL = "https://relay.teleportation.io"
+  THINKBROWSE_API_URL = "https://api.thinkbrowse.io"
+
+  # Self-Improvement
+  SELF_IMPROVEMENT_ENABLED = "true"
+  SELF_IMPROVEMENT_INTERVAL = "86400000"
+
+  # Intervals
+  HEARTBEAT_INTERVAL = "1800000"
+  HEALTH_CHECK_INTERVAL = "300000"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1

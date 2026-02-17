@@ -48,3 +48,6 @@ htmlcov/
 tmp/
 temp/
 *.tmp
+
+# Brain - secret key stored after registration
+brain/config.json
