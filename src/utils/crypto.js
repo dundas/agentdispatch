@@ -4,7 +4,7 @@
  */
 
 import nacl from 'tweetnacl';
-import { createHash } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 
 /**
  * Generate Ed25519 keypair
@@ -134,4 +134,109 @@ export function parseTTL(ttl) {
     case 's': return value;
     default: return value;
   }
+}
+
+// ============ IDENTITY DERIVATION ============
+// SeedID-compatible primitives using tweetnacl + node:crypto.
+// These produce output identical to @seedid/core's hkdf, generateEd25519KeyPair,
+// and generateDID. When SeedID fixes Node.js JSON import compatibility,
+// these can be replaced with direct @seedid/core imports.
+
+/** HKDF label for Agent Dispatch (matches @seedid/core LABEL_ADMP) */
+export const LABEL_ADMP = 'seedid/v1/admp';
+
+/**
+ * RFC 5869 HKDF-SHA256 (Extract + Expand)
+ * @param {Uint8Array} ikm - Input keying material
+ * @param {string} info - Context/label string
+ * @param {Object} opts
+ * @param {string} opts.salt - Salt string (default: 'seedid/v1')
+ * @param {number} opts.length - Output length in bytes (default: 32)
+ * @returns {Uint8Array}
+ */
+export function hkdfSha256(ikm, info, opts = {}) {
+  const salt = opts.salt ?? 'seedid/v1';
+  const length = opts.length ?? 32;
+
+  // HKDF-Extract: PRK = HMAC-SHA256(salt, IKM)
+  const prk = createHmac('sha256', Buffer.from(salt, 'utf8'))
+    .update(ikm)
+    .digest();
+
+  // HKDF-Expand
+  const infoBytes = Buffer.from(info, 'utf8');
+  const out = Buffer.alloc(length);
+  let t = Buffer.alloc(0);
+  let pos = 0;
+  let counter = 1;
+
+  while (pos < length) {
+    t = createHmac('sha256', prk)
+      .update(Buffer.concat([t, infoBytes, Buffer.from([counter])]))
+      .digest();
+    const take = Math.min(t.length, length - pos);
+    t.copy(out, pos, 0, take);
+    pos += take;
+    counter++;
+  }
+
+  return new Uint8Array(out);
+}
+
+/**
+ * Generate Ed25519 keypair from 32-byte seed (deterministic)
+ * Compatible with @seedid/core's generateEd25519KeyPair
+ * @param {Uint8Array} seed - 32-byte private key seed
+ * @returns {{ publicKey: Uint8Array, privateKey: Uint8Array }}
+ */
+export function keypairFromSeed(seed) {
+  if (seed.length !== 32) {
+    throw new Error(`Expected 32-byte seed, got ${seed.length}`);
+  }
+  const kp = nacl.sign.keyPair.fromSeed(seed);
+  return {
+    publicKey: kp.publicKey,
+    privateKey: kp.secretKey  // Return the 64-byte secretKey needed by nacl.sign.detached()
+  };
+}
+
+/**
+ * Generate a did:seed: DID from a public key
+ * Compatible with @seedid/core's generateDID
+ * @param {Uint8Array} publicKey
+ * @returns {string} did:seed:<hex-fingerprint>
+ */
+export function generateDID(publicKey) {
+  const hash = createHash('sha256').update(publicKey).digest();
+  const fingerprint = hash.subarray(0, 8).toString('hex');
+  return `did:seed:${fingerprint}`;
+}
+
+/**
+ * Sign an HTTP request for Signature header authentication
+ * @param {string} method - HTTP method
+ * @param {string} path - Request path
+ * @param {Object} headers - Request headers (must include 'host' and 'date')
+ * @param {Uint8Array} privateKey - Agent's 64-byte secret key (nacl format)
+ * @param {string} keyId - Agent ID or DID for the keyId field
+ * @param {string[]} signedHeaders - Headers to sign (default: request-target, host, date)
+ * @returns {string} Signature header value
+ */
+export function signRequest(method, path, headers, privateKey, keyId, signedHeaders) {
+  const hdrs = signedHeaders || ['(request-target)', 'host', 'date'];
+
+  const signingLines = hdrs.map(h => {
+    if (h === '(request-target)') {
+      return `(request-target): ${method.toLowerCase()} ${path}`;
+    }
+    const val = headers[h.toLowerCase()];
+    if (!val) throw new Error(`Missing header for signing: ${h}`);
+    return `${h.toLowerCase()}: ${val}`;
+  });
+  const signingString = signingLines.join('\n');
+
+  const message = Buffer.from(signingString, 'utf8');
+  const signature = nacl.sign.detached(message, privateKey);
+
+  return `keyId="${keyId}",algorithm="ed25519",headers="${hdrs.join(' ')}",signature="${toBase64(signature)}"`;
 }

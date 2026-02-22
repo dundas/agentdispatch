@@ -26,6 +26,7 @@
     "pino": "^8.16.2",
     "pino-http": "^8.5.1",
     "swagger-ui-express": "^5.0.1",
+    "@seedid/core": "file:../seedid/sdks/core",
     "tweetnacl": "^1.0.3",
     "uuid": "^9.0.1",
     "yamljs": "^0.3.0"

@@ -6,7 +6,7 @@
 
 import express from 'express';
 import { inboxService } from '../services/inbox.service.js';
-import { authenticateAgent } from '../middleware/auth.js';
+import { authenticateHttpSignature } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -65,7 +65,7 @@ router.post('/:agentId/messages', async (req, res) => {
  * POST /api/agents/:agentId/inbox/pull
  * Pull message from inbox (with lease)
  */
-router.post('/:agentId/inbox/pull', authenticateAgent, async (req, res) => {
+router.post('/:agentId/inbox/pull', authenticateHttpSignature, async (req, res) => {
   try {
     const { visibility_timeout } = req.body;
 
@@ -95,7 +95,7 @@ router.post('/:agentId/inbox/pull', authenticateAgent, async (req, res) => {
  * POST /api/agents/:agentId/messages/:messageId/ack
  * Acknowledge message
  */
-router.post('/:agentId/messages/:messageId/ack', authenticateAgent, async (req, res) => {
+router.post('/:agentId/messages/:messageId/ack', authenticateHttpSignature, async (req, res) => {
   try {
     const { result } = req.body;
 
@@ -121,7 +121,7 @@ router.post('/:agentId/messages/:messageId/ack', authenticateAgent, async (req, 
  * POST /api/agents/:agentId/messages/:messageId/nack
  * Negative acknowledge (requeue or extend lease)
  */
-router.post('/:agentId/messages/:messageId/nack', authenticateAgent, async (req, res) => {
+router.post('/:agentId/messages/:messageId/nack', authenticateHttpSignature, async (req, res) => {
   try {
     const { extend_sec, requeue } = req.body;
 
@@ -154,7 +154,7 @@ router.post('/:agentId/messages/:messageId/nack', authenticateAgent, async (req,
  * POST /api/agents/:agentId/messages/:messageId/reply
  * Reply to a message
  */
-router.post('/:agentId/messages/:messageId/reply', authenticateAgent, async (req, res) => {
+router.post('/:agentId/messages/:messageId/reply', authenticateHttpSignature, async (req, res) => {
   try {
     const envelope = req.body;
 
@@ -212,7 +212,7 @@ router.get('/messages/:messageId/status', async (req, res) => {
  * GET /api/agents/:agentId/inbox/stats
  * Get inbox statistics
  */
-router.get('/:agentId/inbox/stats', authenticateAgent, async (req, res) => {
+router.get('/:agentId/inbox/stats', authenticateHttpSignature, async (req, res) => {
   try {
     const stats = await inboxService.getStats(req.params.agentId);
 
@@ -229,7 +229,7 @@ router.get('/:agentId/inbox/stats', authenticateAgent, async (req, res) => {
  * POST /api/agents/:agentId/inbox/reclaim
  * Reclaim expired leases
  */
-router.post('/:agentId/inbox/reclaim', authenticateAgent, async (req, res) => {
+router.post('/:agentId/inbox/reclaim', authenticateHttpSignature, async (req, res) => {
   try {
     const reclaimed = await inboxService.reclaimExpiredLeases();
 

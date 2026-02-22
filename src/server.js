@@ -18,6 +18,7 @@ import agentRoutes from './routes/agents.js';
 import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
+import discoveryRoutes from './routes/discovery.js';
 import { requireApiKey } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
@@ -100,6 +101,9 @@ app.get('/api/stats', async (req, res) => {
     });
   }
 });
+
+// Discovery routes (mounted at root for .well-known and also /api for DID docs)
+app.use(discoveryRoutes);
 
 // Routes
 app.use('/api/agents', agentRoutes);

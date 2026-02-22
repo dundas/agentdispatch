@@ -4,21 +4,30 @@
  */
 
 import { v4 as uuid } from 'uuid';
-import { generateKeypair, toBase64 } from '../utils/crypto.js';
+import { generateKeypair, toBase64, fromBase64, hkdfSha256, LABEL_ADMP, keypairFromSeed, generateDID } from '../utils/crypto.js';
 import { storage } from '../storage/index.js';
 
 export class AgentService {
   /**
    * Register a new agent
+   *
+   * Supports three registration modes:
+   * - Legacy (default): Random keypair, returns secret_key
+   * - Seed-based: Deterministic keypair from HKDF derivation, requires tenant_id
+   * - Import: Client provides public_key, no secret_key returned
+   *
    * @param {Object} params
    * @param {string} params.agent_id - Optional custom agent ID
    * @param {string} params.agent_type - Type of agent (e.g., 'claude_session')
    * @param {Object} params.metadata - Agent metadata
    * @param {string} params.webhook_url - Optional webhook URL for push delivery
    * @param {string} params.webhook_secret - Optional webhook secret for signing
+   * @param {Uint8Array} params.seed - Master key bytes for seed-based registration
+   * @param {string} params.public_key - Base64 public key for import mode
+   * @param {string} params.tenant_id - Tenant ID (required for seed-based)
    * @returns {Object} Agent with keypair
    */
-  async register({ agent_id, agent_type = 'generic', metadata = {}, webhook_url, webhook_secret }) {
+  async register({ agent_id, agent_type = 'generic', metadata = {}, webhook_url, webhook_secret, seed, public_key, tenant_id }) {
     // Generate agent_id if not provided
     if (!agent_id) {
       agent_id = `agent://agent-${uuid()}`;
@@ -30,8 +39,42 @@ export class AgentService {
       throw new Error(`Agent ${agent_id} already exists`);
     }
 
-    // Generate Ed25519 keypair
-    const keypair = generateKeypair();
+    // Determine registration mode and derive keys
+    let publicKeyB64;
+    let secretKeyB64;
+    let registrationMode;
+    let derivationContext = null;
+    let did;
+
+    if (seed) {
+      // Mode 2: Seed-based (deterministic)
+      if (!tenant_id) {
+        throw new Error('tenant_id is required for seed-based registration');
+      }
+      registrationMode = 'seed';
+      derivationContext = `${LABEL_ADMP}:${tenant_id}:${agent_id}:ed25519:v1`;
+
+      // Derive per-agent key via HKDF
+      const derivedKey = hkdfSha256(seed, derivationContext, { length: 32 });
+      const keypair = keypairFromSeed(derivedKey);
+      publicKeyB64 = toBase64(keypair.publicKey);
+      secretKeyB64 = toBase64(keypair.privateKey);
+      did = generateDID(keypair.publicKey);
+    } else if (public_key) {
+      // Mode 3: Import (client-provided public key)
+      registrationMode = 'import';
+      publicKeyB64 = public_key;
+      // No secret key — client retains it
+      const pubBytes = fromBase64(public_key);
+      did = generateDID(pubBytes);
+    } else {
+      // Mode 1: Legacy (random keypair)
+      registrationMode = 'legacy';
+      const keypair = generateKeypair();
+      publicKeyB64 = toBase64(keypair.publicKey);
+      secretKeyB64 = toBase64(keypair.secretKey);
+      did = generateDID(keypair.publicKey);
+    }
 
     // Generate webhook secret if URL provided but no secret
     if (webhook_url && !webhook_secret) {
@@ -41,7 +84,14 @@ export class AgentService {
     const agent = {
       agent_id,
       agent_type,
-      public_key: toBase64(keypair.publicKey),
+      public_key: publicKeyB64,
+      did,
+      tenant_id: tenant_id || null,
+      registration_mode: registrationMode,
+      key_version: 1,
+      public_keys: [{ version: 1, public_key: publicKeyB64, created_at: Date.now(), active: true }],
+      verification_tier: 'unverified',
+      derivation_context: derivationContext,
       metadata,
       webhook_url: webhook_url || null,
       webhook_secret: webhook_secret || null,
@@ -57,10 +107,16 @@ export class AgentService {
 
     await storage.createAgent(agent);
 
-    return {
-      ...agent,
-      secret_key: toBase64(keypair.secretKey)  // Only returned on registration
+    const response = {
+      ...agent
     };
+
+    // Only return secret_key for legacy and seed-based modes
+    if (secretKeyB64) {
+      response.secret_key = secretKeyB64;
+    }
+
+    return response;
   }
 
   /**
@@ -273,6 +329,60 @@ export class AgentService {
     return {
       webhook_url: agent.webhook_url,
       webhook_configured: !!agent.webhook_url
+    };
+  }
+
+  /**
+   * Rotate key for seed-based agents
+   * @param {string} agentId
+   * @param {Object} params
+   * @param {Uint8Array} params.seed - Master key bytes
+   * @param {string} params.tenant_id - Tenant ID
+   * @returns {Object} Updated agent with new key info
+   */
+  async rotateKey(agentId, { seed, tenant_id }) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+
+    if (agent.registration_mode !== 'seed') {
+      throw new Error('Key rotation is only supported for seed-based agents');
+    }
+
+    if (!seed || !tenant_id) {
+      throw new Error('seed and tenant_id are required for key rotation');
+    }
+
+    const newVersion = (agent.key_version || 1) + 1;
+    const derivationContext = `${LABEL_ADMP}:${tenant_id}:${agentId}:ed25519:v${newVersion}`;
+
+    // Derive new key
+    const derivedKey = hkdfSha256(seed, derivationContext, { length: 32 });
+    const keypair = keypairFromSeed(derivedKey);
+    const newPublicKeyB64 = toBase64(keypair.publicKey);
+    const newDid = generateDID(keypair.publicKey);
+
+    // Mark old keys as inactive, add new key
+    const publicKeys = (agent.public_keys || []).map(k => ({ ...k, active: false }));
+    publicKeys.push({
+      version: newVersion,
+      public_key: newPublicKeyB64,
+      created_at: Date.now(),
+      active: true
+    });
+
+    const updated = await storage.updateAgent(agentId, {
+      public_key: newPublicKeyB64,
+      did: newDid,
+      key_version: newVersion,
+      public_keys: publicKeys,
+      derivation_context: derivationContext
+    });
+
+    return {
+      ...updated,
+      secret_key: toBase64(keypair.privateKey)
     };
   }
 }
