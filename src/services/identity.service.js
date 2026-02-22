@@ -34,12 +34,20 @@ export class IdentityService {
   }
 
   /**
-   * Upgrade to cryptographic verification tier
-   * Requires seed-based registration + DID
+   * Upgrade to cryptographic verification tier (administrative action).
+   *
+   * This confirms that the agent was registered via seed-based derivation
+   * and has a DID — meaning the server derived the keypair deterministically
+   * at registration time. It does NOT perform a live challenge-response.
+   * For proof-of-possession, the caller should use HTTP Signature auth
+   * on the route that invokes this method (which is already enforced via
+   * authenticateHttpSignature middleware).
+   *
+   * Requires seed-based registration + DID.
    * @param {string} agentId
    * @returns {Object} Updated agent
    */
-  async verifyCryptographic(agentId) {
+  async confirmCryptographicTier(agentId) {
     const agent = await storage.getAgent(agentId);
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);

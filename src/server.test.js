@@ -2315,19 +2315,18 @@ test('messages signed with old key still verify during rotation window', async (
 
   assert.equal(recipientRes.status, 201);
 
-  // Rotate sender's key — old key stays active in the public_keys array
-  // We need to make old key still active. Let's update storage directly
-  // to keep old key active (the service marks old as inactive, so we fix it)
+  // Rotate sender's key — old key stays in rotation window (deactivate_at set)
   const rotateRes = await request(app)
     .post(`/api/agents/${encodeURIComponent(senderAgentId)}/rotate-key`)
     .send({ seed: seedB64, tenant_id: tenantId });
 
   assert.equal(rotateRes.status, 200);
 
-  // Re-activate the old key to simulate rotation window
+  // Verify old key has deactivate_at set (rotation window)
   const senderAgent = await storage.getAgent(senderAgentId);
-  const updatedKeys = senderAgent.public_keys.map(k => ({ ...k, active: true }));
-  await storage.updateAgent(senderAgentId, { public_keys: updatedKeys });
+  const oldKey = senderAgent.public_keys.find(k => k.version === 1);
+  assert.ok(oldKey.deactivate_at, 'Old key should have deactivate_at for rotation window');
+  assert.ok(oldKey.deactivate_at > Date.now(), 'Old key deactivate_at should be in the future');
 
   // Send message signed with OLD key
   const envelope = {
@@ -2479,4 +2478,59 @@ test('GET identity returns current status', async () => {
   assert.equal(res.body.verification_tier, 'unverified');
   assert.equal(res.body.key_version, 1);
   assert.ok(res.body.public_key);
+});
+
+// ============ NEGATIVE PATH TESTS ============
+
+test('cryptographic verification fails for import-mode agents', async () => {
+  const keypair = nacl.sign.keyPair();
+  const pubKeyB64 = toBase64(keypair.publicKey);
+
+  const regRes = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: `agent://import-nocrypto-${Date.now()}`,
+      agent_type: 'test',
+      public_key: pubKeyB64
+    });
+
+  assert.equal(regRes.status, 201);
+  assert.equal(regRes.body.registration_mode, 'import');
+
+  const verifyRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(regRes.body.agent_id)}/verify/cryptographic`)
+    .send({});
+
+  assert.equal(verifyRes.status, 400);
+  assert.ok(verifyRes.body.message.includes('seed-based'));
+});
+
+test('DID document returns 404 for unknown agent', async () => {
+  const res = await request(app)
+    .get('/api/agents/agent%3A%2F%2Fnonexistent-did-agent/did.json');
+
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'AGENT_NOT_FOUND');
+});
+
+test('message with tampered signature is rejected', async () => {
+  const sender = await registerAgent('tamper-sender');
+  const recipient = await registerAgent('tamper-recv');
+
+  const res = await sendSignedMessage(sender, recipient.agent_id, {
+    mutateSignature: true
+  });
+
+  // Tampered signature returns 403 (invalid signature)
+  assert.ok([400, 403].includes(res.status), `Expected 400 or 403, got ${res.status}`);
+  assert.ok(res.body.message.toLowerCase().includes('signature'));
+});
+
+test('DID fingerprint is 32 hex chars (16 bytes)', async () => {
+  const agent = await registerAgent('did-length');
+
+  // DID format: did:seed:<32-hex-chars>
+  assert.ok(agent.did.startsWith('did:seed:'));
+  const fingerprint = agent.did.replace('did:seed:', '');
+  assert.equal(fingerprint.length, 32, 'DID fingerprint should be 32 hex chars (16 bytes)');
 });

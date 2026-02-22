@@ -5,7 +5,7 @@
 
 import express from 'express';
 import { storage } from '../storage/index.js';
-import { toBase64, fromBase64 } from '../utils/crypto.js';
+import { fromBase64 } from '../utils/crypto.js';
 
 const router = express.Router();
 
@@ -130,7 +130,7 @@ router.get('/api/agents/:agentId/did.json', async (req, res) => {
     // Include all active public keys if agent has multiple (rotation)
     if (agent.public_keys && agent.public_keys.length > 1) {
       didDocument.verificationMethod = agent.public_keys
-        .filter(k => k.active)
+        .filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
         .map((k, i) => ({
           id: `${did}#key-${k.version || i + 1}`,
           type: 'Ed25519VerificationKey2020',

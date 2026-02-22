@@ -376,7 +376,7 @@ router.post('/:agentId/verify/github', authenticateHttpSignature, async (req, re
  */
 router.post('/:agentId/verify/cryptographic', authenticateHttpSignature, async (req, res) => {
   try {
-    const agent = await identityService.verifyCryptographic(req.params.agentId);
+    const agent = await identityService.confirmCryptographicTier(req.params.agentId);
 
     res.json({
       agent_id: agent.agent_id,

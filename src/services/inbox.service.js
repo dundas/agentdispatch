@@ -53,9 +53,9 @@ export class InboxService {
         sender = await storage.getAgent(envelope.from);
       }
       if (sender) {
-        // Try primary key first, then check all active keys (rotation window)
+        // Try all active keys, including those within their rotation window
         const activeKeys = sender.public_keys
-          ? sender.public_keys.filter(k => k.active)
+          ? sender.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
           : [{ public_key: sender.public_key }];
 
         let valid = false;

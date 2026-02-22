@@ -41,6 +41,11 @@ export async function authenticateAgent(req, res, next) {
  * If Signature header present: verify Ed25519 signature
  * If absent: falls back to authenticateAgent (backward compatible)
  *
+ * Note on fallback: When no Signature header is present, the weaker legacy
+ * auth path (agent-lookup by URL param or X-Agent-ID header) is used. This
+ * is intentional for backward compatibility. To mandate HTTP Signatures,
+ * set the REQUIRE_HTTP_SIGNATURES=true env var (future enhancement).
+ *
  * Signature header format:
  *   Signature: keyId="<agent_id or DID>",algorithm="ed25519",
  *              headers="(request-target) host date",signature="<base64>"
@@ -79,6 +84,17 @@ export async function authenticateHttpSignature(req, res, next) {
       });
     }
 
+    // Authorization check: signing agent must match target agent in URL.
+    // Without this, Agent A could sign with their own valid key and
+    // perform actions on Agent B's resources.
+    const targetAgentId = req.params.agentId || req.params.agent_id;
+    if (targetAgentId && agent.agent_id !== targetAgentId) {
+      return res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'Signature keyId does not match target agent'
+      });
+    }
+
     // Build canonical signing string
     const headersToSign = params.headers
       ? params.headers.split(' ')
@@ -99,7 +115,7 @@ export async function authenticateHttpSignature(req, res, next) {
     const message = Buffer.from(signingString, 'utf8');
 
     const activeKeys = agent.public_keys
-      ? agent.public_keys.filter(k => k.active)
+      ? agent.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
       : [{ public_key: agent.public_key }];
 
     let verified = false;

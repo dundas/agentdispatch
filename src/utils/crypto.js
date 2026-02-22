@@ -208,7 +208,7 @@ export function keypairFromSeed(seed) {
  */
 export function generateDID(publicKey) {
   const hash = createHash('sha256').update(publicKey).digest();
-  const fingerprint = hash.subarray(0, 8).toString('hex');
+  const fingerprint = hash.subarray(0, 16).toString('hex');
   return `did:seed:${fingerprint}`;
 }
 

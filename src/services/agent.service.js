@@ -363,8 +363,15 @@ export class AgentService {
     const newPublicKeyB64 = toBase64(keypair.publicKey);
     const newDid = generateDID(keypair.publicKey);
 
-    // Mark old keys as inactive, add new key
-    const publicKeys = (agent.public_keys || []).map(k => ({ ...k, active: false }));
+    // Keep old keys active during rotation window (24 hours) so in-flight
+    // messages signed with the previous key still verify. After the window,
+    // auth middleware and inbox verification will stop accepting them.
+    const ROTATION_WINDOW_MS = 24 * 60 * 60 * 1000;
+    const publicKeys = (agent.public_keys || []).map(k => ({
+      ...k,
+      active: false,
+      deactivate_at: k.active ? Date.now() + ROTATION_WINDOW_MS : k.deactivate_at
+    }));
     publicKeys.push({
       version: newVersion,
       public_key: newPublicKeyB64,
