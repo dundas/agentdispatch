@@ -20,25 +20,52 @@ export class InboxService {
     // Validate envelope
     this.validateEnvelope(envelope);
 
-    // Extract recipient agent ID
-    const toAgentId = envelope.to;
-
-    // Check recipient exists
-    const recipient = await storage.getAgent(toAgentId);
-    if (!recipient) {
-      throw new Error(`Recipient agent ${toAgentId} not found`);
+    // Resolve recipient — supports both agent:// IDs and did:seed: URIs
+    let recipient;
+    if (envelope.to.startsWith('did:seed:')) {
+      recipient = await storage.getAgentByDid(envelope.to);
+      if (!recipient) {
+        throw new Error(`Recipient DID ${envelope.to} not found`);
+      }
+    } else {
+      recipient = await storage.getAgent(envelope.to);
+      if (!recipient) {
+        throw new Error(`Recipient agent ${envelope.to} not found`);
+      }
     }
 
-    if (recipient.trusted_agents && recipient.trusted_agents.length > 0 && !recipient.trusted_agents.includes(envelope.from)) {
-      throw new Error(`Sender ${envelope.from} is not trusted by recipient ${toAgentId}`);
+    const toAgentId = recipient.agent_id;
+
+    // Check trust list using both agent_id and DID of sender
+    if (recipient.trusted_agents && recipient.trusted_agents.length > 0) {
+      const senderAllowed = recipient.trusted_agents.includes(envelope.from);
+      if (!senderAllowed) {
+        throw new Error(`Sender ${envelope.from} is not trusted by recipient ${toAgentId}`);
+      }
     }
 
-    // Verify signature if sender public key is available
+    // Resolve sender for signature verification — supports both agent:// and did:seed:
     if (options.verify_signature !== false) {
-      const sender = await storage.getAgent(envelope.from);
+      let sender;
+      if (envelope.from.startsWith('did:seed:')) {
+        sender = await storage.getAgentByDid(envelope.from);
+      } else {
+        sender = await storage.getAgent(envelope.from);
+      }
       if (sender) {
-        const publicKey = fromBase64(sender.public_key);
-        const valid = verifySignature(envelope, publicKey);
+        // Try all active keys, including those within their rotation window
+        const activeKeys = sender.public_keys
+          ? sender.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
+          : [{ public_key: sender.public_key }];
+
+        let valid = false;
+        for (const keyEntry of activeKeys) {
+          const pubKey = fromBase64(keyEntry.public_key);
+          if (verifySignature(envelope, pubKey)) {
+            valid = true;
+            break;
+          }
+        }
         if (!valid) {
           throw new Error('Invalid message signature');
         }
@@ -363,13 +390,15 @@ export class InboxService {
       throw new Error(`Unsupported ADMP version: ${envelope.version}`);
     }
 
-    // Validate agent URIs
-    if (!envelope.from.startsWith('agent://')) {
-      throw new Error('Invalid from URI (must start with agent://)');
+    // Validate agent URIs — accept both agent:// and did:seed: schemes
+    const validScheme = (uri) => uri.startsWith('agent://') || uri.startsWith('did:seed:');
+
+    if (!validScheme(envelope.from)) {
+      throw new Error('Invalid from URI (must start with agent:// or did:seed:)');
     }
 
-    if (!envelope.to.startsWith('agent://')) {
-      throw new Error('Invalid to URI (must start with agent://)');
+    if (!validScheme(envelope.to)) {
+      throw new Error('Invalid to URI (must start with agent:// or did:seed:)');
     }
 
     // Validate timestamp

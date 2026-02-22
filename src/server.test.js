@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import http from 'node:http';
+import crypto from 'node:crypto';
+import nacl from 'tweetnacl';
 
 import app from './server.js';
-import { fromBase64, signMessage } from './utils/crypto.js';
+import { fromBase64, toBase64, signMessage, signRequest, hkdfSha256, LABEL_ADMP, keypairFromSeed, generateDID } from './utils/crypto.js';
 import { createMechStorage } from './storage/mech.js';
 import { requireApiKey } from './middleware/auth.js';
 import { webhookService } from './services/webhook.service.js';
@@ -1798,4 +1800,737 @@ test('outbox webhook: allows requests when signing key is NOT set (dev mode)', a
     if (origKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
     else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = origKey;
   }
+});
+
+// ============ SEEDID REGISTRATION TESTS ============
+
+test('legacy registration returns secret_key, public_key, and DID (backward compat)', async () => {
+  const agent = await registerAgent('legacy-compat');
+
+  assert.ok(agent.secret_key, 'Legacy registration should return secret_key');
+  assert.ok(agent.public_key, 'Legacy registration should return public_key');
+  assert.ok(agent.did, 'Legacy registration should return DID');
+  assert.ok(agent.did.startsWith('did:seed:'), 'DID should start with did:seed:');
+  assert.equal(agent.registration_mode, 'legacy');
+  assert.equal(agent.verification_tier, 'unverified');
+  assert.equal(agent.key_version, 1);
+});
+
+test('seed-based registration: same seed+tenant+agent = same keypair (deterministic)', async () => {
+  const seed = crypto.randomBytes(32);
+  const seedB64 = toBase64(seed);
+  const tenantId = `tenant-determ-${Date.now()}`;
+  const agentId = `agent://seed-determ-${Date.now()}`;
+
+  // Create tenant first
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
+
+  const res1 = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: agentId,
+      agent_type: 'test',
+      seed: seedB64,
+      tenant_id: tenantId
+    });
+
+  assert.equal(res1.status, 201);
+  assert.equal(res1.body.registration_mode, 'seed');
+  assert.ok(res1.body.secret_key, 'Seed-based should return secret_key');
+  assert.ok(res1.body.did);
+
+  // Re-derive locally to confirm determinism
+  const context = `${LABEL_ADMP}:${tenantId}:${agentId}:ed25519:v1`;
+  const derivedKey = hkdfSha256(seed, context, { length: 32 });
+  const kp = keypairFromSeed(derivedKey);
+
+  assert.equal(res1.body.public_key, toBase64(kp.publicKey),
+    'Server-derived public key should match local derivation');
+});
+
+test('seed-based registration: different tenant = different keypair (isolation)', async () => {
+  const seed = crypto.randomBytes(32);
+  const seedB64 = toBase64(seed);
+  const agentSuffix = `iso-${Date.now()}`;
+
+  const tenantA = `tenant-a-${Date.now()}`;
+  const tenantB = `tenant-b-${Date.now()}`;
+
+  await storage.createTenant({ tenant_id: tenantA, name: tenantA, metadata: {} });
+  await storage.createTenant({ tenant_id: tenantB, name: tenantB, metadata: {} });
+
+  const resA = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: `agent://agent-a-${agentSuffix}`,
+      agent_type: 'test',
+      seed: seedB64,
+      tenant_id: tenantA
+    });
+
+  const resB = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: `agent://agent-b-${agentSuffix}`,
+      agent_type: 'test',
+      seed: seedB64,
+      tenant_id: tenantB
+    });
+
+  assert.equal(resA.status, 201);
+  assert.equal(resB.status, 201);
+  assert.notEqual(resA.body.public_key, resB.body.public_key,
+    'Different tenants should yield different keys from same seed');
+  assert.notEqual(resA.body.did, resB.body.did,
+    'Different tenants should yield different DIDs');
+});
+
+test('seed-based registration requires tenant_id', async () => {
+  const seed = crypto.randomBytes(32);
+  const seedB64 = toBase64(seed);
+
+  const res = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: `agent://no-tenant-${Date.now()}`,
+      agent_type: 'test',
+      seed: seedB64
+    });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.message.includes('tenant_id'));
+});
+
+test('import mode: stores provided key, no secret_key in response, DID generated', async () => {
+  const kp = nacl.sign.keyPair();
+  const pubKeyB64 = toBase64(kp.publicKey);
+
+  const res = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: `agent://import-${Date.now()}`,
+      agent_type: 'test',
+      public_key: pubKeyB64
+    });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.body.registration_mode, 'import');
+  assert.equal(res.body.public_key, pubKeyB64);
+  assert.ok(!res.body.secret_key, 'Import mode should NOT return secret_key');
+  assert.ok(res.body.did, 'Import mode should generate DID');
+  assert.ok(res.body.did.startsWith('did:seed:'));
+});
+
+// ============ TENANT TESTS ============
+
+test('tenant CRUD: create, get, list agents, delete', async () => {
+  const origRequired = process.env.API_KEY_REQUIRED;
+  const origKey = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-tenant-key';
+
+  try {
+    const tenantId = `tenant-crud-${Date.now()}`;
+
+    // Create
+    const createRes = await request(app)
+      .post('/api/agents/tenants')
+      .set('x-api-key', 'test-tenant-key')
+      .send({ tenant_id: tenantId, name: 'Test Tenant', metadata: { plan: 'pro' } });
+
+    assert.equal(createRes.status, 201);
+    assert.equal(createRes.body.tenant_id, tenantId);
+    assert.equal(createRes.body.name, 'Test Tenant');
+
+    // Get
+    const getRes = await request(app)
+      .get(`/api/agents/tenants/${tenantId}`)
+      .set('x-api-key', 'test-tenant-key');
+
+    assert.equal(getRes.status, 200);
+    assert.equal(getRes.body.tenant_id, tenantId);
+
+    // Register agent under tenant
+    const seed = crypto.randomBytes(32);
+    const agentRes = await request(app)
+      .post('/api/agents/register')
+      .send({
+        agent_id: `agent://tenant-agent-${Date.now()}`,
+        agent_type: 'test',
+        seed: toBase64(seed),
+        tenant_id: tenantId
+      });
+
+    assert.equal(agentRes.status, 201);
+
+    // List agents by tenant
+    const listRes = await request(app)
+      .get(`/api/agents/tenants/${tenantId}/agents`)
+      .set('x-api-key', 'test-tenant-key');
+
+    assert.equal(listRes.status, 200);
+    assert.ok(listRes.body.agents.length >= 1);
+    assert.ok(listRes.body.agents.some(a => a.agent_id === agentRes.body.agent_id));
+
+    // Delete
+    const delRes = await request(app)
+      .delete(`/api/agents/tenants/${tenantId}`)
+      .set('x-api-key', 'test-tenant-key');
+
+    assert.equal(delRes.status, 204);
+  } finally {
+    if (origRequired === undefined) delete process.env.API_KEY_REQUIRED;
+    else process.env.API_KEY_REQUIRED = origRequired;
+    if (origKey === undefined) delete process.env.MASTER_API_KEY;
+    else process.env.MASTER_API_KEY = origKey;
+  }
+});
+
+test('duplicate tenant returns 409', async () => {
+  const origRequired = process.env.API_KEY_REQUIRED;
+  const origKey = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-dup-key';
+
+  try {
+    const tenantId = `tenant-dup-${Date.now()}`;
+
+    const first = await request(app)
+      .post('/api/agents/tenants')
+      .set('x-api-key', 'test-dup-key')
+      .send({ tenant_id: tenantId, name: 'Dup Tenant' });
+
+    assert.equal(first.status, 201);
+
+    const second = await request(app)
+      .post('/api/agents/tenants')
+      .set('x-api-key', 'test-dup-key')
+      .send({ tenant_id: tenantId, name: 'Dup Tenant Again' });
+
+    assert.equal(second.status, 409);
+    assert.equal(second.body.error, 'TENANT_EXISTS');
+  } finally {
+    if (origRequired === undefined) delete process.env.API_KEY_REQUIRED;
+    else process.env.API_KEY_REQUIRED = origRequired;
+    if (origKey === undefined) delete process.env.MASTER_API_KEY;
+    else process.env.MASTER_API_KEY = origKey;
+  }
+});
+
+test('tenant routes require API key when API_KEY_REQUIRED is true', async () => {
+  const origRequired = process.env.API_KEY_REQUIRED;
+  const origKey = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-req-key';
+
+  try {
+    // POST without API key
+    const createRes = await request(app)
+      .post('/api/agents/tenants')
+      .send({ tenant_id: 'should-fail' });
+
+    assert.equal(createRes.status, 401);
+    assert.equal(createRes.body.error, 'API_KEY_REQUIRED');
+
+    // GET without API key
+    const getRes = await request(app)
+      .get('/api/agents/tenants/whatever');
+
+    assert.equal(getRes.status, 401);
+
+    // DELETE without API key
+    const delRes = await request(app)
+      .delete('/api/agents/tenants/whatever');
+
+    assert.equal(delRes.status, 401);
+  } finally {
+    if (origRequired === undefined) delete process.env.API_KEY_REQUIRED;
+    else process.env.API_KEY_REQUIRED = origRequired;
+    if (origKey === undefined) delete process.env.MASTER_API_KEY;
+    else process.env.MASTER_API_KEY = origKey;
+  }
+});
+
+// ============ DID MESSAGING TESTS ============
+
+test('send message to agent by DID URI works', async () => {
+  const sender = await registerAgent('did-msg-sender');
+  const recipient = await registerAgent('did-msg-recipient');
+
+  // Get recipient's DID
+  const recipientAgent = await storage.getAgent(recipient.agent_id);
+  assert.ok(recipientAgent.did, 'Recipient should have a DID');
+
+  const res = await sendSignedMessage(sender, recipientAgent.did, {
+    subject: 'did-delivery',
+    body: { hello: 'via-did' }
+  });
+
+  assert.equal(res.status, 201);
+  assert.ok(res.body.message_id);
+});
+
+test('send from DID URI resolves sender correctly', async () => {
+  const sender = await registerAgent('did-from-sender');
+  const recipient = await registerAgent('did-from-recipient');
+
+  const senderAgent = await storage.getAgent(sender.agent_id);
+  assert.ok(senderAgent.did);
+
+  // Build envelope with DID as from
+  const envelope = {
+    version: '1.0',
+    id: `msg-did-from-${Date.now()}`,
+    type: 'task.request',
+    from: senderAgent.did,
+    to: recipient.agent_id,
+    subject: 'from-did',
+    body: { test: 'did-from' },
+    timestamp: new Date().toISOString(),
+    ttl_sec: 3600
+  };
+
+  const secretKey = fromBase64(sender.secret_key);
+  envelope.signature = signMessage(envelope, secretKey);
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+    .send(envelope);
+
+  assert.equal(res.status, 201);
+  assert.ok(res.body.message_id);
+});
+
+// ============ HTTP SIGNATURE TESTS ============
+
+test('valid HTTP signature passes auth', async () => {
+  const agent = await registerAgent('httpsig-valid');
+  const secretKey = fromBase64(agent.secret_key);
+  const agentId = agent.agent_id;
+  const path = `/api/agents/${encodeURIComponent(agentId)}`;
+
+  const headers = {
+    host: '127.0.0.1',
+    date: new Date().toUTCString()
+  };
+
+  const sigHeader = signRequest('GET', path, headers, secretKey, agentId);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', headers.date)
+    .set('signature', sigHeader);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.agent_id, agentId);
+});
+
+test('invalid HTTP signature returns 403', async () => {
+  const agent = await registerAgent('httpsig-invalid');
+  const agentId = agent.agent_id;
+  const path = `/api/agents/${encodeURIComponent(agentId)}`;
+
+  // Create a bogus signature with a different key
+  const bogusKeyPair = nacl.sign.keyPair();
+  const headers = {
+    host: '127.0.0.1',
+    date: new Date().toUTCString()
+  };
+
+  const sigHeader = signRequest('GET', path, headers, bogusKeyPair.secretKey, agentId);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', headers.date)
+    .set('signature', sigHeader);
+
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error, 'SIGNATURE_INVALID');
+});
+
+test('no Signature header falls back to legacy auth (backward compat)', async () => {
+  const agent = await registerAgent('httpsig-fallback');
+  const agentId = agent.agent_id;
+
+  // No Signature header, no X-Agent-ID — relies on URL param
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agentId)}`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.agent_id, agentId);
+});
+
+test('HTTP signature keyId can be DID', async () => {
+  const agent = await registerAgent('httpsig-did');
+  const secretKey = fromBase64(agent.secret_key);
+  const agentId = agent.agent_id;
+
+  const agentRecord = await storage.getAgent(agentId);
+  const did = agentRecord.did;
+  assert.ok(did, 'Agent should have a DID');
+
+  const path = `/api/agents/${encodeURIComponent(agentId)}`;
+  const headers = {
+    host: '127.0.0.1',
+    date: new Date().toUTCString()
+  };
+
+  // Sign using DID as keyId
+  const sigHeader = signRequest('GET', path, headers, secretKey, did);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', headers.date)
+    .set('signature', sigHeader);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.agent_id, agentId);
+});
+
+// ============ DISCOVERY TESTS ============
+
+test('/.well-known/agent-keys.json lists registered agents with DIDs', async () => {
+  const agent = await registerAgent('discovery-agent');
+
+  const res = await request(app)
+    .get('/.well-known/agent-keys.json');
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.body.keys));
+  assert.ok(res.body.keys.length >= 1);
+
+  const found = res.body.keys.find(k => k.kid === agent.agent_id);
+  assert.ok(found, 'Registered agent should appear in key directory');
+  assert.ok(found.did, 'Agent should have DID in directory');
+  assert.equal(found.kty, 'OKP');
+  assert.equal(found.crv, 'Ed25519');
+  assert.ok(found.x, 'Should have public key');
+  assert.ok(found.verification_tier);
+});
+
+test('/api/agents/:id/did.json returns valid DID document with service endpoint', async () => {
+  const agent = await registerAgent('discovery-did-doc');
+
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/did.json`);
+
+  assert.equal(res.status, 200);
+
+  const doc = res.body;
+  assert.ok(doc['@context']);
+  assert.ok(doc.id.startsWith('did:seed:'));
+  assert.ok(Array.isArray(doc.verificationMethod));
+  assert.equal(doc.verificationMethod.length, 1);
+  assert.equal(doc.verificationMethod[0].type, 'Ed25519VerificationKey2020');
+  assert.ok(doc.verificationMethod[0].publicKeyMultibase, 'Should use publicKeyMultibase');
+  assert.ok(doc.verificationMethod[0].publicKeyMultibase.startsWith('z'), 'Multibase should start with z');
+  assert.ok(!doc.verificationMethod[0].publicKeyBase64, 'Should NOT use publicKeyBase64');
+
+  // Check service endpoint
+  assert.ok(Array.isArray(doc.service));
+  const admpService = doc.service.find(s => s.type === 'ADMPInbox');
+  assert.ok(admpService, 'Should have ADMPInbox service');
+  assert.ok(admpService.serviceEndpoint.includes(agent.agent_id));
+
+  // Check authentication
+  assert.ok(Array.isArray(doc.authentication));
+  assert.ok(doc.authentication.length >= 1);
+});
+
+test('DID document returns 404 for unknown agent', async () => {
+  const res = await request(app)
+    .get('/api/agents/agent%3A%2F%2Fnon-existent-agent/did.json');
+
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'AGENT_NOT_FOUND');
+});
+
+// ============ KEY ROTATION TESTS ============
+
+test('key rotation increments version and generates new keypair', async () => {
+  const seed = crypto.randomBytes(32);
+  const seedB64 = toBase64(seed);
+  const tenantId = `tenant-rotate-${Date.now()}`;
+  const agentId = `agent://rotate-${Date.now()}`;
+
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
+
+  const regRes = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: agentId,
+      agent_type: 'test',
+      seed: seedB64,
+      tenant_id: tenantId
+    });
+
+  assert.equal(regRes.status, 201);
+  const originalPubKey = regRes.body.public_key;
+  assert.equal(regRes.body.key_version, 1);
+
+  // Rotate
+  const rotateRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agentId)}/rotate-key`)
+    .send({ seed: seedB64, tenant_id: tenantId });
+
+  assert.equal(rotateRes.status, 200);
+  assert.equal(rotateRes.body.key_version, 2);
+  assert.notEqual(rotateRes.body.public_key, originalPubKey, 'New key should differ');
+  assert.ok(rotateRes.body.did, 'New DID should be generated');
+  assert.ok(rotateRes.body.secret_key, 'Should return new secret_key');
+});
+
+test('messages signed with old key still verify during rotation window', async () => {
+  const seed = crypto.randomBytes(32);
+  const seedB64 = toBase64(seed);
+  const tenantId = `tenant-rotwin-${Date.now()}`;
+  const senderAgentId = `agent://rotwin-sender-${Date.now()}`;
+  const recipientAgentId = `agent://rotwin-recv-${Date.now()}`;
+
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
+
+  // Register sender with seed
+  const senderRes = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: senderAgentId,
+      agent_type: 'test',
+      seed: seedB64,
+      tenant_id: tenantId
+    });
+
+  assert.equal(senderRes.status, 201);
+  const oldSecretKey = senderRes.body.secret_key;
+
+  // Register recipient
+  const recipientRes = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: recipientAgentId,
+      agent_type: 'test'
+    });
+
+  assert.equal(recipientRes.status, 201);
+
+  // Rotate sender's key — old key stays in rotation window (deactivate_at set)
+  const rotateRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(senderAgentId)}/rotate-key`)
+    .send({ seed: seedB64, tenant_id: tenantId });
+
+  assert.equal(rotateRes.status, 200);
+
+  // Verify old key has deactivate_at set (rotation window)
+  const senderAgent = await storage.getAgent(senderAgentId);
+  const oldKey = senderAgent.public_keys.find(k => k.version === 1);
+  assert.ok(oldKey.deactivate_at, 'Old key should have deactivate_at for rotation window');
+  assert.ok(oldKey.deactivate_at > Date.now(), 'Old key deactivate_at should be in the future');
+
+  // Send message signed with OLD key
+  const envelope = {
+    version: '1.0',
+    id: `msg-rotwin-${Date.now()}`,
+    type: 'task.request',
+    from: senderAgentId,
+    to: recipientAgentId,
+    subject: 'rotation-window',
+    body: { test: 'old-key' },
+    timestamp: new Date().toISOString(),
+    ttl_sec: 3600
+  };
+
+  const oldSecret = fromBase64(oldSecretKey);
+  envelope.signature = signMessage(envelope, oldSecret);
+
+  const sendRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipientAgentId)}/messages`)
+    .send(envelope);
+
+  assert.equal(sendRes.status, 201, 'Message with old key should be accepted during rotation window');
+});
+
+test('key rotation fails for non-seed agents', async () => {
+  const agent = await registerAgent('rotate-nonseed');
+
+  const seed = crypto.randomBytes(32);
+  const seedB64 = toBase64(seed);
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/rotate-key`)
+    .send({ seed: seedB64, tenant_id: 'some-tenant' });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.message.includes('seed-based') || res.body.error === 'KEY_ROTATION_FAILED');
+});
+
+test('key rotation requires valid seed matching current key', async () => {
+  const seed = crypto.randomBytes(32);
+  const seedB64 = toBase64(seed);
+  const tenantId = `tenant-seedmatch-${Date.now()}`;
+  const agentId = `agent://seedmatch-${Date.now()}`;
+
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
+
+  const regRes = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: agentId,
+      agent_type: 'test',
+      seed: seedB64,
+      tenant_id: tenantId
+    });
+
+  assert.equal(regRes.status, 201);
+
+  // Try rotation with a DIFFERENT seed
+  const wrongSeed = crypto.randomBytes(32);
+  const wrongSeedB64 = toBase64(wrongSeed);
+
+  const rotateRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agentId)}/rotate-key`)
+    .send({ seed: wrongSeedB64, tenant_id: tenantId });
+
+  assert.equal(rotateRes.status, 403);
+  assert.equal(rotateRes.body.error, 'SEED_MISMATCH');
+});
+
+// ============ IDENTITY VERIFICATION TESTS ============
+
+test('default verification tier is unverified', async () => {
+  const agent = await registerAgent('identity-default');
+
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/identity`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.verification_tier, 'unverified');
+  assert.equal(res.body.agent_id, agent.agent_id);
+});
+
+test('GitHub linking sets tier to github', async () => {
+  const agent = await registerAgent('identity-github');
+
+  const res = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/verify/github`)
+    .send({ github_handle: 'octocat' });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.verification_tier, 'github');
+  assert.equal(res.body.github_handle, 'octocat');
+
+  // Verify persisted via identity endpoint
+  const identityRes = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/identity`);
+
+  assert.equal(identityRes.status, 200);
+  assert.equal(identityRes.body.verification_tier, 'github');
+  assert.equal(identityRes.body.github_handle, 'octocat');
+});
+
+test('cryptographic verification requires seed-based + DID', async () => {
+  // Legacy agent should fail
+  const legacyAgent = await registerAgent('identity-crypto-legacy');
+
+  const legacyRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(legacyAgent.agent_id)}/verify/cryptographic`)
+    .send({});
+
+  assert.equal(legacyRes.status, 400);
+  assert.ok(legacyRes.body.message.includes('seed-based'));
+
+  // Seed-based agent should succeed
+  const seed = crypto.randomBytes(32);
+  const tenantId = `tenant-crypto-${Date.now()}`;
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
+
+  const seedAgent = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: `agent://crypto-verify-${Date.now()}`,
+      agent_type: 'test',
+      seed: toBase64(seed),
+      tenant_id: tenantId
+    });
+
+  assert.equal(seedAgent.status, 201);
+
+  const cryptoRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(seedAgent.body.agent_id)}/verify/cryptographic`)
+    .send({});
+
+  assert.equal(cryptoRes.status, 200);
+  assert.equal(cryptoRes.body.verification_tier, 'cryptographic');
+  assert.ok(cryptoRes.body.did);
+});
+
+test('GET identity returns current status', async () => {
+  const agent = await registerAgent('identity-status');
+
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}/identity`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.agent_id, agent.agent_id);
+  assert.ok(res.body.did);
+  assert.equal(res.body.registration_mode, 'legacy');
+  assert.equal(res.body.verification_tier, 'unverified');
+  assert.equal(res.body.key_version, 1);
+  assert.ok(res.body.public_key);
+});
+
+// ============ NEGATIVE PATH TESTS ============
+
+test('cryptographic verification fails for import-mode agents', async () => {
+  const keypair = nacl.sign.keyPair();
+  const pubKeyB64 = toBase64(keypair.publicKey);
+
+  const regRes = await request(app)
+    .post('/api/agents/register')
+    .send({
+      agent_id: `agent://import-nocrypto-${Date.now()}`,
+      agent_type: 'test',
+      public_key: pubKeyB64
+    });
+
+  assert.equal(regRes.status, 201);
+  assert.equal(regRes.body.registration_mode, 'import');
+
+  const verifyRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(regRes.body.agent_id)}/verify/cryptographic`)
+    .send({});
+
+  assert.equal(verifyRes.status, 400);
+  assert.ok(verifyRes.body.message.includes('seed-based'));
+});
+
+test('DID document returns 404 for unknown agent', async () => {
+  const res = await request(app)
+    .get('/api/agents/agent%3A%2F%2Fnonexistent-did-agent/did.json');
+
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'AGENT_NOT_FOUND');
+});
+
+test('message with tampered signature is rejected', async () => {
+  const sender = await registerAgent('tamper-sender');
+  const recipient = await registerAgent('tamper-recv');
+
+  const res = await sendSignedMessage(sender, recipient.agent_id, {
+    mutateSignature: true
+  });
+
+  // Tampered signature returns 403 (invalid signature)
+  assert.ok([400, 403].includes(res.status), `Expected 400 or 403, got ${res.status}`);
+  assert.ok(res.body.message.toLowerCase().includes('signature'));
+});
+
+test('DID fingerprint is 32 hex chars (16 bytes)', async () => {
+  const agent = await registerAgent('did-length');
+
+  // DID format: did:seed:<32-hex-chars>
+  assert.ok(agent.did.startsWith('did:seed:'));
+  const fingerprint = agent.did.replace('did:seed:', '');
+  assert.equal(fingerprint.length, 32, 'DID fingerprint should be 32 hex chars (16 bytes)');
 });

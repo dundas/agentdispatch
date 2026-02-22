@@ -149,6 +149,80 @@ export class MechStorage {
     return agents;
   }
 
+  async getAgentByDid(did) {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_agents&limit=1000');
+    const agents = this.extractDocuments(json);
+    return agents.find(a => a.did === did) || null;
+  }
+
+  // ============ TENANTS ============
+
+  async createTenant(tenant) {
+    const now = Date.now();
+    const stored = {
+      ...tenant,
+      created_at: now,
+      updated_at: now
+    };
+
+    await this.request('/nosql/documents', {
+      method: 'POST',
+      body: {
+        collection_name: 'admp_tenants',
+        document_key: stored.tenant_id,
+        data: stored
+      }
+    });
+
+    return stored;
+  }
+
+  async getTenant(tenantId) {
+    const { status, json } = await this.request(
+      `/nosql/documents/key/${encodeURIComponent(tenantId)}?collection_name=admp_tenants`,
+      { allow404: true }
+    );
+
+    if (status === 404) return null;
+
+    const doc = json?.data;
+    return this.extractDocument(doc) || null;
+  }
+
+  async updateTenant(tenantId, updates) {
+    const now = Date.now();
+    const patch = {
+      ...updates,
+      updated_at: now
+    };
+
+    await this.request(`/nosql/documents/admp_tenants/${encodeURIComponent(tenantId)}`, {
+      method: 'PUT',
+      body: { data: patch }
+    });
+
+    return this.getTenant(tenantId);
+  }
+
+  async deleteTenant(tenantId) {
+    const { status } = await this.request(
+      `/nosql/documents/admp_tenants/${encodeURIComponent(tenantId)}`,
+      { method: 'DELETE', allow404: true }
+    );
+    return status === 200 || status === 204;
+  }
+
+  async listTenants() {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_tenants&limit=1000');
+    return this.extractDocuments(json);
+  }
+
+  async getAgentsByTenant(tenantId) {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_agents&limit=1000');
+    const agents = this.extractDocuments(json);
+    return agents.filter(a => a.tenant_id === tenantId);
+  }
+
   // ============ MESSAGES / INBOX ============
 
   async createMessage(message) {

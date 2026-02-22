@@ -12,6 +12,7 @@ export class MemoryStorage {
     this.domains = new Map();       // agent_id -> domain config
     this.outboxMessages = new Map(); // message_id -> outbox message
     this.outboxes = new Map();      // agent_id -> message_id[]
+    this.tenants = new Map();       // tenant_id -> tenant object
   }
 
   // ============ AGENTS ============
@@ -57,6 +58,56 @@ export class MemoryStorage {
     }
 
     return agents;
+  }
+
+  async getAgentByDid(did) {
+    for (const agent of this.agents.values()) {
+      if (agent.did === did) return agent;
+    }
+    return null;
+  }
+
+  // ============ TENANTS ============
+
+  async createTenant(tenant) {
+    const now = Date.now();
+    const stored = {
+      ...tenant,
+      created_at: now,
+      updated_at: now
+    };
+    this.tenants.set(tenant.tenant_id, stored);
+    return stored;
+  }
+
+  async getTenant(tenantId) {
+    return this.tenants.get(tenantId) || null;
+  }
+
+  async updateTenant(tenantId, updates) {
+    const tenant = this.tenants.get(tenantId);
+    if (!tenant) return null;
+
+    const updated = {
+      ...tenant,
+      ...updates,
+      updated_at: Date.now()
+    };
+    this.tenants.set(tenantId, updated);
+    return updated;
+  }
+
+  async deleteTenant(tenantId) {
+    this.tenants.delete(tenantId);
+    return true;
+  }
+
+  async listTenants() {
+    return Array.from(this.tenants.values());
+  }
+
+  async getAgentsByTenant(tenantId) {
+    return Array.from(this.agents.values()).filter(a => a.tenant_id === tenantId);
   }
 
   // ============ MESSAGES ============
