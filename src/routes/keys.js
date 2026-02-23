@@ -86,19 +86,23 @@ router.post('/issue', requireMasterKey, async (req, res) => {
  * List all issued keys (hashes only, never raw keys).
  */
 router.get('/', requireMasterKey, async (req, res) => {
-  const keys = await storage.listIssuedKeys();
-  return res.json(keys.map(k => ({
-    key_id: k.key_id,
-    client_id: k.client_id,
-    description: k.description,
-    created_at: new Date(k.created_at).toISOString(),
-    expires_at: k.expires_at ? new Date(k.expires_at).toISOString() : null,
-    revoked: k.revoked,
-    revoked_at: k.revoked_at ? new Date(k.revoked_at).toISOString() : null,
-    single_use: k.single_use || false,
-    used_at: k.used_at ? new Date(k.used_at).toISOString() : null,
-    target_agent_id: k.target_agent_id || null
-  })));
+  try {
+    const keys = await storage.listIssuedKeys();
+    return res.json(keys.map(k => ({
+      key_id: k.key_id,
+      client_id: k.client_id,
+      description: k.description,
+      created_at: new Date(k.created_at).toISOString(),
+      expires_at: k.expires_at ? new Date(k.expires_at).toISOString() : null,
+      revoked: k.revoked,
+      revoked_at: k.revoked_at ? new Date(k.revoked_at).toISOString() : null,
+      single_use: k.single_use || false,
+      used_at: k.used_at ? new Date(k.used_at).toISOString() : null,
+      target_agent_id: k.target_agent_id || null
+    })));
+  } catch (error) {
+    return res.status(500).json({ error: 'LIST_KEYS_FAILED', message: error.message });
+  }
 });
 
 /**
@@ -106,17 +110,21 @@ router.get('/', requireMasterKey, async (req, res) => {
  * Revoke an issued key.
  */
 router.delete('/:keyId', requireMasterKey, async (req, res) => {
-  const { keyId } = req.params;
-  const revoked = await storage.revokeIssuedKey(keyId);
+  try {
+    const { keyId } = req.params;
+    const revoked = await storage.revokeIssuedKey(keyId);
 
-  if (!revoked) {
-    return res.status(404).json({
-      error: 'KEY_NOT_FOUND',
-      message: `Key ${keyId} not found`
-    });
+    if (!revoked) {
+      return res.status(404).json({
+        error: 'KEY_NOT_FOUND',
+        message: `Key ${keyId} not found`
+      });
+    }
+
+    return res.json({ revoked: true, key_id: keyId });
+  } catch (error) {
+    return res.status(500).json({ error: 'REVOKE_KEY_FAILED', message: error.message });
   }
-
-  return res.json({ revoked: true, key_id: keyId });
 });
 
 export default router;

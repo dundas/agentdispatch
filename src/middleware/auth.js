@@ -331,15 +331,60 @@ function base58btcDecode(multibase) {
   const hex = result.toString(16).padStart(ED25519_MULTIBASE_BYTES * 2, '0');
   const bytes = Buffer.from(hex, 'hex');
 
-  // Strip 2-byte multicodec prefix (Ed25519 = 0xed01)
+  // Verify the 2-byte multicodec prefix is Ed25519 (0xed 0x01) before stripping.
+  // Other key types use different prefixes and must not be silently decoded as Ed25519.
+  if (bytes[0] !== 0xed || bytes[1] !== 0x01) {
+    throw new Error(`Unsupported key type: expected Ed25519 multicodec prefix 0xed01, got 0x${bytes[0].toString(16).padStart(2, '0')}${bytes[1].toString(16).padStart(2, '0')}`);
+  }
+
   return bytes.slice(2);
 }
 
 // Short-lived in-process cache for DID document keys (5-minute TTL per DID).
 // Prevents a per-request outbound HTTP fetch and removes the DoS amplification
 // surface from novel did:web key IDs crafted by an attacker.
+// Size is bounded to prevent memory exhaustion from novel DID values.
 const _didKeyCache = new Map();
 const _DID_KEY_CACHE_TTL_MS = 5 * 60 * 1000;
+const _DID_KEY_CACHE_MAX = 1000;
+
+/**
+ * Returns true if the hostname should be blocked from DID web resolution
+ * to prevent SSRF attacks targeting internal/private infrastructure.
+ * Blocks loopback, RFC 1918, link-local (AWS metadata), and raw IPv6 addresses.
+ */
+function isBlockedDIDWebHost(domain) {
+  // Strip IPv6 brackets (e.g. [::1] → ::1)
+  const host = domain.startsWith('[') ? domain.slice(1, -1) : domain;
+
+  // Loopback and localhost
+  if (host === 'localhost' || host.endsWith('.local') || host === '::1' || host === '0.0.0.0') {
+    return true;
+  }
+
+  // Block any raw IPv6 address (::1, fc00::/7, fe80::/10, etc.)
+  if (host.includes(':')) {
+    return true;
+  }
+
+  // Check IPv4 private ranges
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const o = ipv4.slice(1).map(Number);
+    if (
+      o[0] === 127 ||                                            // 127.0.0.0/8 loopback
+      o[0] === 10 ||                                             // 10.0.0.0/8 RFC 1918
+      (o[0] === 172 && o[1] >= 16 && o[1] <= 31) ||             // 172.16.0.0/12 RFC 1918
+      (o[0] === 192 && o[1] === 168) ||                          // 192.168.0.0/16 RFC 1918
+      (o[0] === 169 && o[1] === 254) ||                          // 169.254.0.0/16 link-local
+      o[0] === 0                                                 // 0.0.0.0/8
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 /**
  * Resolve a did:web: DID to a shadow agent record.
@@ -354,6 +399,11 @@ async function resolveDIDWebAgent(did, req) {
     const parts = withoutPrefix.split(':');
     const domain = decodeURIComponent(parts[0]);
     const pathSegments = parts.slice(1).map(decodeURIComponent);
+
+    // Block SSRF: reject DIDs targeting private/internal infrastructure
+    if (isBlockedDIDWebHost(domain)) {
+      return null;
+    }
 
     // Check in-process key cache before making an outbound HTTP request
     const cachedEntry = _didKeyCache.get(did);
@@ -405,10 +455,18 @@ async function resolveDIDWebAgent(did, req) {
 
       if (didWebKeys.length === 0) return null;
 
+      // Evict entire cache when size limit reached (simple ceiling, no LRU overhead)
+      if (_didKeyCache.size >= _DID_KEY_CACHE_MAX) {
+        _didKeyCache.clear();
+      }
       _didKeyCache.set(did, { keys: didWebKeys, cachedAt: Date.now() });
     }
 
-    // Check for existing shadow agent
+    // Check for existing shadow agent.
+    // NOTE: There is a narrow race between the getAgentByDid check and createAgent
+    // for the first request from a given DID. The memory backend overwrites silently;
+    // the Mech backend may return an error on duplicate writes. The race window is
+    // small and for federated agents it is acceptable — the second write is idempotent.
     const existing = await storage.getAgentByDid(did);
     if (existing) {
       // Attach fresh keys for this request's signature verification

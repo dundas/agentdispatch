@@ -720,6 +720,10 @@ export class MechStorage {
   async revokeIssuedKey(keyId) {
     const key = await this.getIssuedKey(keyId);
     if (!key) return false;
+    // Mech API uses different URL forms per operation:
+    //   GET  → /nosql/documents/key/:key?collection_name=...  (query-param format)
+    //   PUT  → /nosql/documents/:collection/:key              (path-segment format)
+    // this.request() throws on non-2xx, so reaching `return true` implies success.
     await this.request(`/nosql/documents/admp_api_keys/${encodeURIComponent(keyId)}`, {
       method: 'PUT',
       body: { data: { ...key, revoked: true, revoked_at: Date.now() } }
@@ -731,6 +735,7 @@ export class MechStorage {
     const key = await this.getIssuedKey(keyId);
     if (!key) return null;
     const updated = { ...key, ...updates };
+    // See revokeIssuedKey for note on Mech URL format difference between GET and PUT.
     await this.request(`/nosql/documents/admp_api_keys/${encodeURIComponent(keyId)}`, {
       method: 'PUT',
       body: { data: updated }

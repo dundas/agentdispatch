@@ -551,8 +551,9 @@ router.post('/:agentId/approve', requireMasterKey, async (req, res) => {
       registration_status: agent.registration_status
     });
   } catch (error) {
-    res.status(400).json({
-      error: 'APPROVE_FAILED',
+    const status = error.message.includes('not found') ? 404 : 400;
+    res.status(status).json({
+      error: status === 404 ? 'AGENT_NOT_FOUND' : 'APPROVE_FAILED',
       message: error.message
     });
   }
@@ -573,8 +574,9 @@ router.post('/:agentId/reject', requireMasterKey, async (req, res) => {
       rejection_reason: agent.rejection_reason
     });
   } catch (error) {
-    res.status(400).json({
-      error: 'REJECT_FAILED',
+    const status = error.message.includes('not found') ? 404 : 400;
+    res.status(status).json({
+      error: status === 404 ? 'AGENT_NOT_FOUND' : 'REJECT_FAILED',
       message: error.message
     });
   }

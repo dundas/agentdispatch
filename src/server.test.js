@@ -2539,14 +2539,6 @@ test('DID fingerprint is 32 hex chars (16 bytes)', async () => {
 // ============ API KEY MANAGEMENT SECURITY TESTS ============
 
 import { requireMasterKey } from './middleware/auth.js';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname as _dirname, join as _join } from 'node:path';
-
-const _authSrc = readFileSync(
-  _join(_dirname(fileURLToPath(import.meta.url)), 'middleware/auth.js'),
-  'utf8'
-);
 
 test('requireApiKey master key: exact match required (case-sensitive, prefix rejected)', async () => {
   const masterKey = `test-master-timing-${Date.now()}`;
