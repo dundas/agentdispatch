@@ -42,6 +42,17 @@ export function sha256(input) {
 }
 
 /**
+ * SHA-256 hex digest for API key lookups.
+ * Shared by auth.js (key validation) and keys.js (key issuance) to ensure
+ * the same hashing algorithm is used in both places.
+ * @param {string} key
+ * @returns {string} hex digest
+ */
+export function hashApiKey(key) {
+  return createHash('sha256').update(key).digest('hex');
+}
+
+/**
  * Create canonical signing base string for ADMP message
  * Format: timestamp\nbodyHash\nfrom\nto\ncorrelationId
  *

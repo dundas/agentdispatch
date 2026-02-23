@@ -44,6 +44,15 @@ if (process.env.MAILGUN_API_KEY && !process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {
   );
 }
 
+// Warn when no master key is configured — admin endpoints will deny all requests
+if (!process.env.MASTER_API_KEY) {
+  console.warn(
+    'WARNING: MASTER_API_KEY is not set. ' +
+    'Admin endpoints (key issuance, agent approval/rejection) will reject all requests. ' +
+    'Set MASTER_API_KEY to enable administrative operations.'
+  );
+}
+
 // Initialize logger
 const logger = pino({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug'

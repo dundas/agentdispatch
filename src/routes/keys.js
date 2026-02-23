@@ -4,19 +4,16 @@
  */
 
 import express from 'express';
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { storage } from '../storage/index.js';
 import { requireMasterKey } from '../middleware/auth.js';
+import { hashApiKey } from '../utils/crypto.js';
 
 const router = express.Router();
 
 function generateApiKey() {
   return `admp_${randomBytes(32).toString('hex')}`;
-}
-
-function hashKey(key) {
-  return createHash('sha256').update(key).digest('hex');
 }
 
 /**
@@ -48,8 +45,19 @@ router.post('/issue', requireMasterKey, async (req, res) => {
     });
   }
 
+  // Validate target_agent_id exists before issuing the key
+  if (target_agent_id) {
+    const targetAgent = await storage.getAgent(target_agent_id);
+    if (!targetAgent) {
+      return res.status(400).json({
+        error: 'AGENT_NOT_FOUND',
+        message: `Target agent ${target_agent_id} not found`
+      });
+    }
+  }
+
   const rawKey = generateApiKey();
-  const keyHash = hashKey(rawKey);
+  const keyHash = hashApiKey(rawKey);
   const keyId = uuidv4();
   const now = Date.now();
 
@@ -66,7 +74,11 @@ router.post('/issue', requireMasterKey, async (req, res) => {
     target_agent_id: target_agent_id || null
   };
 
-  await storage.createIssuedKey(issuedKey);
+  try {
+    await storage.createIssuedKey(issuedKey);
+  } catch (error) {
+    return res.status(500).json({ error: 'KEY_ISSUANCE_FAILED', message: error.message });
+  }
 
   return res.status(201).json({
     key_id: keyId,

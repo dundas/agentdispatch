@@ -3372,6 +3372,129 @@ test('trust model: DID web — fetch failure → AGENT_NOT_FOUND (fail closed)',
   }
 });
 
+test('trust model: DID web — approval_required policy → shadow agent starts pending', async () => {
+  const domain = `did-web-pending-${Date.now()}.example.com`;
+  const did = `did:web:${domain}`;
+  const shadowAgentId = `did-web:${domain}`;
+  const keypair = nacl.sign.keyPair();
+  const pubKeyB64 = toBase64(keypair.publicKey);
+
+  const didDoc = {
+    '@context': ['https://www.w3.org/ns/did/v1'],
+    id: did,
+    verificationMethod: [{
+      id: `${did}#key-1`,
+      type: 'Ed25519VerificationKey2020',
+      controller: did,
+      publicKeyBase64: pubKeyB64
+    }]
+  };
+
+  const originalFetch = globalThis.fetch;
+  const didDocUrl = `https://${domain}/.well-known/did.json`;
+  globalThis.fetch = async (url, init) => {
+    if (url === didDocUrl) {
+      const body = JSON.stringify(didDoc);
+      return { ok: true, json: async () => didDoc, text: async () => body };
+    }
+    return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
+  };
+
+  const savedPolicy = process.env.REGISTRATION_POLICY;
+  process.env.REGISTRATION_POLICY = 'approval_required';
+
+  try {
+    const dateStr = new Date().toUTCString();
+    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
+    const sigB64 = toBase64(sigBytes);
+    const signatureHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
+    const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
+
+    const res = await request(app)
+      .post(targetPath)
+      .set('Signature', signatureHeader)
+      .set('Date', dateStr)
+      .send({});
+
+    // With approval_required policy, shadow agent should be created as pending → 403
+    assert.equal(res.status, 403, `Expected 403 REGISTRATION_PENDING, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.error, 'REGISTRATION_PENDING');
+
+    // Shadow agent should be persisted with pending status
+    const shadowAgent = await storage.getAgentByDid(did);
+    assert.ok(shadowAgent, 'shadow agent must be created even when pending');
+    assert.equal(shadowAgent.registration_status, 'pending');
+    assert.equal(shadowAgent.registration_mode, 'did-web');
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.REGISTRATION_POLICY = savedPolicy;
+  }
+});
+
+test('trust model: scoped enrollment token — rejects when target_agent_id does not exist', async () => {
+  const masterKey = `test-master-scope-validation-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    const nonExistentAgentId = `agent://nonexistent-${Date.now()}`;
+
+    const res = await request(app)
+      .post('/api/keys/issue')
+      .set('x-api-key', masterKey)
+      .send({
+        client_id: `scope-test-${Date.now()}`,
+        single_use: true,
+        target_agent_id: nonExistentAgentId
+      });
+
+    assert.equal(res.status, 400, `Expected 400 AGENT_NOT_FOUND, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.error, 'AGENT_NOT_FOUND', 'Should reject issuance when target agent does not exist');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
+});
+
+test('trust model: approve is idempotent — second approval returns success', async () => {
+  const masterKey = `test-master-idempotent-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    const tenantId = `tenant-idempotent-${Date.now()}`;
+    await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'approval_required', metadata: {} });
+
+    const regRes = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://idem-test-${Date.now()}`, tenant_id: tenantId });
+
+    assert.equal(regRes.status, 201);
+    const agentId = regRes.body.agent_id;
+
+    // First approval
+    const res1 = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/approve`)
+      .set('x-api-key', masterKey);
+    assert.equal(res1.status, 200, `First approval should succeed: ${JSON.stringify(res1.body)}`);
+    assert.equal(res1.body.registration_status, 'approved');
+
+    // Second approval — must not throw, must return 200
+    const res2 = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/approve`)
+      .set('x-api-key', masterKey);
+    assert.equal(res2.status, 200, `Idempotent second approval should succeed: ${JSON.stringify(res2.body)}`);
+    assert.equal(res2.body.registration_status, 'approved');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
+});
+
 test('trust model: tenant creation accepts registration_policy field', async () => {
   const masterKey = `test-master-tenant-policy-${Date.now()}`;
   const savedMaster = process.env.MASTER_API_KEY;

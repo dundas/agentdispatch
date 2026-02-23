@@ -707,6 +707,8 @@ export class MechStorage {
       }
     }
     // Fallback: linear scan (catches pre-index keys; remove once all keys are re-issued)
+    // If this warning fires, re-issue API keys so the hash index gets populated.
+    console.warn('[mech] admp_api_key_hashes index miss — falling back to linear scan. Re-issue API keys to rebuild the index.');
     const { json } = await this.request('/nosql/documents?collection_name=admp_api_keys&limit=1000');
     const keys = this.extractDocuments(json);
     return keys.find(k => k.key_hash === keyHash) || null;

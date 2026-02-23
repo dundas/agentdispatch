@@ -8,13 +8,32 @@
  * - Registration approval status gate
  */
 
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { storage } from '../storage/index.js';
 import nacl from 'tweetnacl';
-import { fromBase64, toBase64 } from '../utils/crypto.js';
+import { fromBase64, toBase64, hashApiKey } from '../utils/crypto.js';
 
-function hashApiKey(key) {
-  return createHash('sha256').update(key).digest('hex');
+/**
+ * Rejects the response if the agent's registration is not approved.
+ * Returns true if rejected (caller should return early), false if the agent is approved.
+ * Extracted to avoid duplicating the same two-condition check across multiple middlewares.
+ */
+function rejectIfNotApproved(agent, res) {
+  if (agent.registration_status === 'pending') {
+    res.status(403).json({
+      error: 'REGISTRATION_PENDING',
+      message: 'Agent registration is pending approval'
+    });
+    return true;
+  }
+  if (agent.registration_status === 'rejected') {
+    res.status(403).json({
+      error: 'REGISTRATION_REJECTED',
+      message: 'Agent registration has been rejected'
+    });
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -40,19 +59,7 @@ export async function authenticateAgent(req, res, next) {
     });
   }
 
-  if (agent.registration_status === 'pending') {
-    return res.status(403).json({
-      error: 'REGISTRATION_PENDING',
-      message: 'Agent registration is pending approval'
-    });
-  }
-
-  if (agent.registration_status === 'rejected') {
-    return res.status(403).json({
-      error: 'REGISTRATION_REJECTED',
-      message: 'Agent registration has been rejected'
-    });
-  }
+  if (rejectIfNotApproved(agent, res)) return;
 
   req.agent = agent;
   next();
@@ -109,19 +116,7 @@ export async function authenticateHttpSignature(req, res, next) {
     }
 
     // Approval status gate
-    if (agent.registration_status === 'pending') {
-      return res.status(403).json({
-        error: 'REGISTRATION_PENDING',
-        message: 'Agent registration is pending approval'
-      });
-    }
-
-    if (agent.registration_status === 'rejected') {
-      return res.status(403).json({
-        error: 'REGISTRATION_REJECTED',
-        message: 'Agent registration has been rejected'
-      });
-    }
+    if (rejectIfNotApproved(agent, res)) return;
 
     // Authorization check: signing agent must match target agent in URL.
     // Without this, Agent A could sign with their own valid key and
@@ -304,40 +299,65 @@ export async function requireApiKey(req, res, next) {
   });
 }
 
+// Lookup table for base58 alphabet — avoids BigInt arithmetic in the hot auth path.
+// Built once at module load; indexed by char code (0-127).
+const _BASE58_MAP = new Uint8Array(128).fill(0xff);
+for (let i = 0; i < 58; i++) {
+  _BASE58_MAP['123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'.charCodeAt(i)] = i;
+}
+
 /**
  * Decode a base58btc-encoded multibase string (stripping the 2-byte multicodec prefix).
  * Used for DID document `publicKeyMultibase` values (e.g. Ed25519 keys start with 0xed01).
  *
- * Uses a fixed output length of 34 bytes (2-byte multicodec prefix + 32-byte Ed25519 key)
- * to preserve any leading zero bytes that a plain BigInt→hex conversion would drop.
+ * Uses a lookup-table algorithm (not BigInt) to avoid allocating large integers
+ * on every incoming authentication request.
  */
 function base58btcDecode(multibase) {
-  // Strip leading 'z' multibase prefix
   const encoded = multibase.startsWith('z') ? multibase.slice(1) : multibase;
 
-  const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-  const BASE = BigInt(58);
-
-  let result = BigInt(0);
-  for (const char of encoded) {
-    const idx = ALPHABET.indexOf(char);
-    if (idx < 0) throw new Error(`Invalid base58 character: ${char}`);
-    result = result * BASE + BigInt(idx);
+  // Decode base58 into a little-endian byte array using the lookup table
+  const digits = [0];
+  for (let i = 0; i < encoded.length; i++) {
+    const code = encoded.charCodeAt(i);
+    if (code >= 128 || _BASE58_MAP[code] === 0xff) {
+      throw new Error(`Invalid base58 character: ${encoded[i]}`);
+    }
+    let carry = _BASE58_MAP[code];
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] * 58;
+      digits[j] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      digits.push(carry & 0xff);
+      carry >>= 8;
+    }
   }
 
-  // Ed25519 with multicodec prefix is exactly 34 bytes (2-byte prefix + 32-byte key).
-  // Pad to the full expected length so leading zero bytes in the key material are preserved.
+  // Count leading '1' characters → leading zero bytes
+  let leadingZeros = 0;
+  for (let i = 0; i < encoded.length && encoded[i] === '1'; i++) leadingZeros++;
+
+  // Assemble big-endian byte array (digits is little-endian → reverse)
+  const result = new Uint8Array(leadingZeros + digits.length);
+  for (let i = 0; i < digits.length; i++) {
+    result[leadingZeros + i] = digits[digits.length - 1 - i];
+  }
+
+  // Ed25519 with multicodec prefix is exactly 34 bytes; left-pad if shorter
   const ED25519_MULTIBASE_BYTES = 34;
-  const hex = result.toString(16).padStart(ED25519_MULTIBASE_BYTES * 2, '0');
-  const bytes = Buffer.from(hex, 'hex');
+  const padded = result.length < ED25519_MULTIBASE_BYTES
+    ? new Uint8Array([...new Uint8Array(ED25519_MULTIBASE_BYTES - result.length), ...result])
+    : result.slice(result.length - ED25519_MULTIBASE_BYTES);
 
   // Verify the 2-byte multicodec prefix is Ed25519 (0xed 0x01) before stripping.
   // Other key types use different prefixes and must not be silently decoded as Ed25519.
-  if (bytes[0] !== 0xed || bytes[1] !== 0x01) {
-    throw new Error(`Unsupported key type: expected Ed25519 multicodec prefix 0xed01, got 0x${bytes[0].toString(16).padStart(2, '0')}${bytes[1].toString(16).padStart(2, '0')}`);
+  if (padded[0] !== 0xed || padded[1] !== 0x01) {
+    throw new Error(`Unsupported key type: expected Ed25519 multicodec prefix 0xed01, got 0x${padded[0].toString(16).padStart(2, '0')}${padded[1].toString(16).padStart(2, '0')}`);
   }
 
-  return bytes.slice(2);
+  return padded.slice(2);
 }
 
 // Short-lived in-process cache for DID document keys (5-minute TTL per DID).
@@ -405,6 +425,13 @@ async function resolveDIDWebAgent(did, req) {
       return null;
     }
 
+    // Compute DID document URL once (per W3C DID:web spec):
+    //   did:web:domain.com           → https://domain.com/.well-known/did.json
+    //   did:web:domain.com:path:seg  → https://domain.com/path/seg/did.json
+    const didUrl = pathSegments.length > 0
+      ? `https://${domain}/${pathSegments.join('/')}/did.json`
+      : `https://${domain}/.well-known/did.json`;
+
     // Check in-process key cache before making an outbound HTTP request
     const cachedEntry = _didKeyCache.get(did);
     let didWebKeys = cachedEntry && (Date.now() - cachedEntry.cachedAt < _DID_KEY_CACHE_TTL_MS)
@@ -412,13 +439,6 @@ async function resolveDIDWebAgent(did, req) {
       : null;
 
     if (!didWebKeys) {
-      // Per the DID:web spec:
-      //   did:web:domain.com           → https://domain.com/.well-known/did.json
-      //   did:web:domain.com:path:seg  → https://domain.com/path/seg/did.json
-      const didUrl = pathSegments.length > 0
-        ? `https://${domain}/${pathSegments.join('/')}/did.json`
-        : `https://${domain}/.well-known/did.json`;
-
       // Fetch with 5s timeout (fail-closed on network errors)
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
@@ -455,9 +475,10 @@ async function resolveDIDWebAgent(did, req) {
 
       if (didWebKeys.length === 0) return null;
 
-      // Evict entire cache when size limit reached (simple ceiling, no LRU overhead)
+      // Evict the oldest cached entry (Map preserves insertion order) to bound memory use.
+      // Evicting one-at-a-time limits the blast radius compared to a full clear().
       if (_didKeyCache.size >= _DID_KEY_CACHE_MAX) {
-        _didKeyCache.clear();
+        _didKeyCache.delete(_didKeyCache.keys().next().value);
       }
       _didKeyCache.set(did, { keys: didWebKeys, cachedAt: Date.now() });
     }
@@ -481,9 +502,6 @@ async function resolveDIDWebAgent(did, req) {
     // Use decoded domain + path segments as agent_id to avoid collisions between
     // multi-path DIDs sharing the same domain (e.g. did:web:host:alice vs did:web:host:bob)
     const agentIdPath = [domain, ...pathSegments].join('/');
-    const didUrl = pathSegments.length > 0
-      ? `https://${domain}/${pathSegments.join('/')}/did.json`
-      : `https://${domain}/.well-known/did.json`;
 
     const shadowAgent = {
       agent_id: `did-web:${agentIdPath}`,
