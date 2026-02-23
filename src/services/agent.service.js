@@ -153,7 +153,8 @@ export class AgentService {
       throw new Error(`Agent ${agentId} not found`);
     }
     if (agent.registration_status === 'rejected') {
-      throw new Error(`Agent ${agentId} is already rejected`);
+      // Idempotent: already rejected, return as-is
+      return agent;
     }
     return await storage.updateAgent(agentId, {
       registration_status: 'rejected',

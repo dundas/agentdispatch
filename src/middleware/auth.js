@@ -345,11 +345,14 @@ function base58btcDecode(multibase) {
     result[leadingZeros + i] = digits[digits.length - 1 - i];
   }
 
-  // Ed25519 with multicodec prefix is exactly 34 bytes; left-pad if shorter
+  // Ed25519 with multicodec prefix is exactly 34 bytes.
   const ED25519_MULTIBASE_BYTES = 34;
+  if (result.length > ED25519_MULTIBASE_BYTES) {
+    throw new Error(`Invalid key length: expected ${ED25519_MULTIBASE_BYTES} bytes, got ${result.length}`);
+  }
   const padded = result.length < ED25519_MULTIBASE_BYTES
     ? new Uint8Array([...new Uint8Array(ED25519_MULTIBASE_BYTES - result.length), ...result])
-    : result.slice(result.length - ED25519_MULTIBASE_BYTES);
+    : result;
 
   // Verify the 2-byte multicodec prefix is Ed25519 (0xed 0x01) before stripping.
   // Other key types use different prefixes and must not be silently decoded as Ed25519.
@@ -372,6 +375,12 @@ const _DID_KEY_CACHE_MAX = 1000;
  * Returns true if the hostname should be blocked from DID web resolution
  * to prevent SSRF attacks targeting internal/private infrastructure.
  * Blocks loopback, RFC 1918, link-local (AWS metadata), and raw IPv6 addresses.
+ *
+ * NOTE: DNS rebinding is NOT mitigated here. This blocklist validates the hostname
+ * string before the fetch but cannot prevent the DNS resolver from returning a
+ * different (internal) IP at connection time. The 5-minute DID key cache reduces
+ * the attack window but does not close it. Full SSRF protection requires a
+ * post-connect IP check or an explicit allow-list configured at the network layer.
  */
 function isBlockedDIDWebHost(domain) {
   // Strip IPv6 brackets (e.g. [::1] → ::1)

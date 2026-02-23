@@ -69,12 +69,13 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(pinoHttp({ logger }));
 
-// API key authentication middleware
-// Always register so requireApiKey (which reads API_KEY_REQUIRED at request time) is always called.
-// This allows tests to toggle API_KEY_REQUIRED at runtime without restarting the server.
-if (process.env.API_KEY_REQUIRED === 'true') {
-  logger.info('API key authentication enabled');
-}
+// API key authentication middleware.
+// The middleware is always mounted; enforcement is checked at request time
+// by reading API_KEY_REQUIRED, so the flag can be toggled without restart.
+logger.info(
+  { apiKeyRequired: process.env.API_KEY_REQUIRED === 'true' },
+  `API key enforcement: ${process.env.API_KEY_REQUIRED === 'true' ? 'enabled' : 'disabled'} (API_KEY_REQUIRED=${process.env.API_KEY_REQUIRED ?? 'unset'})`
+);
 app.use('/api', (req, res, next) => {
   // Always allow agent self-registration without an API key
   if (req.method === 'POST' && req.path === '/agents/register') return next();

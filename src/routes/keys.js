@@ -45,6 +45,17 @@ router.post('/issue', requireMasterKey, async (req, res) => {
     });
   }
 
+  // expires_in_days: 0 is falsy and would silently produce a non-expiring key.
+  // Reject it explicitly so callers get a clear error instead of unexpected behavior.
+  if (expires_in_days !== undefined && expires_in_days !== null) {
+    if (!Number.isFinite(expires_in_days) || expires_in_days <= 0) {
+      return res.status(400).json({
+        error: 'INVALID_EXPIRES_IN_DAYS',
+        message: 'expires_in_days must be a positive finite number'
+      });
+    }
+  }
+
   // Validate target_agent_id exists before issuing the key
   if (target_agent_id) {
     const targetAgent = await storage.getAgent(target_agent_id);
@@ -67,7 +78,7 @@ router.post('/issue', requireMasterKey, async (req, res) => {
     client_id,
     description: description || '',
     created_at: now,
-    expires_at: expires_in_days ? now + expires_in_days * 86400000 : null,
+    expires_at: (expires_in_days != null) ? now + expires_in_days * 86400000 : null,
     revoked: false,
     single_use: single_use === true,
     used_at: null,

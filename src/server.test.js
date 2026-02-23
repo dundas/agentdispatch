@@ -3458,6 +3458,65 @@ test('trust model: scoped enrollment token — rejects when target_agent_id does
   }
 });
 
+test('trust model: reject is idempotent — second rejection returns success', async () => {
+  const masterKey = `test-master-reject-idem-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    const tenantId = `tenant-reject-idem-${Date.now()}`;
+    await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'approval_required', metadata: {} });
+
+    const regRes = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://reject-idem-${Date.now()}`, tenant_id: tenantId });
+    assert.equal(regRes.status, 201);
+    const agentId = regRes.body.agent_id;
+
+    // First rejection
+    const res1 = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/reject`)
+      .set('x-api-key', masterKey)
+      .send({ reason: 'test reason' });
+    assert.equal(res1.status, 200, `First rejection should succeed: ${JSON.stringify(res1.body)}`);
+    assert.equal(res1.body.registration_status, 'rejected');
+
+    // Second rejection — must not throw, must return 200
+    const res2 = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/reject`)
+      .set('x-api-key', masterKey)
+      .send({ reason: 'retry' });
+    assert.equal(res2.status, 200, `Idempotent second rejection should succeed: ${JSON.stringify(res2.body)}`);
+    assert.equal(res2.body.registration_status, 'rejected');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
+});
+
+test('key issuance: expires_in_days: 0 returns 400', async () => {
+  const masterKey = `test-master-exp-zero-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    const res = await request(app)
+      .post('/api/keys/issue')
+      .set('x-api-key', masterKey)
+      .send({ client_id: `expire-zero-${Date.now()}`, expires_in_days: 0 });
+
+    assert.equal(res.status, 400, `expires_in_days: 0 should be rejected: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.error, 'INVALID_EXPIRES_IN_DAYS');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
+});
+
 test('trust model: approve is idempotent — second approval returns success', async () => {
   const masterKey = `test-master-idempotent-${Date.now()}`;
   const savedMaster = process.env.MASTER_API_KEY;
