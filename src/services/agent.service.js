@@ -134,6 +134,9 @@ export class AgentService {
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
     }
+    if (agent.registration_status === 'approved') {
+      throw new Error(`Agent ${agentId} is already approved`);
+    }
     return await storage.updateAgent(agentId, { registration_status: 'approved' });
   }
 
@@ -147,6 +150,9 @@ export class AgentService {
     const agent = await storage.getAgent(agentId);
     if (!agent) {
       throw new Error(`Agent ${agentId} not found`);
+    }
+    if (agent.registration_status === 'rejected') {
+      throw new Error(`Agent ${agentId} is already rejected`);
     }
     return await storage.updateAgent(agentId, {
       registration_status: 'rejected',

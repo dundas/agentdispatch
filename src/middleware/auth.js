@@ -261,13 +261,16 @@ export async function requireApiKey(req, res, next) {
         });
       }
 
-      // Single-use token scope: validate against requested agent path
+      // Single-use token scope: validate against requested agent path.
+      // A scoped token is only valid for its designated agent's endpoints.
+      // Requests to non-agent paths (e.g. /api/stats) are denied — the token
+      // is intended for a specific agent, not general API access.
       if (issuedKey.target_agent_id) {
         // req.params not populated yet (middleware runs before route matching)
         // Parse agent ID directly from req.path
         const match = req.path.match(/^\/agents\/([^/]+)/);
         const requestedAgentId = match ? decodeURIComponent(match[1]) : null;
-        if (requestedAgentId && requestedAgentId !== 'register' && requestedAgentId !== issuedKey.target_agent_id) {
+        if (!requestedAgentId || (requestedAgentId !== 'register' && requestedAgentId !== issuedKey.target_agent_id)) {
           return res.status(403).json({
             error: 'ENROLLMENT_TOKEN_SCOPE',
             message: 'This enrollment token is scoped to a different agent'
@@ -275,7 +278,12 @@ export async function requireApiKey(req, res, next) {
         }
       }
 
-      // Burn single-use token on first valid use
+      // Burn single-use token on first valid use.
+      // NOTE: There is an inherent TOCTOU race: two concurrent requests carrying
+      // the same token may both pass the used_at check before either write completes.
+      // This is acceptable for the intended 1:1 enrollment scenario (token is
+      // pre-shared with a single agent). Do not use single-use tokens for
+      // high-concurrency access control.
       if (issuedKey.single_use) {
         await storage.updateIssuedKey(issuedKey.key_id, { used_at: Date.now() });
       }
@@ -285,8 +293,9 @@ export async function requireApiKey(req, res, next) {
       req.apiKeyClientId = issuedKey.client_id;
       return next();
     }
-  } catch {
-    // Storage lookup failure → deny
+  } catch (err) {
+    // Storage lookup failure → deny; log for observability
+    console.error('issued key lookup failed:', err.message);
   }
 
   return res.status(403).json({
@@ -298,6 +307,9 @@ export async function requireApiKey(req, res, next) {
 /**
  * Decode a base58btc-encoded multibase string (stripping the 2-byte multicodec prefix).
  * Used for DID document `publicKeyMultibase` values (e.g. Ed25519 keys start with 0xed01).
+ *
+ * Uses a fixed output length of 34 bytes (2-byte multicodec prefix + 32-byte Ed25519 key)
+ * to preserve any leading zero bytes that a plain BigInt→hex conversion would drop.
  */
 function base58btcDecode(multibase) {
   // Strip leading 'z' multibase prefix
@@ -313,17 +325,25 @@ function base58btcDecode(multibase) {
     result = result * BASE + BigInt(idx);
   }
 
-  // Convert to bytes
-  const hex = result.toString(16).padStart(Math.ceil(result.toString(16).length / 2) * 2, '0');
+  // Ed25519 with multicodec prefix is exactly 34 bytes (2-byte prefix + 32-byte key).
+  // Pad to the full expected length so leading zero bytes in the key material are preserved.
+  const ED25519_MULTIBASE_BYTES = 34;
+  const hex = result.toString(16).padStart(ED25519_MULTIBASE_BYTES * 2, '0');
   const bytes = Buffer.from(hex, 'hex');
 
   // Strip 2-byte multicodec prefix (Ed25519 = 0xed01)
   return bytes.slice(2);
 }
 
+// Short-lived in-process cache for DID document keys (5-minute TTL per DID).
+// Prevents a per-request outbound HTTP fetch and removes the DoS amplification
+// surface from novel did:web key IDs crafted by an attacker.
+const _didKeyCache = new Map();
+const _DID_KEY_CACHE_TTL_MS = 5 * 60 * 1000;
+
 /**
  * Resolve a did:web: DID to a shadow agent record.
- * - Fetches the DID document from the well-known URL
+ * - Fetches the DID document from the well-known URL (cached 5 min)
  * - Extracts Ed25519 verification keys
  * - Returns existing shadow agent or creates a new one per tenant policy
  */
@@ -335,45 +355,58 @@ async function resolveDIDWebAgent(did, req) {
     const domain = decodeURIComponent(parts[0]);
     const pathSegments = parts.slice(1).map(decodeURIComponent);
 
-    const didUrl = pathSegments.length > 0
-      ? `https://${domain}/${pathSegments.join('/')}/${did}.json`
-      : `https://${domain}/.well-known/did.json`;
+    // Check in-process key cache before making an outbound HTTP request
+    const cachedEntry = _didKeyCache.get(did);
+    let didWebKeys = cachedEntry && (Date.now() - cachedEntry.cachedAt < _DID_KEY_CACHE_TTL_MS)
+      ? cachedEntry.keys
+      : null;
 
-    // Fetch with 5s timeout (fail-closed on network errors)
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    if (!didWebKeys) {
+      // Per the DID:web spec:
+      //   did:web:domain.com           → https://domain.com/.well-known/did.json
+      //   did:web:domain.com:path:seg  → https://domain.com/path/seg/did.json
+      const didUrl = pathSegments.length > 0
+        ? `https://${domain}/${pathSegments.join('/')}/did.json`
+        : `https://${domain}/.well-known/did.json`;
 
-    let didDoc;
-    try {
-      const resp = await fetch(didUrl, { signal: controller.signal });
-      if (!resp.ok) return null;
-      didDoc = await resp.json();
-    } finally {
-      clearTimeout(timeout);
+      // Fetch with 5s timeout (fail-closed on network errors)
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      let didDoc;
+      try {
+        const resp = await fetch(didUrl, { signal: controller.signal });
+        if (!resp.ok) return null;
+        didDoc = await resp.json();
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (!didDoc || didDoc.id !== did) return null;
+
+      // Extract Ed25519 verification methods
+      const verificationMethods = (didDoc.verificationMethod || []).filter(
+        vm => vm.type === 'Ed25519VerificationKey2020' || vm.type === 'Ed25519VerificationKey2018'
+      );
+
+      if (verificationMethods.length === 0) return null;
+
+      // Convert DID doc keys to internal format for signature verification
+      didWebKeys = verificationMethods.map(vm => {
+        if (vm.publicKeyMultibase) {
+          const pubKeyBytes = base58btcDecode(vm.publicKeyMultibase);
+          return { public_key: toBase64(pubKeyBytes) };
+        }
+        if (vm.publicKeyBase64) {
+          return { public_key: vm.publicKeyBase64 };
+        }
+        return null;
+      }).filter(Boolean);
+
+      if (didWebKeys.length === 0) return null;
+
+      _didKeyCache.set(did, { keys: didWebKeys, cachedAt: Date.now() });
     }
-
-    if (!didDoc || didDoc.id !== did) return null;
-
-    // Extract Ed25519 verification methods
-    const verificationMethods = (didDoc.verificationMethod || []).filter(
-      vm => vm.type === 'Ed25519VerificationKey2020' || vm.type === 'Ed25519VerificationKey2018'
-    );
-
-    if (verificationMethods.length === 0) return null;
-
-    // Convert DID doc keys to internal format for signature verification
-    const didWebKeys = verificationMethods.map(vm => {
-      if (vm.publicKeyMultibase) {
-        const pubKeyBytes = base58btcDecode(vm.publicKeyMultibase);
-        return { public_key: toBase64(pubKeyBytes) };
-      }
-      if (vm.publicKeyBase64) {
-        return { public_key: vm.publicKeyBase64 };
-      }
-      return null;
-    }).filter(Boolean);
-
-    if (didWebKeys.length === 0) return null;
 
     // Check for existing shadow agent
     const existing = await storage.getAgentByDid(did);
@@ -387,8 +420,15 @@ async function resolveDIDWebAgent(did, req) {
     const policy = process.env.REGISTRATION_POLICY || 'open';
     const registrationStatus = policy === 'approval_required' ? 'pending' : 'approved';
 
+    // Use decoded domain + path segments as agent_id to avoid collisions between
+    // multi-path DIDs sharing the same domain (e.g. did:web:host:alice vs did:web:host:bob)
+    const agentIdPath = [domain, ...pathSegments].join('/');
+    const didUrl = pathSegments.length > 0
+      ? `https://${domain}/${pathSegments.join('/')}/did.json`
+      : `https://${domain}/.well-known/did.json`;
+
     const shadowAgent = {
-      agent_id: `did-web:${domain}`,
+      agent_id: `did-web:${agentIdPath}`,
       agent_type: 'federated',
       did,
       public_key: didWebKeys[0].public_key,

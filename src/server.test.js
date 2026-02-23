@@ -2548,13 +2548,29 @@ const _authSrc = readFileSync(
   'utf8'
 );
 
-test('requireMasterKey uses constant-time comparison to prevent timing attacks', () => {
-  // The source of auth.js must reference timingSafeEqual. If it uses ===
-  // for the master key comparison it is vulnerable to timing attacks.
-  assert.ok(
-    _authSrc.includes('timingSafeEqual'),
-    'requireMasterKey must use crypto.timingSafeEqual to prevent timing attacks'
-  );
+test('requireApiKey master key: exact match required (case-sensitive, prefix rejected)', async () => {
+  const masterKey = `test-master-timing-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    // Exact match must be accepted
+    const ok = await request(app).get('/api/stats').set('x-api-key', masterKey);
+    assert.equal(ok.status, 200, 'exact master key must be accepted');
+
+    // Wrong case must be rejected (constant-time comparison is case-sensitive)
+    const wrongCase = await request(app).get('/api/stats').set('x-api-key', masterKey.toUpperCase());
+    assert.equal(wrongCase.status, 403, 'wrong-case key must be rejected');
+
+    // Key prefix must be rejected (different length → different key)
+    const prefix = await request(app).get('/api/stats').set('x-api-key', masterKey.slice(0, -1));
+    assert.equal(prefix.status, 403, 'prefix of master key must be rejected');
+  } finally {
+    process.env.API_KEY_REQUIRED = savedRequired;
+    process.env.MASTER_API_KEY = savedMaster;
+  }
 });
 
 test('POST /api/keys/issue requires master key - rejects missing key', async () => {

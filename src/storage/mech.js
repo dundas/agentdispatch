@@ -671,6 +671,16 @@ export class MechStorage {
         data: stored
       }
     });
+    // Write a hash-indexed pointer document for O(1) getIssuedKeyByHash lookups.
+    // The pointer only stores the key_id; revocation/expiry is checked on the primary record.
+    await this.request('/nosql/documents', {
+      method: 'POST',
+      body: {
+        collection_name: 'admp_api_key_hashes',
+        document_key: stored.key_hash,
+        data: { key_id: stored.key_id }
+      }
+    });
     return stored;
   }
 
@@ -684,6 +694,19 @@ export class MechStorage {
   }
 
   async getIssuedKeyByHash(keyHash) {
+    // O(1) lookup via hash-index collection (written in createIssuedKey).
+    // Falls back to full scan if the index doesn't exist (e.g. keys created before this change).
+    const { status: idxStatus, json: idxJson } = await this.request(
+      `/nosql/documents/key/${encodeURIComponent(keyHash)}?collection_name=admp_api_key_hashes`,
+      { allow404: true }
+    );
+    if (idxStatus !== 404) {
+      const pointer = this.extractDocument(idxJson?.data);
+      if (pointer?.key_id) {
+        return this.getIssuedKey(pointer.key_id);
+      }
+    }
+    // Fallback: linear scan (catches pre-index keys; remove once all keys are re-issued)
     const { json } = await this.request('/nosql/documents?collection_name=admp_api_keys&limit=1000');
     const keys = this.extractDocuments(json);
     return keys.find(k => k.key_hash === keyHash) || null;
