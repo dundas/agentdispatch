@@ -439,7 +439,7 @@ test('requireApiKey rejects missing API key when enabled', () => {
   process.env.MASTER_API_KEY = ORIGINAL_MASTER_API_KEY;
 });
 
-test('requireApiKey rejects invalid API key', () => {
+test('requireApiKey rejects invalid API key', async () => {
   process.env.API_KEY_REQUIRED = 'true';
   process.env.MASTER_API_KEY = 'test-master-key';
 
@@ -462,7 +462,8 @@ test('requireApiKey rejects invalid API key', () => {
     nextCalled = true;
   };
 
-  requireApiKey(req, res, next);
+  // requireApiKey is async: it checks issued keys in storage when master key does not match
+  await requireApiKey(req, res, next);
 
   assert.equal(nextCalled, false);
   assert.equal(statusCode, 403);
@@ -2533,4 +2534,876 @@ test('DID fingerprint is 32 hex chars (16 bytes)', async () => {
   assert.ok(agent.did.startsWith('did:seed:'));
   const fingerprint = agent.did.replace('did:seed:', '');
   assert.equal(fingerprint.length, 32, 'DID fingerprint should be 32 hex chars (16 bytes)');
+});
+
+// ============ API KEY MANAGEMENT SECURITY TESTS ============
+
+import { requireMasterKey } from './middleware/auth.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname as _dirname, join as _join } from 'node:path';
+
+const _authSrc = readFileSync(
+  _join(_dirname(fileURLToPath(import.meta.url)), 'middleware/auth.js'),
+  'utf8'
+);
+
+test('requireMasterKey uses constant-time comparison to prevent timing attacks', () => {
+  // The source of auth.js must reference timingSafeEqual. If it uses ===
+  // for the master key comparison it is vulnerable to timing attacks.
+  assert.ok(
+    _authSrc.includes('timingSafeEqual'),
+    'requireMasterKey must use crypto.timingSafeEqual to prevent timing attacks'
+  );
+});
+
+test('POST /api/keys/issue requires master key - rejects missing key', async () => {
+  const res = await request(app)
+    .post('/api/keys/issue')
+    .send({ client_id: 'test-client' });
+
+  assert.equal(res.status, 401);
+  assert.equal(res.body.error, 'API_KEY_REQUIRED');
+});
+
+test('POST /api/keys/issue requires master key - rejects issued key (not master)', async () => {
+  const masterKey = 'test-master-reject-issued';
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  const issueRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'client-for-reject-test' });
+
+  assert.equal(issueRes.status, 201);
+  const issuedApiKey = issueRes.body.api_key;
+
+  // Attempt to issue ANOTHER key using the issued key — must be rejected
+  const rejectRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', issuedApiKey)
+    .send({ client_id: 'should-fail' });
+
+  assert.equal(rejectRes.status, 403);
+  assert.equal(rejectRes.body.error, 'MASTER_KEY_REQUIRED');
+
+  process.env.MASTER_API_KEY = savedMaster;
+});
+
+test('POST /api/keys/issue issues key, raw returned once, hash stored', async () => {
+  const masterKey = 'test-master-key-issue';
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  const res = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'integration-client', description: 'test key', expires_in_days: 30 });
+
+  assert.equal(res.status, 201);
+  assert.ok(res.body.api_key.startsWith('admp_'), 'raw key must start with admp_');
+  assert.ok(res.body.warning, 'warning message must be present');
+  assert.equal(res.body.client_id, 'integration-client');
+  assert.ok(res.body.expires_at, 'expires_at must be set');
+  assert.notEqual(res.body.key_id, res.body.api_key);
+
+  process.env.MASTER_API_KEY = savedMaster;
+});
+
+test('GET /api/keys does not expose raw keys or hashes', async () => {
+  const masterKey = 'test-master-key-list';
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'list-test-client' });
+
+  const res = await request(app)
+    .get('/api/keys')
+    .set('x-api-key', masterKey);
+
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(res.body));
+
+  for (const key of res.body) {
+    assert.ok(!('api_key' in key), 'raw key must not appear in list');
+    assert.ok(!('key_hash' in key), 'key hash must not appear in list');
+  }
+
+  process.env.MASTER_API_KEY = savedMaster;
+});
+
+// Unit tests for requireApiKey middleware: issued key acceptance, revocation, expiry.
+// These bypass the HTTP server because API_KEY_REQUIRED=false at server startup means
+// the middleware is not mounted on the app. We test the middleware function directly.
+
+function makeMiddlewareHarness(apiKeyHeader) {
+  const req = { headers: { 'x-api-key': apiKeyHeader } };
+  let statusCode;
+  let body;
+  const res = {
+    status(code) { statusCode = code; return this; },
+    json(payload) { body = payload; return this; }
+  };
+  let nextCalled = false;
+  const next = () => { nextCalled = true; };
+  return { req, res, next, getStatus: () => statusCode, getBody: () => body, wasNextCalled: () => nextCalled };
+}
+
+test('requireApiKey accepts a valid issued key (unit test)', async () => {
+  const masterKey = 'test-master-issued-accept-unit';
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  // Issue a key via HTTP (uses the actual storage)
+  const issueRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'issued-key-unit-test' });
+
+  assert.equal(issueRes.status, 201);
+  const issuedApiKey = issueRes.body.api_key;
+
+  // Call requireApiKey middleware directly
+  const harness = makeMiddlewareHarness(issuedApiKey);
+  await requireApiKey(harness.req, harness.res, harness.next);
+
+  assert.equal(harness.wasNextCalled(), true, 'next() must be called for valid issued key');
+  assert.equal(harness.getStatus(), undefined, 'no error status for valid issued key');
+
+  process.env.MASTER_API_KEY = savedMaster;
+  process.env.API_KEY_REQUIRED = savedRequired;
+});
+
+test('revoked issued key is rejected by requireApiKey (unit test)', async () => {
+  const masterKey = 'test-master-revoke-unit';
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  // Issue a key via HTTP
+  const issueRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'revoke-unit-client' });
+
+  assert.equal(issueRes.status, 201);
+  const { api_key: issuedKey, key_id: keyId } = issueRes.body;
+
+  // Confirm it is accepted before revocation
+  const harnessOk = makeMiddlewareHarness(issuedKey);
+  await requireApiKey(harnessOk.req, harnessOk.res, harnessOk.next);
+  assert.equal(harnessOk.wasNextCalled(), true);
+
+  // Revoke via HTTP
+  const revokeRes = await request(app)
+    .delete(`/api/keys/${keyId}`)
+    .set('x-api-key', masterKey);
+  assert.equal(revokeRes.status, 200);
+  assert.equal(revokeRes.body.revoked, true);
+
+  // Confirm it is rejected after revocation
+  const harnessRevoked = makeMiddlewareHarness(issuedKey);
+  await requireApiKey(harnessRevoked.req, harnessRevoked.res, harnessRevoked.next);
+  assert.equal(harnessRevoked.wasNextCalled(), false);
+  assert.equal(harnessRevoked.getStatus(), 403);
+  assert.equal(harnessRevoked.getBody().error, 'INVALID_API_KEY');
+
+  process.env.MASTER_API_KEY = savedMaster;
+  process.env.API_KEY_REQUIRED = savedRequired;
+});
+
+test('expired issued key is rejected with API_KEY_EXPIRED (unit test)', async () => {
+  // NOTE: expires_in_days: 0 would be falsy in keys.js and set expires_at=null.
+  // Instead we directly insert a key record with a past expires_at into storage.
+  const { createHash, randomBytes } = await import('node:crypto');
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  const rawKey = `admp_${randomBytes(32).toString('hex')}`;
+  const keyHash = createHash('sha256').update(rawKey).digest('hex');
+  const keyId = `test-expired-key-${Date.now()}`;
+
+  await storage.createIssuedKey({
+    key_id: keyId,
+    key_hash: keyHash,
+    client_id: 'expire-test-direct',
+    description: '',
+    created_at: Date.now() - 10000,
+    expires_at: Date.now() - 1,  // already expired
+    revoked: false
+  });
+
+  const harness = makeMiddlewareHarness(rawKey);
+  await requireApiKey(harness.req, harness.res, harness.next);
+
+  assert.equal(harness.wasNextCalled(), false);
+  assert.equal(harness.getStatus(), 403);
+  assert.equal(harness.getBody().error, 'API_KEY_EXPIRED');
+
+  process.env.API_KEY_REQUIRED = savedRequired;
+});
+
+test('DELETE /api/keys/:keyId returns 404 for unknown key', async () => {
+  const masterKey = 'test-master-del-404';
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  const res = await request(app)
+    .delete('/api/keys/nonexistent-key-id')
+    .set('x-api-key', masterKey);
+
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error, 'KEY_NOT_FOUND');
+
+  process.env.MASTER_API_KEY = savedMaster;
+});
+
+// ===== MAJOR: double-middleware chain unit test =====
+// The global requireApiKey middleware is only mounted when API_KEY_REQUIRED=true at server
+// startup, so the full HTTP chain cannot be exercised via supertest in the test suite.
+// Instead we call both middleware functions directly in sequence to verify:
+//   1. requireApiKey calls next() for a valid issued key (accepts it)
+//   2. requireMasterKey then rejects the same key with 403 MASTER_KEY_REQUIRED
+test('requireApiKey passes issued key through; requireMasterKey then rejects with MASTER_KEY_REQUIRED (unit chain test)', async () => {
+  const masterKey = 'test-master-chain-unit';
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+
+  // Issue a key while master key is configured (API_KEY_REQUIRED is false so no global gating)
+  const issueRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'chain-unit-client' });
+
+  assert.equal(issueRes.status, 201);
+  const issuedKey = issueRes.body.api_key;
+
+  // Set API_KEY_REQUIRED=true so requireApiKey enforces key checks
+  process.env.API_KEY_REQUIRED = 'true';
+
+  // Step 1: call requireApiKey directly — must accept the issued key and call next()
+  const req = { headers: { 'x-api-key': issuedKey } };
+  let step1Status;
+  const res1 = {
+    status(code) { step1Status = code; return this; },
+    json() { return this; }
+  };
+  let nextCalledByRequireApiKey = false;
+  await requireApiKey(req, res1, () => { nextCalledByRequireApiKey = true; });
+
+  assert.equal(nextCalledByRequireApiKey, true, 'requireApiKey must call next() for a valid issued key');
+  assert.equal(step1Status, undefined, 'requireApiKey must not set an error status for a valid issued key');
+
+  // Step 2: call requireMasterKey on the same req — must reject with 403 MASTER_KEY_REQUIRED
+  // (because the issued key is not the master key)
+  let step2Status;
+  let step2Body;
+  const res2 = {
+    status(code) { step2Status = code; return this; },
+    json(payload) { step2Body = payload; return this; }
+  };
+  requireMasterKey(req, res2, () => {
+    assert.fail('requireMasterKey must NOT call next() for an issued key');
+  });
+
+  assert.equal(step2Status, 403, 'requireMasterKey must return 403 for an issued key');
+  assert.equal(step2Body.error, 'MASTER_KEY_REQUIRED', 'error code must be MASTER_KEY_REQUIRED');
+
+  process.env.MASTER_API_KEY = savedMaster;
+  process.env.API_KEY_REQUIRED = savedRequired;
+});
+
+// ===== MAJOR: missing MASTER_API_KEY with API_KEY_REQUIRED=true =====
+// When MASTER_API_KEY is not configured, requireApiKey must still accept
+// valid issued keys via the hash lookup path.
+test('issued key authenticates when MASTER_API_KEY is not set but API_KEY_REQUIRED=true', async () => {
+  const masterKey = 'test-master-no-master-env';
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+
+  // Issue a key while master key is configured
+  const issueRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'no-master-env-client' });
+
+  assert.equal(issueRes.status, 201);
+  const issuedKey = issueRes.body.api_key;
+
+  // Now unset MASTER_API_KEY and set API_KEY_REQUIRED=true
+  delete process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  // The issued key must be accepted by requireApiKey via issued-key hash path
+  const harness = makeMiddlewareHarness(issuedKey);
+  await requireApiKey(harness.req, harness.res, harness.next);
+
+  assert.equal(harness.wasNextCalled(), true, 'issued key must authenticate even when MASTER_API_KEY is unset');
+  assert.equal(harness.getStatus(), undefined, 'no error status expected');
+
+  process.env.MASTER_API_KEY = savedMaster;
+  process.env.API_KEY_REQUIRED = savedRequired;
+});
+
+// ===== MINOR: client_id format validation =====
+test('POST /api/keys/issue rejects invalid client_id format', async () => {
+  const masterKey = 'test-master-client-id-validation';
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  // Empty string
+  const emptyRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: '' });
+  assert.equal(emptyRes.status, 400, 'empty client_id must be rejected');
+  assert.equal(emptyRes.body.error, 'INVALID_CLIENT_ID');
+
+  // client_id with invalid characters (spaces)
+  const invalidCharsRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'invalid client id' });
+  assert.equal(invalidCharsRes.status, 400, 'client_id with spaces must be rejected');
+  assert.equal(invalidCharsRes.body.error, 'INVALID_CLIENT_ID');
+
+  // client_id exceeding 100 chars
+  const longId = 'a'.repeat(101);
+  const longRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: longId });
+  assert.equal(longRes.status, 400, 'client_id over 100 chars must be rejected');
+  assert.equal(longRes.body.error, 'INVALID_CLIENT_ID');
+
+  // Valid client_id with hyphens and underscores must pass validation
+  const validRes = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: 'valid-client_123' });
+  assert.equal(validRes.status, 201, 'valid client_id must be accepted');
+
+  process.env.MASTER_API_KEY = savedMaster;
+});
+
+
+// ===== MINOR: numeric-only client_id is intentionally permitted =====
+// The CLIENT_ID_PATTERN (/^[a-zA-Z0-9_-]+$/) accepts numeric-only strings.
+// This is by design: client_id is an opaque integration label with no
+// requirement for a leading letter. Callers may use numeric tenant IDs.
+test('POST /api/keys/issue accepts numeric-only client_id (intentional design)', async () => {
+  const masterKey = 'test-master-numeric-client-id';
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  const res = await request(app)
+    .post('/api/keys/issue')
+    .set('x-api-key', masterKey)
+    .send({ client_id: '12345' });
+
+  assert.equal(res.status, 201, 'numeric-only client_id must be accepted (201 Created)');
+  assert.equal(res.body.client_id, '12345', 'returned client_id must match submitted value');
+
+  process.env.MASTER_API_KEY = savedMaster;
+});
+
+// ============ AGENT TRUST MODEL TESTS ============
+
+test('trust model: registration is exempt from API key when API_KEY_REQUIRED=true', async () => {
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-master-exempt';
+
+  try {
+    const suffix = `${Date.now()}-exempt`;
+    const res = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://exempt-test-${suffix}`, agent_type: 'test' });
+    // No X-API-Key header — should succeed
+    assert.equal(res.status, 201, 'register must succeed without API key even when API_KEY_REQUIRED=true');
+    assert.ok(res.body.agent_id);
+  } finally {
+    process.env.API_KEY_REQUIRED = savedRequired;
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+test('trust model: other endpoints require API key when API_KEY_REQUIRED=true', async () => {
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-master-gate';
+
+  try {
+    const res = await request(app)
+      .get('/api/stats');
+    // No X-API-Key header — should be blocked
+    assert.equal(res.status, 401, '/api/stats must require API key when API_KEY_REQUIRED=true');
+  } finally {
+    process.env.API_KEY_REQUIRED = savedRequired;
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+test('trust model: single-use enrollment token burns on first use', async () => {
+  const masterKey = `test-master-singleuse-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    // Issue a single-use token
+    const issueRes = await request(app)
+      .post('/api/keys/issue')
+      .set('x-api-key', masterKey)
+      .send({ client_id: 'enrollment-client', single_use: true });
+    assert.equal(issueRes.status, 201);
+    assert.equal(issueRes.body.single_use, true);
+    const token = issueRes.body.api_key;
+
+    // First use — register an agent (exempted route — single-use doesn't matter here)
+    // Use token on a non-registration API endpoint
+    const statsRes1 = await request(app)
+      .get('/api/stats')
+      .set('x-api-key', token);
+    assert.equal(statsRes1.status, 200, 'first use should succeed');
+
+    // Second use — should be rejected
+    const statsRes2 = await request(app)
+      .get('/api/stats')
+      .set('x-api-key', token);
+    assert.equal(statsRes2.status, 403, 'second use should be rejected');
+    assert.equal(statsRes2.body.error, 'ENROLLMENT_TOKEN_USED');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
+});
+
+test('trust model: single-use token scope enforcement', async () => {
+  const masterKey = `test-master-scope-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    const suffix = `${Date.now()}-scope`;
+    // Register two agents without auth key (exempt)
+    const regA = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://scope-a-${suffix}`, agent_type: 'test' });
+    assert.equal(regA.status, 201);
+
+    const regB = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://scope-b-${suffix}`, agent_type: 'test' });
+    assert.equal(regB.status, 201);
+
+    const agentA = regA.body.agent_id;
+    const agentB = regB.body.agent_id;
+
+    // Issue a token scoped to agentA
+    const issueRes = await request(app)
+      .post('/api/keys/issue')
+      .set('x-api-key', masterKey)
+      .send({ client_id: 'scope-client', single_use: false, target_agent_id: agentA });
+    assert.equal(issueRes.status, 201);
+    const token = issueRes.body.api_key;
+
+    // Access agentA endpoint — should succeed
+    const resA = await request(app)
+      .get(`/api/agents/${encodeURIComponent(agentA)}`)
+      .set('x-api-key', token)
+      .set('x-agent-id', agentA);
+    assert.equal(resA.status, 200, 'scoped token must work for target agent');
+
+    // Access agentB endpoint — should be rejected
+    const resB = await request(app)
+      .get(`/api/agents/${encodeURIComponent(agentB)}`)
+      .set('x-api-key', token)
+      .set('x-agent-id', agentB);
+    assert.equal(resB.status, 403, 'scoped token must be rejected for other agents');
+    assert.equal(resB.body.error, 'ENROLLMENT_TOKEN_SCOPE');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
+});
+
+test('trust model: open tenant policy → agent approved immediately', async () => {
+  const tenantId = `tenant-open-${Date.now()}`;
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'open', metadata: {} });
+
+  const suffix = `${Date.now()}`;
+  const res = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `agent://open-policy-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.body.registration_status, 'approved', 'open policy should approve immediately');
+});
+
+test('trust model: approval_required tenant policy → agent starts pending', async () => {
+  const tenantId = `tenant-approval-${Date.now()}`;
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'approval_required', metadata: {} });
+
+  const suffix = `${Date.now()}`;
+  const res = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `agent://pending-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+
+  assert.equal(res.status, 201);
+  assert.equal(res.body.registration_status, 'pending', 'approval_required policy should set status to pending');
+});
+
+test('trust model: pending agent is blocked from API access', async () => {
+  const tenantId = `tenant-block-${Date.now()}`;
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'approval_required', metadata: {} });
+
+  const suffix = `${Date.now()}`;
+  const regRes = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `agent://blocked-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+  assert.equal(regRes.status, 201);
+  assert.equal(regRes.body.registration_status, 'pending');
+
+  const agentId = regRes.body.agent_id;
+
+  // Try heartbeat — should be blocked
+  const hbRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agentId)}/heartbeat`)
+    .set('x-agent-id', agentId)
+    .send({});
+  assert.equal(hbRes.status, 403);
+  assert.equal(hbRes.body.error, 'REGISTRATION_PENDING');
+});
+
+test('trust model: approve pending agent → becomes accessible', async () => {
+  const masterKey = `test-master-approve-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  const tenantId = `tenant-approve-${Date.now()}`;
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'approval_required', metadata: {} });
+
+  try {
+    const suffix = `${Date.now()}`;
+    const regRes = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://to-approve-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+    assert.equal(regRes.status, 201);
+    const agentId = regRes.body.agent_id;
+
+    // Approve it
+    const approveRes = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/approve`)
+      .set('x-api-key', masterKey);
+    assert.equal(approveRes.status, 200);
+    assert.equal(approveRes.body.registration_status, 'approved');
+
+    // Now heartbeat should work
+    const hbRes = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/heartbeat`)
+      .set('x-agent-id', agentId)
+      .send({});
+    assert.equal(hbRes.status, 200, 'approved agent should be accessible');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+test('trust model: reject agent → returns REGISTRATION_REJECTED error', async () => {
+  const masterKey = `test-master-reject-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  const tenantId = `tenant-reject-${Date.now()}`;
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'approval_required', metadata: {} });
+
+  try {
+    const suffix = `${Date.now()}`;
+    const regRes = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://to-reject-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+    assert.equal(regRes.status, 201);
+    const agentId = regRes.body.agent_id;
+
+    // Reject it
+    const rejectRes = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/reject`)
+      .set('x-api-key', masterKey)
+      .send({ reason: 'Spam agent' });
+    assert.equal(rejectRes.status, 200);
+    assert.equal(rejectRes.body.registration_status, 'rejected');
+    assert.equal(rejectRes.body.rejection_reason, 'Spam agent');
+
+    // Heartbeat should return REGISTRATION_REJECTED
+    const hbRes = await request(app)
+      .post(`/api/agents/${encodeURIComponent(agentId)}/heartbeat`)
+      .set('x-agent-id', agentId)
+      .send({});
+    assert.equal(hbRes.status, 403);
+    assert.equal(hbRes.body.error, 'REGISTRATION_REJECTED');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+test('trust model: pending list endpoint returns correct subset', async () => {
+  const masterKey = `test-master-pending-list-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.MASTER_API_KEY = masterKey;
+
+  const tenantId = `tenant-list-${Date.now()}`;
+  await storage.createTenant({ tenant_id: tenantId, name: tenantId, registration_policy: 'approval_required', metadata: {} });
+
+  try {
+    const suffix = Date.now();
+    // Register two pending agents in the tenant
+    const reg1 = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://list-pending-1-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+    assert.equal(reg1.status, 201);
+
+    const reg2 = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://list-pending-2-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+    assert.equal(reg2.status, 201);
+
+    // Register one approved (different tenant — no policy)
+    const reg3 = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: `agent://list-approved-${suffix}`, agent_type: 'test' });
+    assert.equal(reg3.status, 201);
+
+    // Fetch pending list
+    const listRes = await request(app)
+      .get(`/api/agents/tenants/${tenantId}/pending`)
+      .set('x-api-key', masterKey);
+    assert.equal(listRes.status, 200);
+    const ids = listRes.body.agents.map(a => a.agent_id);
+    assert.ok(ids.includes(reg1.body.agent_id), 'pending agent 1 must be in list');
+    assert.ok(ids.includes(reg2.body.agent_id), 'pending agent 2 must be in list');
+    assert.ok(!ids.includes(reg3.body.agent_id), 'approved agent must NOT be in pending list');
+    // Ensure no secret keys are exposed
+    for (const a of listRes.body.agents) {
+      assert.equal(a.secret_key, undefined, 'secret_key must not be in pending list response');
+    }
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+test('trust model: existing agents without registration_status are treated as approved', async () => {
+  // Simulate a legacy agent (no registration_status field)
+  const agentId = `agent://legacy-no-status-${Date.now()}`;
+  await storage.createAgent({
+    agent_id: agentId,
+    agent_type: 'test',
+    public_key: 'fake-key',
+    heartbeat: { last_heartbeat: Date.now(), status: 'online', interval_ms: 60000, timeout_ms: 300000 },
+    trusted_agents: [],
+    blocked_agents: []
+    // No registration_status field
+  });
+
+  const hbRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(agentId)}/heartbeat`)
+    .set('x-agent-id', agentId)
+    .send({});
+  // Should NOT be blocked — absence of registration_status means approved
+  assert.notEqual(hbRes.status, 403, 'legacy agent without registration_status must not be blocked');
+});
+
+test('trust model: DID web — shadow agent created from DID document', async () => {
+  const domain = `did-web-${Date.now()}.example.com`;
+  const did = `did:web:${domain}`;
+  const shadowAgentId = `did-web:${domain}`;
+  const keypair = nacl.sign.keyPair();
+  const pubKeyB64 = toBase64(keypair.publicKey);
+
+  // Build a minimal DID document using publicKeyBase64 format
+  const didDoc = {
+    '@context': ['https://www.w3.org/ns/did/v1'],
+    id: did,
+    verificationMethod: [{
+      id: `${did}#key-1`,
+      type: 'Ed25519VerificationKey2020',
+      controller: did,
+      publicKeyBase64: pubKeyB64
+    }]
+  };
+
+  const originalFetch = globalThis.fetch;
+  const didDocUrl = `https://${domain}/.well-known/did.json`;
+  globalThis.fetch = async (url, init) => {
+    if (url === didDocUrl) {
+      const body = JSON.stringify(didDoc);
+      return { ok: true, json: async () => didDoc, text: async () => body };
+    }
+    return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
+  };
+
+  try {
+    // Sign just the date header — simplest valid signature for testing
+    const dateStr = new Date().toUTCString();
+    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
+    const sigB64 = toBase64(sigBytes);
+    const signatureHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
+
+    // Use heartbeat endpoint which runs authenticateHttpSignature middleware
+    const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
+    const res = await request(app)
+      .post(targetPath)
+      .set('Signature', signatureHeader)
+      .set('Date', dateStr)
+      .send({});
+
+    // Auth should succeed; status 200 or 400 from heartbeat handler, not 401/403
+    assert.notEqual(res.status, 401, 'DID web auth should not return 401');
+    assert.notEqual(res.status, 403, `DID web auth should not return 403 (got: ${JSON.stringify(res.body)})`);
+
+    // Verify shadow agent was persisted
+    const shadowAgent = await storage.getAgentByDid(did);
+    assert.ok(shadowAgent, 'shadow agent must be created for did:web');
+    assert.equal(shadowAgent.registration_mode, 'did-web');
+    assert.equal(shadowAgent.registration_status, 'approved', 'open policy should set status to approved');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('trust model: DID web — deduplication: same DID resolves to existing shadow agent', async () => {
+  const domain = `did-web-dedup-${Date.now()}.example.com`;
+  const did = `did:web:${domain}`;
+  const shadowAgentId = `did-web:${domain}`;
+  const keypair = nacl.sign.keyPair();
+  const pubKeyB64 = toBase64(keypair.publicKey);
+
+  const didDoc = {
+    '@context': ['https://www.w3.org/ns/did/v1'],
+    id: did,
+    verificationMethod: [{
+      id: `${did}#key-1`,
+      type: 'Ed25519VerificationKey2020',
+      controller: did,
+      publicKeyBase64: pubKeyB64
+    }]
+  };
+
+  const originalFetch = globalThis.fetch;
+  const didDocUrlDedup = `https://${domain}/.well-known/did.json`;
+  globalThis.fetch = async (url, init) => {
+    if (url === didDocUrlDedup) {
+      const body = JSON.stringify(didDoc);
+      return { ok: true, json: async () => didDoc, text: async () => body };
+    }
+    return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
+  };
+
+  try {
+    const dateStr = new Date().toUTCString();
+    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
+    const sigB64 = toBase64(sigBytes);
+    const sigHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
+    const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
+
+    // First request: creates shadow agent
+    await request(app).post(targetPath).set('Signature', sigHeader).set('Date', dateStr).send({});
+
+    const agent1 = await storage.getAgentByDid(did);
+    assert.ok(agent1, 'shadow agent must exist after first request');
+
+    // Second request: should reuse existing agent (not create duplicate)
+    await request(app).post(targetPath).set('Signature', sigHeader).set('Date', dateStr).send({});
+
+    const agent2 = await storage.getAgentByDid(did);
+    assert.equal(agent1.agent_id, agent2.agent_id, 'shadow agent must be deduplicated');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('trust model: DID web — fetch failure → AGENT_NOT_FOUND (fail closed)', async () => {
+  const domain = `did-web-unreachable-${Date.now()}.example.com`;
+  const did = `did:web:${domain}`;
+  const shadowAgentId = `did-web:${domain}`;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('Network unreachable');
+  };
+
+  try {
+    // Sign some content (invalid signature but DID resolution fails first anyway)
+    const sigHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="invalidsig"`;
+    const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
+
+    const res = await request(app)
+      .post(targetPath)
+      .set('Signature', sigHeader)
+      .set('Date', new Date().toUTCString())
+      .send({});
+
+    assert.equal(res.status, 404, 'failed DID fetch must return 404 (fail closed)');
+    assert.equal(res.body.error, 'AGENT_NOT_FOUND');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('trust model: tenant creation accepts registration_policy field', async () => {
+  const masterKey = `test-master-tenant-policy-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    const tenantId = `tenant-policy-test-${Date.now()}`;
+    const res = await request(app)
+      .post('/api/agents/tenants')
+      .set('x-api-key', masterKey)
+      .send({ tenant_id: tenantId, name: 'Policy Test', registration_policy: 'approval_required' });
+
+    assert.equal(res.status, 201);
+    assert.equal(res.body.registration_policy, 'approval_required');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
+});
+
+test('trust model: tenant creation rejects invalid registration_policy', async () => {
+  const masterKey = `test-master-bad-policy-${Date.now()}`;
+  const savedMaster = process.env.MASTER_API_KEY;
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  process.env.MASTER_API_KEY = masterKey;
+  process.env.API_KEY_REQUIRED = 'true';
+
+  try {
+    const tenantId = `tenant-bad-policy-${Date.now()}`;
+    const res = await request(app)
+      .post('/api/agents/tenants')
+      .set('x-api-key', masterKey)
+      .send({ tenant_id: tenantId, registration_policy: 'unsupported_value' });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'INVALID_REGISTRATION_POLICY');
+  } finally {
+    process.env.MASTER_API_KEY = savedMaster;
+    process.env.API_KEY_REQUIRED = savedRequired;
+  }
 });

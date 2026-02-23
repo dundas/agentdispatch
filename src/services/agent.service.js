@@ -105,6 +105,11 @@ export class AgentService {
       blocked_agents: []
     };
 
+    // Apply registration policy
+    const tenant = tenant_id ? await storage.getTenant(tenant_id) : null;
+    const policy = tenant?.registration_policy || process.env.REGISTRATION_POLICY || 'open';
+    agent.registration_status = policy === 'approval_required' ? 'pending' : 'approved';
+
     await storage.createAgent(agent);
 
     const response = {
@@ -117,6 +122,36 @@ export class AgentService {
     }
 
     return response;
+  }
+
+  /**
+   * Approve a pending agent
+   * @param {string} agentId
+   * @returns {Object} Updated agent
+   */
+  async approve(agentId) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+    return await storage.updateAgent(agentId, { registration_status: 'approved' });
+  }
+
+  /**
+   * Reject an agent
+   * @param {string} agentId
+   * @param {string} reason - Optional rejection reason
+   * @returns {Object} Updated agent
+   */
+  async reject(agentId, reason) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+    return await storage.updateAgent(agentId, {
+      registration_status: 'rejected',
+      rejection_reason: reason || null
+    });
   }
 
   /**

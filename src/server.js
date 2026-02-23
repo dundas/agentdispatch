@@ -19,6 +19,7 @@ import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
 import discoveryRoutes from './routes/discovery.js';
+import keysRoutes from './routes/keys.js';
 import { requireApiKey } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
@@ -59,11 +60,17 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(pinoHttp({ logger }));
 
-// Optional API key authentication
+// API key authentication middleware
+// Always register so requireApiKey (which reads API_KEY_REQUIRED at request time) is always called.
+// This allows tests to toggle API_KEY_REQUIRED at runtime without restarting the server.
 if (process.env.API_KEY_REQUIRED === 'true') {
   logger.info('API key authentication enabled');
-  app.use('/api', requireApiKey);
 }
+app.use('/api', (req, res, next) => {
+  // Always allow agent self-registration without an API key
+  if (req.method === 'POST' && req.path === '/agents/register') return next();
+  return requireApiKey(req, res, next);
+});
 
 // Load OpenAPI spec
 const openapiSpec = YAML.load(join(projectRoot, 'openapi.yaml'));
@@ -110,6 +117,7 @@ app.use('/api/agents', agentRoutes);
 app.use('/api/agents', inboxRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/agents', outboxRoutes);
+app.use('/api/keys', keysRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
 app.use('/api', outboxWebhookRouter);  // For /api/webhooks/mailgun
 

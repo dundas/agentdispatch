@@ -3,11 +3,19 @@
  * Supports:
  * - Agent ID lookup (legacy)
  * - HTTP Signature verification (RFC 9421-style)
+ * - DID web federation
+ * - Single-use enrollment tokens
+ * - Registration approval status gate
  */
 
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { storage } from '../storage/index.js';
 import nacl from 'tweetnacl';
 import { fromBase64, toBase64 } from '../utils/crypto.js';
+
+function hashApiKey(key) {
+  return createHash('sha256').update(key).digest('hex');
+}
 
 /**
  * Verify agent exists (legacy auth)
@@ -29,6 +37,20 @@ export async function authenticateAgent(req, res, next) {
     return res.status(404).json({
       error: 'AGENT_NOT_FOUND',
       message: `Agent ${agentId} not found`
+    });
+  }
+
+  if (agent.registration_status === 'pending') {
+    return res.status(403).json({
+      error: 'REGISTRATION_PENDING',
+      message: 'Agent registration is pending approval'
+    });
+  }
+
+  if (agent.registration_status === 'rejected') {
+    return res.status(403).json({
+      error: 'REGISTRATION_REJECTED',
+      message: 'Agent registration has been rejected'
     });
   }
 
@@ -69,9 +91,11 @@ export async function authenticateHttpSignature(req, res, next) {
       });
     }
 
-    // Resolve agent by keyId (supports agent_id or DID)
+    // Resolve agent by keyId (supports agent_id, DID seed, or DID web)
     let agent;
-    if (params.keyId.startsWith('did:seed:')) {
+    if (params.keyId.startsWith('did:web:')) {
+      agent = await resolveDIDWebAgent(params.keyId, req);
+    } else if (params.keyId.startsWith('did:seed:')) {
       agent = await storage.getAgentByDid(params.keyId);
     } else {
       agent = await storage.getAgent(params.keyId);
@@ -81,6 +105,21 @@ export async function authenticateHttpSignature(req, res, next) {
       return res.status(404).json({
         error: 'AGENT_NOT_FOUND',
         message: `Agent for keyId ${params.keyId} not found`
+      });
+    }
+
+    // Approval status gate
+    if (agent.registration_status === 'pending') {
+      return res.status(403).json({
+        error: 'REGISTRATION_PENDING',
+        message: 'Agent registration is pending approval'
+      });
+    }
+
+    if (agent.registration_status === 'rejected') {
+      return res.status(403).json({
+        error: 'REGISTRATION_REJECTED',
+        message: 'Agent registration has been rejected'
       });
     }
 
@@ -110,20 +149,27 @@ export async function authenticateHttpSignature(req, res, next) {
     });
     const signingString = signingLines.join('\n');
 
-    // Verify signature against all active public keys (supports rotation window)
+    // For DID web agents: verify against keys fetched during resolution
+    // For regular agents: verify against all active public keys
     const sigBytes = fromBase64(params.signature);
     const message = Buffer.from(signingString, 'utf8');
 
-    const activeKeys = agent.public_keys
-      ? agent.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
-      : [{ public_key: agent.public_key }];
+    const activeKeys = agent._did_web_keys
+      ? agent._did_web_keys
+      : agent.public_keys
+        ? agent.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
+        : [{ public_key: agent.public_key }];
 
     let verified = false;
     for (const keyEntry of activeKeys) {
-      const pubKey = fromBase64(keyEntry.public_key);
-      if (nacl.sign.detached.verify(message, sigBytes, pubKey)) {
-        verified = true;
-        break;
+      try {
+        const pubKey = fromBase64(keyEntry.public_key);
+        if (nacl.sign.detached.verify(message, sigBytes, pubKey)) {
+          verified = true;
+          break;
+        }
+      } catch {
+        // Skip malformed key entries
       }
     }
 
@@ -134,7 +180,9 @@ export async function authenticateHttpSignature(req, res, next) {
       });
     }
 
-    req.agent = agent;
+    // Clean up transient DID web keys before attaching to request
+    const { _did_web_keys, ...agentForRequest } = agent;
+    req.agent = agentForRequest;
     req.authMethod = 'http-signature';
     next();
   } catch (error) {
@@ -163,8 +211,9 @@ function parseSignatureHeader(header) {
 
 /**
  * Optional API key authentication
+ * Accepts MASTER_API_KEY or any valid issued key from storage.
  */
-export function requireApiKey(req, res, next) {
+export async function requireApiKey(req, res, next) {
   const apiKeyRequired = process.env.API_KEY_REQUIRED === 'true';
 
   if (!apiKeyRequired) {
@@ -180,12 +229,223 @@ export function requireApiKey(req, res, next) {
     });
   }
 
+  // Check master key first using constant-time comparison to prevent timing attacks
   const masterKey = process.env.MASTER_API_KEY;
+  if (masterKey) {
+    const masterBuf = Buffer.from(masterKey);
+    const inputBuf = Buffer.from(apiKey);
+    if (masterBuf.length === inputBuf.length && timingSafeEqual(masterBuf, inputBuf)) {
+      req.apiKeyType = 'master';
+      return next();
+    }
+  }
 
-  if (apiKey !== masterKey) {
+  // Check issued keys by hash
+  try {
+    const keyHash = hashApiKey(apiKey);
+    const issuedKey = await storage.getIssuedKeyByHash(keyHash);
+
+    if (issuedKey && !issuedKey.revoked) {
+      if (issuedKey.expires_at && Date.now() > issuedKey.expires_at) {
+        return res.status(403).json({
+          error: 'API_KEY_EXPIRED',
+          message: 'API key has expired'
+        });
+      }
+
+      // Single-use enrollment token: check if already consumed
+      if (issuedKey.single_use && issuedKey.used_at) {
+        return res.status(403).json({
+          error: 'ENROLLMENT_TOKEN_USED',
+          message: 'This enrollment token has already been used'
+        });
+      }
+
+      // Single-use token scope: validate against requested agent path
+      if (issuedKey.target_agent_id) {
+        // req.params not populated yet (middleware runs before route matching)
+        // Parse agent ID directly from req.path
+        const match = req.path.match(/^\/agents\/([^/]+)/);
+        const requestedAgentId = match ? decodeURIComponent(match[1]) : null;
+        if (requestedAgentId && requestedAgentId !== 'register' && requestedAgentId !== issuedKey.target_agent_id) {
+          return res.status(403).json({
+            error: 'ENROLLMENT_TOKEN_SCOPE',
+            message: 'This enrollment token is scoped to a different agent'
+          });
+        }
+      }
+
+      // Burn single-use token on first valid use
+      if (issuedKey.single_use) {
+        await storage.updateIssuedKey(issuedKey.key_id, { used_at: Date.now() });
+      }
+
+      req.apiKeyType = 'issued';
+      req.apiKeyId = issuedKey.key_id;
+      req.apiKeyClientId = issuedKey.client_id;
+      return next();
+    }
+  } catch {
+    // Storage lookup failure → deny
+  }
+
+  return res.status(403).json({
+    error: 'INVALID_API_KEY',
+    message: 'Invalid API key'
+  });
+}
+
+/**
+ * Decode a base58btc-encoded multibase string (stripping the 2-byte multicodec prefix).
+ * Used for DID document `publicKeyMultibase` values (e.g. Ed25519 keys start with 0xed01).
+ */
+function base58btcDecode(multibase) {
+  // Strip leading 'z' multibase prefix
+  const encoded = multibase.startsWith('z') ? multibase.slice(1) : multibase;
+
+  const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const BASE = BigInt(58);
+
+  let result = BigInt(0);
+  for (const char of encoded) {
+    const idx = ALPHABET.indexOf(char);
+    if (idx < 0) throw new Error(`Invalid base58 character: ${char}`);
+    result = result * BASE + BigInt(idx);
+  }
+
+  // Convert to bytes
+  const hex = result.toString(16).padStart(Math.ceil(result.toString(16).length / 2) * 2, '0');
+  const bytes = Buffer.from(hex, 'hex');
+
+  // Strip 2-byte multicodec prefix (Ed25519 = 0xed01)
+  return bytes.slice(2);
+}
+
+/**
+ * Resolve a did:web: DID to a shadow agent record.
+ * - Fetches the DID document from the well-known URL
+ * - Extracts Ed25519 verification keys
+ * - Returns existing shadow agent or creates a new one per tenant policy
+ */
+async function resolveDIDWebAgent(did, req) {
+  try {
+    // Parse DID web URL: did:web:domain.com[:path:segments]
+    const withoutPrefix = did.slice('did:web:'.length);
+    const parts = withoutPrefix.split(':');
+    const domain = decodeURIComponent(parts[0]);
+    const pathSegments = parts.slice(1).map(decodeURIComponent);
+
+    const didUrl = pathSegments.length > 0
+      ? `https://${domain}/${pathSegments.join('/')}/${did}.json`
+      : `https://${domain}/.well-known/did.json`;
+
+    // Fetch with 5s timeout (fail-closed on network errors)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    let didDoc;
+    try {
+      const resp = await fetch(didUrl, { signal: controller.signal });
+      if (!resp.ok) return null;
+      didDoc = await resp.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!didDoc || didDoc.id !== did) return null;
+
+    // Extract Ed25519 verification methods
+    const verificationMethods = (didDoc.verificationMethod || []).filter(
+      vm => vm.type === 'Ed25519VerificationKey2020' || vm.type === 'Ed25519VerificationKey2018'
+    );
+
+    if (verificationMethods.length === 0) return null;
+
+    // Convert DID doc keys to internal format for signature verification
+    const didWebKeys = verificationMethods.map(vm => {
+      if (vm.publicKeyMultibase) {
+        const pubKeyBytes = base58btcDecode(vm.publicKeyMultibase);
+        return { public_key: toBase64(pubKeyBytes) };
+      }
+      if (vm.publicKeyBase64) {
+        return { public_key: vm.publicKeyBase64 };
+      }
+      return null;
+    }).filter(Boolean);
+
+    if (didWebKeys.length === 0) return null;
+
+    // Check for existing shadow agent
+    const existing = await storage.getAgentByDid(did);
+    if (existing) {
+      // Attach fresh keys for this request's signature verification
+      return { ...existing, _did_web_keys: didWebKeys };
+    }
+
+    // Create shadow agent with tenant policy applied
+    // Shadow agents don't have a specific tenant; use global policy
+    const policy = process.env.REGISTRATION_POLICY || 'open';
+    const registrationStatus = policy === 'approval_required' ? 'pending' : 'approved';
+
+    const shadowAgent = {
+      agent_id: `did-web:${domain}`,
+      agent_type: 'federated',
+      did,
+      public_key: didWebKeys[0].public_key,
+      public_keys: didWebKeys.map((k, i) => ({ version: i + 1, public_key: k.public_key, created_at: Date.now(), active: true })),
+      tenant_id: null,
+      registration_mode: 'did-web',
+      registration_status: registrationStatus,
+      key_version: 1,
+      verification_tier: 'unverified',
+      metadata: { did_document_url: didUrl },
+      webhook_url: null,
+      webhook_secret: null,
+      heartbeat: {
+        last_heartbeat: Date.now(),
+        status: 'online',
+        interval_ms: 60000,
+        timeout_ms: 300000
+      },
+      trusted_agents: [],
+      blocked_agents: []
+    };
+
+    await storage.createAgent(shadowAgent);
+
+    return { ...shadowAgent, _did_web_keys: didWebKeys };
+  } catch {
+    // Any error → fail closed
+    return null;
+  }
+}
+
+/**
+ * Requires the master API key specifically.
+ * Used for admin-only operations like key issuance.
+ */
+export function requireMasterKey(req, res, next) {
+  const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+
+  if (!apiKey) {
+    return res.status(401).json({
+      error: 'API_KEY_REQUIRED',
+      message: 'Master API key is required'
+    });
+  }
+
+  const masterKey = process.env.MASTER_API_KEY;
+  let masterKeyMatches = false;
+  if (masterKey) {
+    const masterBuf = Buffer.from(masterKey);
+    const inputBuf = Buffer.from(apiKey);
+    masterKeyMatches = masterBuf.length === inputBuf.length && timingSafeEqual(masterBuf, inputBuf);
+  }
+
+  if (!masterKeyMatches) {
     return res.status(403).json({
-      error: 'INVALID_API_KEY',
-      message: 'Invalid API key'
+      error: 'MASTER_KEY_REQUIRED',
+      message: 'This endpoint requires the master API key'
     });
   }
 

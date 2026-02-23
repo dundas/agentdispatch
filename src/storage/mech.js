@@ -146,6 +146,14 @@ export class MechStorage {
       agents = agents.filter(a => a.heartbeat?.status === filter.status);
     }
 
+    if (filter.registration_status) {
+      agents = agents.filter(a => a.registration_status === filter.registration_status);
+    }
+
+    if (filter.tenant_id) {
+      agents = agents.filter(a => a.tenant_id === filter.tenant_id);
+    }
+
     return agents;
   }
 
@@ -649,6 +657,62 @@ export class MechStorage {
       { method: 'DELETE', allow404: true }
     );
     return status === 200 || status === 204;
+  }
+
+  // ============ ISSUED API KEYS ============
+
+  async createIssuedKey(key) {
+    const stored = { ...key, created_at: key.created_at || Date.now() };
+    await this.request('/nosql/documents', {
+      method: 'POST',
+      body: {
+        collection_name: 'admp_api_keys',
+        document_key: stored.key_id,
+        data: stored
+      }
+    });
+    return stored;
+  }
+
+  async getIssuedKey(keyId) {
+    const { status, json } = await this.request(
+      `/nosql/documents/key/${encodeURIComponent(keyId)}?collection_name=admp_api_keys`,
+      { allow404: true }
+    );
+    if (status === 404) return null;
+    return this.extractDocument(json?.data) || null;
+  }
+
+  async getIssuedKeyByHash(keyHash) {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_api_keys&limit=1000');
+    const keys = this.extractDocuments(json);
+    return keys.find(k => k.key_hash === keyHash) || null;
+  }
+
+  async listIssuedKeys() {
+    const { json } = await this.request('/nosql/documents?collection_name=admp_api_keys&limit=1000');
+    return this.extractDocuments(json);
+  }
+
+  async revokeIssuedKey(keyId) {
+    const key = await this.getIssuedKey(keyId);
+    if (!key) return false;
+    await this.request(`/nosql/documents/admp_api_keys/${encodeURIComponent(keyId)}`, {
+      method: 'PUT',
+      body: { data: { ...key, revoked: true, revoked_at: Date.now() } }
+    });
+    return true;
+  }
+
+  async updateIssuedKey(keyId, updates) {
+    const key = await this.getIssuedKey(keyId);
+    if (!key) return null;
+    const updated = { ...key, ...updates };
+    await this.request(`/nosql/documents/admp_api_keys/${encodeURIComponent(keyId)}`, {
+      method: 'PUT',
+      body: { data: updated }
+    });
+    return updated;
   }
 
   // ============ OUTBOX ============
