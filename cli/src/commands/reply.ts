@@ -14,12 +14,14 @@ export function register(program: Command): void {
     .option('--to <agentId>', 'Recipient agent ID (auto-detected from original message if omitted)')
     .addHelpText('after', '\nExample:\n  admp reply msg_abc123 --subject done --body \'{"result":"ok"}\'')
     .action(async (messageId: string, opts: { subject: string; body: string; type: string; to?: string }) => {
-      const config = requireConfig(['agent_id', 'secret_key', 'base_url', 'api_key']);
+      const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
       // Resolve the reply recipient: explicit --to or fetch from original message status
       let toAgentId = opts.to;
       if (!toAgentId) {
+        // api_key is only needed to authenticate the status lookup
+        requireConfig(['api_key']);
         const status = await client.request<{ from?: string }>(
           'GET',
           `/api/messages/${messageId}/status`,

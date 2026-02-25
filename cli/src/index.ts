@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { AdmpError } from './client.js';
 import { error } from './output.js';
+import pkg from '../package.json' with { type: 'json' };
 
 // Static imports so the single-file build bundles everything
 import * as initCmd from './commands/init.js';
@@ -25,7 +26,7 @@ export const program = new Command();
 program
   .name('admp')
   .description('Agent Dispatch Messaging Protocol CLI')
-  .version('0.1.0')
+  .version(pkg.version)
   .option('--json', 'Output raw JSON (machine-readable)');
 
 const commandModules = [

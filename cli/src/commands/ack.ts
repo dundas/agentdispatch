@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success } from '../output.js';
+import { success, error } from '../output.js';
 
 export function register(program: Command): void {
   program
@@ -18,7 +18,8 @@ export function register(program: Command): void {
         try {
           body.result = JSON.parse(opts.result);
         } catch {
-          body.result = opts.result;
+          error('--result must be valid JSON', 'INVALID_ARGUMENT');
+          process.exit(1);
         }
       }
 

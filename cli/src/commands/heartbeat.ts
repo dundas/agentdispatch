@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success } from '../output.js';
+import { success, error } from '../output.js';
 
 export function register(program: Command): void {
   program
@@ -15,7 +15,12 @@ export function register(program: Command): void {
 
       const body: Record<string, unknown> = {};
       if (opts.metadata) {
-        try { body.metadata = JSON.parse(opts.metadata); } catch { body.metadata = opts.metadata; }
+        try {
+          body.metadata = JSON.parse(opts.metadata);
+        } catch {
+          error('--metadata must be valid JSON', 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
       }
 
       const res = await client.request<{ timestamp: string }>(
