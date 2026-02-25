@@ -11,8 +11,8 @@ export function register(program: Command): void {
     .requiredOption('--subject <subject>', 'Reply subject')
     .option('--body <json>', 'Reply body as JSON string', '{}')
     .option('--type <type>', 'Message type', 'task.response')
-    .option('--to <agentId>', 'Recipient agent ID (auto-detected from original message if omitted)')
-    .addHelpText('after', '\nExample:\n  admp reply msg_abc123 --subject done --body \'{"result":"ok"}\'')
+    .option('--to <agentId>', 'Recipient agent ID (auto-detected from original message if omitted; requires api_key)')
+    .addHelpText('after', '\nExample:\n  admp reply msg_abc123 --subject done --body \'{"result":"ok"}\'\n  admp reply msg_abc123 --to sender-agent --subject done  # skip status lookup')
     .action(async (messageId: string, opts: { subject: string; body: string; type: string; to?: string }) => {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
@@ -57,7 +57,7 @@ export function register(program: Command): void {
         timestamp: new Date().toISOString(),
       };
 
-      const signed = signEnvelope(envelope, config.secret_key, config.agent_id);
+      const signed = signEnvelope(envelope, config.secret_key);
 
       const res = await client.request<{ message_id: string; status: string }>(
         'POST',

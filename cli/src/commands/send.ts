@@ -70,7 +70,7 @@ export function register(program: Command): void {
       }
       if (opts.ephemeral) envelope.ephemeral = true;
 
-      const signed = signEnvelope(envelope, config.secret_key, config.agent_id);
+      const signed = signEnvelope(envelope, config.secret_key);
 
       const client = new AdmpClient(config);
       const res = await client.request<{ message_id: string; status: string }>(

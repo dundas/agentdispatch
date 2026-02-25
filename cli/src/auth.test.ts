@@ -43,7 +43,7 @@ test('signEnvelope adds signature.alg, signature.kid, and signature.sig to the e
     body: { hello: 'world' },
   };
 
-  const signed = signEnvelope(envelope, secretKeyB64, agentId) as typeof envelope & {
+  const signed = signEnvelope(envelope, secretKeyB64) as typeof envelope & {
     signature: { alg: string; kid: string; sig: string };
   };
 
@@ -68,7 +68,7 @@ test('signEnvelope roundtrip: verify with nacl.sign.detached.verify returns true
     body: { data: 'roundtrip payload' },
   };
 
-  const signed = signEnvelope(envelope, secretKeyB64, agentId) as typeof envelope & {
+  const signed = signEnvelope(envelope, secretKeyB64) as typeof envelope & {
     signature: { alg: string; kid: string; sig: string };
   };
 

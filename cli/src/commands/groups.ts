@@ -51,7 +51,7 @@ export function register(program: Command): void {
       console.log(`\n${'GROUP ID'.padEnd(36)} ${'NAME'.padEnd(24)} ${'ROLE'.padEnd(10)} MEMBERS`);
       console.log('─'.repeat(80));
       for (const g of groups) {
-        console.log(`${g.group_id.padEnd(36)} ${g.name.padEnd(24)} ${g.role.padEnd(10)} ${g.member_count}`);
+        console.log(`${g.group_id.padEnd(36)} ${String(g.name).slice(0, 24).padEnd(24)} ${g.role.padEnd(10)} ${g.member_count}`);
       }
       console.log('');
     });

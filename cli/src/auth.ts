@@ -163,13 +163,11 @@ export function buildAuthHeaders(
  *
  * @param envelope - The envelope object (must include timestamp, from, to, body)
  * @param secretKey - Base64-encoded 64-byte nacl secret key (from config file)
- * @param agentId - Agent ID (unused directly here; kid is derived from envelope.from)
- * @returns A new envelope object with `signature` set
+ * @returns A new envelope object with `signature` set; kid is derived from envelope.from
  */
 export function signEnvelope(
   envelope: object,
   secretKey: string,
-  _agentId: string,
 ): object {
   const privateKey = fromBase64(secretKey);
   const env = envelope as AdmpEnvelope;

@@ -14,26 +14,20 @@ import { buildAuthHeaders, signEnvelope } from '../src/auth.js';
 import nacl from 'tweetnacl';
 
 const BASE_URL = process.env.ADMP_BASE_URL;
-const SKIP = !BASE_URL;
+const HAVE_SERVER = !!BASE_URL;
 
-function skipIf(condition: boolean, name: string, fn: () => Promise<void>) {
-  test(name, async () => {
-    if (condition) {
-      console.log(`  SKIP: ${name} (set ADMP_BASE_URL to enable)`);
-      return;
-    }
-    await fn();
-  });
-}
+// Use test.skip when the server is not available so CI shows real skips, not passes
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const serverTest = HAVE_SERVER ? test : (test as any).skip as typeof test;
 
 describe('Integration: register → send → pull → ack', () => {
-  skipIf(SKIP, 'server is reachable', async () => {
+  serverTest('server is reachable', async () => {
     const url = new URL('/health', BASE_URL!);
     const res = await fetch(url.toString());
     expect(res.ok || res.status === 404).toBe(true); // any response = server is up
   });
 
-  skipIf(SKIP, 'register returns agent_id and secret_key', async () => {
+  serverTest('register returns agent_id and secret_key', async () => {
     const res = await fetch(new URL('/api/agents/register', BASE_URL!).toString(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -46,7 +40,7 @@ describe('Integration: register → send → pull → ack', () => {
 });
 
 describe('Integration: rotate-key', () => {
-  skipIf(SKIP, 'rotate-key returns new secret_key', async () => {
+  serverTest('rotate-key returns new secret_key', async () => {
     // Register a fresh agent
     const regRes = await fetch(new URL('/api/agents/register', BASE_URL!).toString(), {
       method: 'POST',
@@ -73,7 +67,7 @@ describe('Integration: rotate-key', () => {
 });
 
 describe('Integration: groups', () => {
-  skipIf(SKIP, 'create → join → send → list messages', async () => {
+  serverTest('create → join → send → list messages', async () => {
     const config = resolveConfig();
     if (!config.agent_id || !config.secret_key) return;
 

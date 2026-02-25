@@ -1,6 +1,6 @@
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync, existsSync } from 'fs';
 
 export interface AdmpConfig {
   base_url: string;
@@ -27,9 +27,14 @@ export function loadConfig(): Partial<AdmpConfig> {
 
 export function saveConfig(config: Partial<AdmpConfig>): void {
   const path = getConfigPath();
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
-  chmodSync(path, 0o600);
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true });
+  // Write to a temp file, chmod, then atomically rename to avoid a TOCTOU
+  // window where the target file briefly holds new secrets with old permissions.
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  chmodSync(tmp, 0o600);
+  renameSync(tmp, path);
 }
 
 export function resolveConfig(): Partial<ResolvedConfig> {
