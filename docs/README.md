@@ -22,6 +22,8 @@ To regenerate after source changes:
 
 This runs the docs-generator skill in Claude Code, reading all source files listed in `docs-generator.json` and regenerating the output files.
 
+**Without Claude Code:** The generator reads each source file in `docs-generator.json` → `sources[]`, extracts endpoint signatures, error codes, and architecture details using the specified `extractor` type, then writes the output files listed in `outputs[]`. You can replicate this manually by reading the source files and updating the docs to match.
+
 ## Staleness Warning
 
 There is no CI check that validates docs against source code. If route handlers, error codes, or authentication logic change in `src/`, these docs will drift. Consider adding a CI step or running `/docs-generator --diff` before releases to detect drift.

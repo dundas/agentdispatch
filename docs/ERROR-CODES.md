@@ -30,19 +30,19 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `API_KEY_REQUIRED` | 401 | No | No API key provided | Include `X-Api-Key` header or `Authorization: Bearer` |
 | `INVALID_API_KEY` | 401 | No | API key not recognized or expired | Check key is correct and not expired. Expired keys return this same error to avoid leaking key existence |
 | `MASTER_KEY_REQUIRED` | 401 | No | Endpoint requires the master API key | Use `MASTER_API_KEY` for admin endpoints (key issuance, approval) |
-| `SIGNATURE_INVALID` | 403 | No | HTTP signature verification failed | Verify signing string matches: method, path, host, date headers. Check Ed25519 keypair |
+| `SIGNATURE_INVALID` | 403 | No | HTTP Signature header verification failed | Verify signing string matches: method, path, host, date headers. Check Ed25519 keypair. **Not the same as `INVALID_SIGNATURE`** — this code is for the HTTP `Signature:` header; `INVALID_SIGNATURE` is for the message envelope `signature` field. |
 | `INVALID_SIGNATURE_HEADER` | 400 | No | Signature header missing keyId or signature | Format: `keyId="id",algorithm="ed25519",headers="(request-target) host date",signature="base64"` |
 | `UNSUPPORTED_ALGORITHM` | 400 | No | Signature algorithm is not ed25519 | Only ed25519 is supported |
 | `INSUFFICIENT_SIGNED_HEADERS` | 400 | No | `(request-target)` not in signed headers | Always include `(request-target)` in the headers param |
 | `DATE_HEADER_REQUIRED` | 400 | No | Date header not in signed headers or missing | Include `Date` header and list `date` in signed headers |
 | `REQUEST_EXPIRED` | 403 | Yes (with fresh timestamp) | Date header outside +/-5 minute window | Ensure system clock is synced. Regenerate `Date` header |
-| `SIGNATURE_VERIFICATION_FAILED` | 400 | No | General signature verification error | Check signing string construction |
+| `SIGNATURE_VERIFICATION_FAILED` | 400 | No | General signature verification error (catch-all) | Check signing string construction. Distinct from `SIGNATURE_INVALID` (specific Ed25519 mismatch) — this covers parse errors and unexpected failures. |
 | `REGISTRATION_PENDING` | 403 | Yes (after approval) | Agent registration awaiting admin approval | Contact admin or wait for `POST /:agentId/approve` |
 | `REGISTRATION_REJECTED` | 403 | No | Agent registration was rejected | Contact admin. Check `rejection_reason` |
 | `FORBIDDEN` | 403 | No | Signature keyId doesn't match target agent | Agent can only access its own resources |
 | `ENROLLMENT_TOKEN_USED` | 403 | No | Single-use enrollment token already consumed | Request a new enrollment token |
 | `ENROLLMENT_TOKEN_SCOPE` | 403 | No | Token scoped to a different agent | Use the token only for the agent specified in `target_agent_id` |
-| `INVALID_SIGNATURE` | 403 | No | Message-level signature verification failed | Check the signature in the message envelope |
+| `INVALID_SIGNATURE` | 403 | No | Message-level envelope signature verification failed | Check the `signature` field in the message envelope body. **Not the same as `SIGNATURE_INVALID`** — this code is for the message envelope `signature` field; `SIGNATURE_INVALID` is for the HTTP `Signature:` header. |
 
 ## Agent Errors
 
