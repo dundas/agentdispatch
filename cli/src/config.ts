@@ -1,6 +1,6 @@
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync } from 'fs';
 
 export interface AdmpConfig {
   base_url: string;
@@ -29,6 +29,7 @@ export function saveConfig(config: Partial<AdmpConfig>): void {
   const path = getConfigPath();
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 export function resolveConfig(): Partial<ResolvedConfig> {

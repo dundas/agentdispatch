@@ -1,7 +1,4 @@
 import { Command } from 'commander';
-import { readFileSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
 import { AdmpError } from './client.js';
 import { error } from './output.js';
 
@@ -23,15 +20,12 @@ import * as webhookCmd from './commands/webhook.js';
 import * as groupsCmd from './commands/groups.js';
 import * as outboxCmd from './commands/outbox.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
-
 export const program = new Command();
 
 program
   .name('admp')
   .description('Agent Dispatch Messaging Protocol CLI')
-  .version(pkg.version)
+  .version('0.1.0')
   .option('--json', 'Output raw JSON (machine-readable)');
 
 const commandModules = [

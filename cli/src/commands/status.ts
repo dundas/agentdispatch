@@ -18,7 +18,7 @@ export function register(program: Command): void {
     .description('Get delivery status of a sent message')
     .addHelpText('after', '\nExample:\n  admp status msg_abc123')
     .action(async (messageId: string) => {
-      const config = requireConfig(['base_url']);
+      const config = requireConfig(['base_url', 'api_key']);
       const client = new AdmpClient(config);
 
       const res = await client.request<MessageStatus>(

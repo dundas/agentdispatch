@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success } from '../output.js';
+import { success, error } from '../output.js';
 
 export function register(program: Command): void {
   program
@@ -17,7 +17,10 @@ export function register(program: Command): void {
       const body: Record<string, unknown> = {};
       if (opts.extend) {
         const n = parseInt(opts.extend, 10);
-        if (isNaN(n) || n <= 0) throw new Error(`--extend must be a positive integer, got: ${opts.extend}`);
+        if (isNaN(n) || n <= 0) {
+          error(`--extend must be a positive integer, got: ${opts.extend}`, 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
         body.extend = n;
       }
       if (opts.requeue) body.requeue = true;
