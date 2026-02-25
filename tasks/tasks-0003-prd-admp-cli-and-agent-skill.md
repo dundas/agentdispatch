@@ -73,19 +73,19 @@
   - [x] 3.3 Implement `signEnvelope(envelope: object, secretKey: string, agentId: string): object` — adds `signature` field to a message envelope using the message-level signing format from `src/utils/crypto.js`
   - [x] 3.4 Write unit tests in `cli/src/auth.test.ts` covering: `buildAuthHeaders` produces valid Signature header format (keyId, algorithm, headers, signature fields present), `signEnvelope` adds signature field, roundtrip sign+verify using tweetnacl
 
-- [ ] 4.0 Implement HTTP client and core messaging commands
-  - [ ] 4.1 Create `cli/src/client.ts` — `AdmpClient` class with constructor `(config: ResolvedConfig)` and a private `request(method, path, body?, useApiKey?)` method that: sets `Content-Type`, adds `Date` header, adds `Signature` header via `buildAuthHeaders` (or `X-Api-Key` when `useApiKey` is true), calls `fetch`, throws `AdmpError` on non-2xx
-  - [ ] 4.2 Add `AdmpError` class to `cli/src/client.ts` with `code: string`, `message: string`, `status: number`
-  - [ ] 4.3 Create `cli/src/output.ts` with: `success(msg, data?)` (green prefix, pretty JSON if data), `warn(msg)` (yellow), `error(msg, code?)` (red to stderr), `json(data)` (raw JSON.stringify to stdout), `printMessage(envelope)` (formatted message view), `isJsonMode(): boolean` (checks `--json` flag or `ADMP_JSON=1`)
-  - [ ] 4.4 Implement `admp register` in `cli/src/commands/register.ts` — POST `/api/agents/register`, save returned `agent_id` and `secret_key` to config, print agent_id + DID + registration_mode + ⚠ warning if secret_key present
-  - [ ] 4.5 Implement `admp deregister` — prompt "Are you sure? (y/N)", DELETE `/api/agents/:agentId`, clear agent_id and secret_key from config
-  - [ ] 4.6 Implement `admp send` with flags `--to`, `--subject`, `--body`, `--type`, `--correlation-id`, `--ttl`, `--ephemeral`; parse `@file.json` body syntax; sign envelope; POST to `/api/agents/:to/messages` with API key auth; print `message_id` and `status`
-  - [ ] 4.7 Implement `admp pull` with optional `--timeout` flag; POST `/api/agents/:agentId/inbox/pull` with HTTP Signature auth; print "Inbox empty" on 204; pretty-print envelope on success including `message_id`, `lease_until`, `attempts`
-  - [ ] 4.8 Implement `admp ack <message-id>` with optional `--result <json>`; POST `/api/agents/:agentId/messages/:messageId/ack` with HTTP Signature auth
-  - [ ] 4.9 Implement `admp nack <message-id>` with optional `--extend <seconds>` and `--requeue` flag
-  - [ ] 4.10 Implement `admp reply <message-id>` — fetch original message status to get `from` for the `to` field, then POST a correlated reply signed with HTTP Signature
-  - [ ] 4.11 Implement `admp status <message-id>` — GET `/api/messages/:messageId/status` with API key auth; print status, timestamps
-  - [ ] 4.12 Implement `admp inbox stats` — GET `/api/agents/:agentId/inbox/stats` with HTTP Signature auth; print queued, leased, total counts
+- [x] 4.0 Implement HTTP client and core messaging commands
+  - [x] 4.1 Create `cli/src/client.ts` — `AdmpClient` class with constructor `(config: ResolvedConfig)` and a private `request(method, path, body?, useApiKey?)` method that: sets `Content-Type`, adds `Date` header, adds `Signature` header via `buildAuthHeaders` (or `X-Api-Key` when `useApiKey` is true), calls `fetch`, throws `AdmpError` on non-2xx
+  - [x] 4.2 Add `AdmpError` class to `cli/src/client.ts` with `code: string`, `message: string`, `status: number`
+  - [x] 4.3 Create `cli/src/output.ts` with: `success(msg, data?)` (green prefix, pretty JSON if data), `warn(msg)` (yellow), `error(msg, code?)` (red to stderr), `json(data)` (raw JSON.stringify to stdout), `printMessage(envelope)` (formatted message view), `isJsonMode(): boolean` (checks `--json` flag or `ADMP_JSON=1`)
+  - [x] 4.4 Implement `admp register` in `cli/src/commands/register.ts` — POST `/api/agents/register`, save returned `agent_id` and `secret_key` to config, print agent_id + DID + registration_mode + ⚠ warning if secret_key present
+  - [x] 4.5 Implement `admp deregister` — prompt "Are you sure? (y/N)", DELETE `/api/agents/:agentId`, clear agent_id and secret_key from config
+  - [x] 4.6 Implement `admp send` with flags `--to`, `--subject`, `--body`, `--type`, `--correlation-id`, `--ttl`, `--ephemeral`; parse `@file.json` body syntax; sign envelope; POST to `/api/agents/:to/messages` with API key auth; print `message_id` and `status`
+  - [x] 4.7 Implement `admp pull` with optional `--timeout` flag; POST `/api/agents/:agentId/inbox/pull` with HTTP Signature auth; print "Inbox empty" on 204; pretty-print envelope on success including `message_id`, `lease_until`, `attempts`
+  - [x] 4.8 Implement `admp ack <message-id>` with optional `--result <json>`; POST `/api/agents/:agentId/messages/:messageId/ack` with HTTP Signature auth
+  - [x] 4.9 Implement `admp nack <message-id>` with optional `--extend <seconds>` and `--requeue` flag
+  - [x] 4.10 Implement `admp reply <message-id>` — fetch original message status to get `from` for the `to` field, then POST a correlated reply signed with HTTP Signature
+  - [x] 4.11 Implement `admp status <message-id>` — GET `/api/messages/:messageId/status` with API key auth; print status, timestamps
+  - [x] 4.12 Implement `admp inbox stats` — GET `/api/agents/:agentId/inbox/stats` with HTTP Signature auth; print queued, leased, total counts
 
 - [ ] 5.0 Implement agent management commands
   - [ ] 5.1 Implement `admp heartbeat` with optional `--metadata <json>`; POST `/api/agents/:agentId/heartbeat`; print confirmation with timestamp

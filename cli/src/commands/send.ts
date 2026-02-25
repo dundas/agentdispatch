@@ -1,0 +1,77 @@
+import { Command } from 'commander';
+import { readFileSync } from 'fs';
+import { AdmpClient } from '../client.js';
+import { requireConfig } from '../config.js';
+import { signEnvelope } from '../auth.js';
+import { success, error } from '../output.js';
+
+function parseBody(raw: string): unknown {
+  if (raw.startsWith('@')) {
+    try {
+      return JSON.parse(readFileSync(raw.slice(1), 'utf8'));
+    } catch {
+      error(`Could not read body file: ${raw.slice(1)}`);
+      process.exit(1);
+    }
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+export function register(program: Command): void {
+  program
+    .command('send')
+    .description('Send a message to another agent')
+    .requiredOption('--to <agentId>', 'Recipient agent ID')
+    .requiredOption('--subject <subject>', 'Message subject')
+    .option('--body <json|@file>', 'Message body as JSON string or @file.json', '{}')
+    .option('--type <type>', 'Message type', 'task.request')
+    .option('--correlation-id <id>', 'Correlation ID for threading')
+    .option('--ttl <seconds>', 'Time-to-live in seconds')
+    .option('--ephemeral', 'Do not persist message (best-effort delivery)')
+    .addHelpText('after', '\nExamples:\n  admp send --to storage.agent --subject create_user --body \'{"email":"a@b.com"}\'\n  admp send --to analyst --subject report --body @report.json')
+    .action(async (opts: {
+      to: string;
+      subject: string;
+      body: string;
+      type: string;
+      correlationId?: string;
+      ttl?: string;
+      ephemeral?: boolean;
+    }) => {
+      const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
+
+      const body = parseBody(opts.body);
+      const timestamp = new Date().toISOString();
+
+      const envelope: Record<string, unknown> = {
+        version: '1.0',
+        id: crypto.randomUUID(),
+        type: opts.type,
+        from: `agent://${config.agent_id}`,
+        to: `agent://${opts.to}`,
+        subject: opts.subject,
+        body,
+        timestamp,
+      };
+
+      if (opts.correlationId) envelope.correlation_id = opts.correlationId;
+      if (opts.ttl) envelope.ttl_sec = parseInt(opts.ttl, 10);
+      if (opts.ephemeral) envelope.ephemeral = true;
+
+      const signed = signEnvelope(envelope, config.secret_key, config.agent_id);
+
+      const client = new AdmpClient(config);
+      const res = await client.request<{ message_id: string; status: string }>(
+        'POST',
+        `/api/agents/${opts.to}/messages`,
+        signed,
+        'api-key'
+      );
+
+      success(`Message sent to ${opts.to}`, { message_id: res.message_id, status: res.status });
+    });
+}
