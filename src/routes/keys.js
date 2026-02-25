@@ -56,6 +56,16 @@ router.post('/issue', requireMasterKey, async (req, res) => {
     }
   }
 
+  // Validate description length (consistent with rejection_reason limit in agents.js)
+  if (description !== undefined && description !== null) {
+    if (typeof description !== 'string' || description.length > 500) {
+      return res.status(400).json({
+        error: 'INVALID_DESCRIPTION',
+        message: 'description must be a string of at most 500 characters'
+      });
+    }
+  }
+
   // Validate target_agent_id exists before issuing the key
   if (target_agent_id) {
     const targetAgent = await storage.getAgent(target_agent_id);

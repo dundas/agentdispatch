@@ -2729,10 +2729,10 @@ test('revoked issued key is rejected by requireApiKey (unit test)', async () => 
   process.env.API_KEY_REQUIRED = savedRequired;
 });
 
-test('expired issued key is rejected with API_KEY_EXPIRED (unit test)', async () => {
+test('expired issued key is rejected with INVALID_API_KEY (unit test)', async () => {
   // NOTE: expires_in_days: 0 would be falsy in keys.js and set expires_at=null.
   // Instead we directly insert a key record with a past expires_at into storage.
-  const { createHash, randomBytes } = await import('node:crypto');
+  const { createHash, randomBytes } = crypto;
   const savedRequired = process.env.API_KEY_REQUIRED;
   process.env.API_KEY_REQUIRED = 'true';
 
@@ -2754,8 +2754,8 @@ test('expired issued key is rejected with API_KEY_EXPIRED (unit test)', async ()
   await requireApiKey(harness.req, harness.res, harness.next);
 
   assert.equal(harness.wasNextCalled(), false);
-  assert.equal(harness.getStatus(), 403);
-  assert.equal(harness.getBody().error, 'API_KEY_EXPIRED');
+  assert.equal(harness.getStatus(), 401);
+  assert.equal(harness.getBody().error, 'INVALID_API_KEY');
 
   process.env.API_KEY_REQUIRED = savedRequired;
 });
@@ -3266,6 +3266,10 @@ test('trust model: DID web — shadow agent created from DID document', async ()
     return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
   };
 
+  // DID:web auto-approval requires the domain to be in the allowlist
+  const savedAllowedDomains = process.env.DID_WEB_ALLOWED_DOMAINS;
+  process.env.DID_WEB_ALLOWED_DOMAINS = domain;
+
   try {
     // Use heartbeat endpoint which runs authenticateHttpSignature middleware
     const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
@@ -3288,9 +3292,11 @@ test('trust model: DID web — shadow agent created from DID document', async ()
     const shadowAgent = await storage.getAgentByDid(did);
     assert.ok(shadowAgent, 'shadow agent must be created for did:web');
     assert.equal(shadowAgent.registration_mode, 'did-web');
-    assert.equal(shadowAgent.registration_status, 'approved', 'open policy should set status to approved');
+    assert.equal(shadowAgent.registration_status, 'approved', 'allowed domain should be auto-approved');
   } finally {
     globalThis.fetch = originalFetch;
+    if (savedAllowedDomains !== undefined) process.env.DID_WEB_ALLOWED_DOMAINS = savedAllowedDomains;
+    else delete process.env.DID_WEB_ALLOWED_DOMAINS;
   }
 });
 
@@ -3902,6 +3908,10 @@ test('trust model: DID web with path segments — resolves URL and creates shado
     return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
   };
 
+  // DID:web auto-approval requires the domain to be in the allowlist
+  const savedAllowedDomains = process.env.DID_WEB_ALLOWED_DOMAINS;
+  process.env.DID_WEB_ALLOWED_DOMAINS = domain;
+
   try {
     const targetPath = `/api/agents/${encodeURIComponent(expectedAgentId)}/heartbeat`;
     const dateStr = new Date().toUTCString();
@@ -3930,5 +3940,7 @@ test('trust model: DID web with path segments — resolves URL and creates shado
     assert.equal(shadowAgent.registration_status, 'approved');
   } finally {
     globalThis.fetch = originalFetch;
+    if (savedAllowedDomains !== undefined) process.env.DID_WEB_ALLOWED_DOMAINS = savedAllowedDomains;
+    else delete process.env.DID_WEB_ALLOWED_DOMAINS;
   }
 });

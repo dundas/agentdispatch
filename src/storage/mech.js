@@ -745,6 +745,27 @@ export class MechStorage {
     return updated;
   }
 
+  /**
+   * Atomically burn a single-use token: sets used_at only if it is currently null.
+   * Returns true if this call burned the token, false if it was already burned.
+   *
+   * NOTE: Mech backend does not support conditional writes natively, so this uses
+   * read-then-conditional-write. The race window is narrower than the old
+   * unconditional write (we reject if used_at is already set after re-read),
+   * but is not fully atomic. For true atomicity, migrate to a backend that
+   * supports conditional updates (e.g. PostgreSQL WHERE used_at IS NULL).
+   */
+  async burnSingleUseKey(keyId) {
+    const key = await this.getIssuedKey(keyId);
+    if (!key || key.used_at) return false;
+    const updated = { ...key, used_at: Date.now() };
+    await this.request(`/nosql/documents/admp_api_keys/${encodeURIComponent(keyId)}`, {
+      method: 'PUT',
+      body: { data: updated }
+    });
+    return true;
+  }
+
   // ============ OUTBOX ============
 
   async createOutboxMessage(message) {

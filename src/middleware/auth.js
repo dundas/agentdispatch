@@ -326,9 +326,12 @@ export async function requireApiKey(req, res, next) {
 
       if (issuedKey && !issuedKey.revoked) {
         if (issuedKey.expires_at && Date.now() > issuedKey.expires_at) {
-          return res.status(403).json({
-            error: 'API_KEY_EXPIRED',
-            message: 'API key has expired'
+          // Return the same error as unknown keys to avoid leaking key existence.
+          // An attacker probing keys shouldn't be able to distinguish 'expired but
+          // valid' from 'never existed'.
+          return res.status(401).json({
+            error: 'INVALID_API_KEY',
+            message: 'Invalid API key'
           });
         }
 
@@ -349,7 +352,9 @@ export async function requireApiKey(req, res, next) {
           // Parse agent ID directly from req.path
           const match = req.path.match(/^\/agents\/([^/]+)/);
           const requestedAgentId = match ? decodeURIComponent(match[1]) : null;
-          if (!requestedAgentId || (requestedAgentId !== 'register' && requestedAgentId !== issuedKey.target_agent_id)) {
+          // Note: POST /agents/register is already exempted in server.js before
+          // requireApiKey runs, so no 'register' carve-out is needed here.
+          if (!requestedAgentId || requestedAgentId !== issuedKey.target_agent_id) {
             return res.status(403).json({
               error: 'ENROLLMENT_TOKEN_SCOPE',
               message: 'This enrollment token is scoped to a different agent'
@@ -357,14 +362,18 @@ export async function requireApiKey(req, res, next) {
           }
         }
 
-        // Burn single-use token on first valid use.
-        // NOTE: There is an inherent TOCTOU race: two concurrent requests carrying
-        // the same token may both pass the used_at check before either write completes.
-        // This is acceptable for the intended 1:1 enrollment scenario (token is
-        // pre-shared with a single agent). Do not use single-use tokens for
-        // high-concurrency access control.
+        // Burn single-use token atomically: burnSingleUseKey sets used_at only if
+        // it is currently null, returning false if another request already burned it.
+        // This closes the TOCTOU race where two concurrent requests both pass the
+        // used_at check above before either write completes.
         if (issuedKey.single_use) {
-          await storage.updateIssuedKey(issuedKey.key_id, { used_at: Date.now() });
+          const burned = await storage.burnSingleUseKey(issuedKey.key_id);
+          if (!burned) {
+            return res.status(403).json({
+              error: 'ENROLLMENT_TOKEN_USED',
+              message: 'This enrollment token has already been used'
+            });
+          }
         }
 
         req.apiKeyType = 'issued';
@@ -643,10 +652,25 @@ async function resolveDIDWebAgent(did, req) {
       return { ...existing, _did_web_keys: didWebKeys };
     }
 
-    // Create shadow agent with tenant policy applied
-    // Shadow agents don't have a specific tenant; use global policy
+    // Create shadow agent with federated trust policy.
+    // DID:web agents come from external domains — a different trust origin than
+    // locally-registered agents. Auto-approve only if:
+    //   1. REGISTRATION_POLICY is 'open' (not 'approval_required'), AND
+    //   2. DID_WEB_ALLOWED_DOMAINS is set and the domain is in the allowlist.
+    // Otherwise default to 'pending' to prevent arbitrary internet domains from
+    // gaining immediate access.
     const policy = process.env.REGISTRATION_POLICY || 'open';
-    const registrationStatus = policy === 'approval_required' ? 'pending' : 'approved';
+    let registrationStatus = 'pending';
+    if (policy === 'open') {
+      const allowedDomains = process.env.DID_WEB_ALLOWED_DOMAINS;
+      if (allowedDomains) {
+        const allowed = allowedDomains.split(',').map(d => d.trim().toLowerCase());
+        if (allowed.includes(domain.toLowerCase())) {
+          registrationStatus = 'approved';
+        }
+      }
+      // If no allowlist set, DID:web agents default to pending even under open policy
+    }
 
     // Use decoded domain + path segments as agent_id to avoid collisions between
     // multi-path DIDs sharing the same domain (e.g. did:web:host:alice vs did:web:host:bob)

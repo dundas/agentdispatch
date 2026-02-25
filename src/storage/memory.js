@@ -502,6 +502,18 @@ export class MemoryStorage {
     return updated;
   }
 
+  /**
+   * Atomically burn a single-use token: sets used_at only if it is currently null.
+   * Returns true if this call burned the token, false if it was already burned.
+   * Eliminates TOCTOU race where two concurrent requests both pass the used_at check.
+   */
+  async burnSingleUseKey(keyId) {
+    const key = this.issuedKeys.get(keyId);
+    if (!key || key.used_at) return false;
+    this.issuedKeys.set(keyId, { ...key, used_at: Date.now() });
+    return true;
+  }
+
   // ============ OUTBOX ============
 
   async createOutboxMessage(message) {

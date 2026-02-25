@@ -22,6 +22,7 @@ primary_region = 'dfw'
   MAX_MESSAGES_PER_AGENT = "1000"
   STORAGE_BACKEND = "mech"
   MECH_BASE_URL = "https://storage.mechdna.net"
+  REGISTRATION_POLICY = "approval_required"
 
 [http_service]
   internal_port = 8080
