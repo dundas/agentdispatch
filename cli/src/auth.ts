@@ -72,13 +72,14 @@ export interface EnvelopeSignature {
  * @returns Signature object { alg, kid, sig }
  */
 function signMessage(envelope: AdmpEnvelope, secretKey: Uint8Array): EnvelopeSignature {
-  const base = createSigningBase(envelope);
-  const message = Buffer.from(base, 'utf8');
-  const signature = nacl.sign.detached(message, secretKey);
+  // Derive and validate kid before doing any cryptographic work.
   const kid = envelope.from.replace('agent://', '');
   if (!kid) {
     throw new Error('signMessage: envelope.from must not be bare "agent://" — no agent ID');
   }
+  const base = createSigningBase(envelope);
+  const message = Buffer.from(base, 'utf8');
+  const signature = nacl.sign.detached(message, secretKey);
   return {
     alg: 'ed25519',
     kid,

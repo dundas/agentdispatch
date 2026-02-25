@@ -14,6 +14,7 @@ export function register(program: Command): void {
       const client = new AdmpClient(config);
 
       const body: Record<string, unknown> = {};
+      let clientTimeoutMs: number | undefined;
       if (opts.timeout) {
         const n = parseInt(opts.timeout, 10);
         if (isNaN(n) || n <= 0) {
@@ -21,6 +22,10 @@ export function register(program: Command): void {
           process.exit(1);
         }
         body.timeout = n;
+        // Add a 5s buffer so the client abort controller doesn't race the server's
+        // long-poll window. Without this, ADMP_TIMEOUT (default 30s) fires before
+        // the server responds for any --timeout value above ~25 s.
+        clientTimeoutMs = (n + 5) * 1000;
       }
 
       try {
@@ -28,7 +33,8 @@ export function register(program: Command): void {
           'POST',
           `/api/agents/${config.agent_id}/inbox/pull`,
           body,
-          'signature'
+          'signature',
+          clientTimeoutMs
         );
 
         if (res === undefined) {

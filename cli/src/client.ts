@@ -32,14 +32,15 @@ export class AdmpClient {
     method: string,
     path: string,
     body?: unknown,
-    auth: AuthMode = 'signature'
+    auth: AuthMode = 'signature',
+    timeoutOverrideMs?: number
   ): Promise<T> {
     const url = new URL(path, this.config.base_url);
     const host = url.hostname;
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
+    // Only set Content-Type when there is a body; avoids spurious header on GETs.
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
 
     if (auth === 'signature') {
       // Include query string in signed path so the server can verify GET requests
@@ -59,8 +60,8 @@ export class AdmpClient {
     }
     // auth === 'none': no auth headers added (e.g. public endpoints)
 
-    // Default 30-second timeout; pull --timeout commands add a 5s buffer via their body param
-    const timeoutMs = parseInt(process.env.ADMP_TIMEOUT ?? '30000', 10);
+    // Use caller-supplied override (e.g. pull long-poll + 5s buffer), else env/default.
+    const timeoutMs = timeoutOverrideMs ?? parseInt(process.env.ADMP_TIMEOUT ?? '30000', 10);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 

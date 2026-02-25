@@ -43,6 +43,9 @@ export function register(program: Command): void {
       ttl?: string;
       ephemeral?: boolean;
     }) => {
+      // api_key is not listed here because 'api-key' auth mode in AdmpClient.request
+      // already validates it and throws AdmpError('INVALID_API_KEY') with a clear message.
+      // Checking it here would duplicate that logic without adding user value.
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
 
       const body = parseBody(opts.body);
