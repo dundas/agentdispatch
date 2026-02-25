@@ -28,4 +28,4 @@ There is no CI check that validates docs against source code. If route handlers,
 
 ## Last Generated
 
-These docs were generated on **2026-02-25** from commit history on the `docs/generated-documentation` branch.
+These docs were generated on **2026-02-25**. Run `/docs-generator` to check for drift against current source.
