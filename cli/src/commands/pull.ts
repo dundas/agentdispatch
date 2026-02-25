@@ -21,6 +21,10 @@ export function register(program: Command): void {
           error('--timeout must be a positive integer', 'INVALID_ARGUMENT');
           process.exit(1);
         }
+        if (n > 300) {
+          error('--timeout max is 300 seconds (5 min)', 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
         body.timeout = n;
         // Add a 5s buffer so the client abort controller doesn't race the server's
         // long-poll window. Without this, ADMP_TIMEOUT (default 30s) fires before
@@ -48,7 +52,10 @@ export function register(program: Command): void {
 
         printMessage(res);
       } catch (err) {
-        if (err instanceof AdmpError && err.status === 404) {
+        // Treat as empty only when the server signals an inbox-specific code.
+        // Re-throw AGENT_NOT_FOUND or any non-404 so misconfiguration is visible.
+        if (err instanceof AdmpError && err.status === 404 &&
+            err.code !== 'AGENT_NOT_FOUND' && err.code !== 'NOT_FOUND') {
           if (isJsonMode()) {
             console.log(JSON.stringify({ message: 'Inbox empty' }));
           } else {

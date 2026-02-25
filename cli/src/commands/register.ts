@@ -79,8 +79,9 @@ export function register(program: Command): void {
       const client = new AdmpClient(config);
       await client.request('DELETE', `/api/agents/${config.agent_id}`, undefined, 'signature');
 
-      const existing = loadConfig();
-      saveConfig({ ...existing, agent_id: '', secret_key: '' });
+      // Remove agent_id and secret_key rather than setting to empty string.
+      const { agent_id: _a, secret_key: _s, ...rest } = loadConfig();
+      saveConfig(rest);
 
       success(`Agent ${config.agent_id} deregistered.`);
     });

@@ -85,7 +85,7 @@ export function register(program: Command): void {
       if (answer.trim().toLowerCase() !== 'y') { console.log('Aborted.'); return; }
 
       const client = new AdmpClient(config);
-      await client.request('POST', `/api/groups/${groupId}/leave`, {}, 'signature');
+      await client.request('POST', `/api/groups/${groupId}/leave`, undefined, 'signature');
       success(`Left group ${groupId}`);
     });
 

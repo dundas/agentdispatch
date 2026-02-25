@@ -32,7 +32,11 @@ export function register(program: Command): void {
         `Base URL [${existing.base_url ?? 'https://agentdispatch.fly.dev'}]: `
       );
       const agent_id = await prompt(rl, `Agent ID [${existing.agent_id ?? ''}]: `);
-      process.stdout.write('Note: secret key input is not masked — paste carefully.\n');
+      process.stdout.write(
+        'Note: secret key input is not masked — terminal echoing may expose it in screen\n' +
+        'recordings or shared sessions. To avoid this, set ADMP_SECRET_KEY and run:\n' +
+        '  admp init --from-env\n'
+      );
       const secret_key = await prompt(rl, `Secret key [${existing.secret_key ? '(keep existing)' : '(not set)'}]: `);
       const api_key = await prompt(rl, `API key (optional) [${existing.api_key ?? ''}]: `);
 

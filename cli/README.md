@@ -109,7 +109,9 @@ Config file: `~/.admp/config.json` (permissions: `0600`)
 | `ADMP_SECRET_KEY` | `secret_key` | _(required)_ |
 | `ADMP_API_KEY` | `api_key` | _(optional)_ |
 | `ADMP_JSON=1` | same as `--json` flag | |
-| `NO_COLOR=1` | disables ANSI output | |
+| `ADMP_TIMEOUT` | request timeout in ms | `30000` |
+| `ADMP_CONFIG_PATH` | config file path | `~/.admp/config.json` |
+| `NO_COLOR` | disables ANSI output (any value) | |
 
 ## JSON Output
 
