@@ -105,10 +105,21 @@ export class AgentService {
       blocked_agents: []
     };
 
-    // Apply registration policy
+    // Apply registration policy.
+    // Precedence: tenant-level policy > REGISTRATION_POLICY env var > 'open' default.
+    // A tenant with registration_policy='approval_required' overrides an env var of 'open'.
+    // DID:web shadow agents bypass this path — see resolveDIDWebAgent in auth.js.
     const tenant = tenant_id ? await storage.getTenant(tenant_id) : null;
     const policy = tenant?.registration_policy || process.env.REGISTRATION_POLICY || 'open';
-    agent.registration_status = policy === 'approval_required' ? 'pending' : 'approved';
+
+    // Preserve existing approval status on re-registration to prevent
+    // an already-approved agent from being downgraded back to 'pending'.
+    const existingAgent = await storage.getAgent(agent_id);
+    if (existingAgent && existingAgent.registration_status === 'approved') {
+      agent.registration_status = 'approved';
+    } else {
+      agent.registration_status = policy === 'approval_required' ? 'pending' : 'approved';
+    }
 
     await storage.createAgent(agent);
 

@@ -236,7 +236,7 @@ export async function authenticateHttpSignature(req, res, next) {
       const reasonMap = {
         INVALID_PARAMS: [400, 'INVALID_SIGNATURE_HEADER', 'Signature header must include keyId and signature'],
         UNSUPPORTED_ALGORITHM: [400, 'UNSUPPORTED_ALGORITHM', 'Only ed25519 signatures are supported'],
-        AGENT_NOT_FOUND: [404, 'AGENT_NOT_FOUND', `Agent for keyId not found`],
+        AGENT_NOT_FOUND: [404, 'AGENT_NOT_FOUND', `Agent for keyId ${result.keyId || 'unknown'} not found`],
         REGISTRATION_PENDING: [403, 'REGISTRATION_PENDING', 'Agent registration is pending approval'],
         REGISTRATION_REJECTED: [403, 'REGISTRATION_REJECTED', 'Agent registration has been rejected'],
         REQUEST_TARGET_REQUIRED: [400, 'INSUFFICIENT_SIGNED_HEADERS', 'Signed headers must include (request-target)'],
@@ -513,6 +513,9 @@ function isBlockedDIDWebHost(domain) {
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4) {
     const o = ipv4.slice(1).map(Number);
+    // Guard against out-of-range octets (e.g. 999.0.0.1) which would bypass
+    // all private-range checks and be treated as a valid public IP.
+    if (o.some(x => x > 255)) return true;
     if (
       o[0] === 127 ||                                            // 127.0.0.0/8 loopback
       o[0] === 10 ||                                             // 10.0.0.0/8 RFC 1918
@@ -746,7 +749,9 @@ export function requireMasterKey(req, res, next) {
   }
 
   if (!masterKeyMatches) {
-    return res.status(403).json({
+    // 401 for all bad-credential cases — consistent with requireApiKey.
+    // 403 would leak that the key was recognised as a key but didn't match.
+    return res.status(401).json({
       error: 'MASTER_KEY_REQUIRED',
       message: 'This endpoint requires the master API key'
     });

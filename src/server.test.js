@@ -2595,7 +2595,7 @@ test('POST /api/keys/issue requires master key - rejects issued key (not master)
     .set('x-api-key', issuedApiKey)
     .send({ client_id: 'should-fail' });
 
-  assert.equal(rejectRes.status, 403);
+  assert.equal(rejectRes.status, 401);
   assert.equal(rejectRes.body.error, 'MASTER_KEY_REQUIRED');
 
   process.env.MASTER_API_KEY = savedMaster;
@@ -2780,7 +2780,7 @@ test('DELETE /api/keys/:keyId returns 404 for unknown key', async () => {
 // startup, so the full HTTP chain cannot be exercised via supertest in the test suite.
 // Instead we call both middleware functions directly in sequence to verify:
 //   1. requireApiKey calls next() for a valid issued key (accepts it)
-//   2. requireMasterKey then rejects the same key with 403 MASTER_KEY_REQUIRED
+//   2. requireMasterKey then rejects the same key with 401 MASTER_KEY_REQUIRED
 test('requireApiKey passes issued key through; requireMasterKey then rejects with MASTER_KEY_REQUIRED (unit chain test)', async () => {
   const masterKey = 'test-master-chain-unit';
   const savedMaster = process.env.MASTER_API_KEY;
@@ -2812,7 +2812,7 @@ test('requireApiKey passes issued key through; requireMasterKey then rejects wit
   assert.equal(nextCalledByRequireApiKey, true, 'requireApiKey must call next() for a valid issued key');
   assert.equal(step1Status, undefined, 'requireApiKey must not set an error status for a valid issued key');
 
-  // Step 2: call requireMasterKey on the same req — must reject with 403 MASTER_KEY_REQUIRED
+  // Step 2: call requireMasterKey on the same req — must reject with 401 MASTER_KEY_REQUIRED
   // (because the issued key is not the master key)
   let step2Status;
   let step2Body;
@@ -2824,7 +2824,7 @@ test('requireApiKey passes issued key through; requireMasterKey then rejects wit
     assert.fail('requireMasterKey must NOT call next() for an issued key');
   });
 
-  assert.equal(step2Status, 403, 'requireMasterKey must return 403 for an issued key');
+  assert.equal(step2Status, 401, 'requireMasterKey must return 401 for an issued key');
   assert.equal(step2Body.error, 'MASTER_KEY_REQUIRED', 'error code must be MASTER_KEY_REQUIRED');
 
   process.env.MASTER_API_KEY = savedMaster;

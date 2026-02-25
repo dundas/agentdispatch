@@ -107,7 +107,8 @@ app.use('/api', async (req, res, next) => {
     }
     // The presence of a Signature header signals intent to use cryptographic auth.
     // If verification fails, reject immediately — do NOT fall through to API key.
-    // This prevents an attacker from bypassing signature checks with a stolen API key.
+    // Invariant: once a Signature header is present, verification failure causes
+    // an immediate rejection rather than falling through to API key auth.
     // Use the specific reason if the agent is pending/rejected (actionable error)
     // rather than a generic SIGNATURE_INVALID (misleading).
     if (result.reason === 'REGISTRATION_PENDING') {
