@@ -53,6 +53,16 @@ if (!process.env.MASTER_API_KEY) {
   );
 }
 
+// Warn when DID:web federation is open without an allowlist — any internet domain
+// serving a valid DID document will get an auto-approved shadow agent.
+if ((process.env.REGISTRATION_POLICY || 'open') === 'open' && !process.env.DID_WEB_ALLOWED_DOMAINS) {
+  console.warn(
+    'WARNING: REGISTRATION_POLICY is "open" and DID_WEB_ALLOWED_DOMAINS is not set. ' +
+    'Any external domain serving a DID document can auto-register shadow agents. ' +
+    'Set REGISTRATION_POLICY=approval_required or DID_WEB_ALLOWED_DOMAINS for production use.'
+  );
+}
+
 // Initialize logger
 const logger = pino({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug'

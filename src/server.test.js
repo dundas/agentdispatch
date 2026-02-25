@@ -3267,16 +3267,15 @@ test('trust model: DID web — shadow agent created from DID document', async ()
   };
 
   try {
-    // Sign just the date header — simplest valid signature for testing
-    const dateStr = new Date().toUTCString();
-    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
-    const sigB64 = toBase64(sigBytes);
-    const signatureHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
-
     // Use heartbeat endpoint which runs authenticateHttpSignature middleware
     const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
+    const dateStr = new Date().toUTCString();
+    const headers = { host: '127.0.0.1', date: dateStr };
+    const signatureHeader = signRequest('POST', targetPath, headers, keypair.secretKey, did);
+
     const res = await request(app)
       .post(targetPath)
+      .set('Host', headers.host)
       .set('Signature', signatureHeader)
       .set('Date', dateStr)
       .send({});
@@ -3324,20 +3323,19 @@ test('trust model: DID web — deduplication: same DID resolves to existing shad
   };
 
   try {
-    const dateStr = new Date().toUTCString();
-    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
-    const sigB64 = toBase64(sigBytes);
-    const sigHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
     const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
+    const dateStr = new Date().toUTCString();
+    const headers = { host: '127.0.0.1', date: dateStr };
+    const sigHeader = signRequest('POST', targetPath, headers, keypair.secretKey, did);
 
     // First request: creates shadow agent
-    await request(app).post(targetPath).set('Signature', sigHeader).set('Date', dateStr).send({});
+    await request(app).post(targetPath).set('Host', headers.host).set('Signature', sigHeader).set('Date', dateStr).send({});
 
     const agent1 = await storage.getAgentByDid(did);
     assert.ok(agent1, 'shadow agent must exist after first request');
 
     // Second request: should reuse existing agent (not create duplicate)
-    await request(app).post(targetPath).set('Signature', sigHeader).set('Date', dateStr).send({});
+    await request(app).post(targetPath).set('Host', headers.host).set('Signature', sigHeader).set('Date', dateStr).send({});
 
     const agent2 = await storage.getAgentByDid(did);
     assert.equal(agent1.agent_id, agent2.agent_id, 'shadow agent must be deduplicated');
@@ -3410,14 +3408,14 @@ test('trust model: DID web — approval_required policy → shadow agent starts 
   process.env.REGISTRATION_POLICY = 'approval_required';
 
   try {
-    const dateStr = new Date().toUTCString();
-    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
-    const sigB64 = toBase64(sigBytes);
-    const signatureHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
     const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
+    const dateStr = new Date().toUTCString();
+    const headers = { host: '127.0.0.1', date: dateStr };
+    const signatureHeader = signRequest('POST', targetPath, headers, keypair.secretKey, did);
 
     const res = await request(app)
       .post(targetPath)
+      .set('Host', headers.host)
       .set('Signature', signatureHeader)
       .set('Date', dateStr)
       .send({});
@@ -3905,14 +3903,14 @@ test('trust model: DID web with path segments — resolves URL and creates shado
   };
 
   try {
-    const dateStr = new Date().toUTCString();
-    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
-    const sigB64 = toBase64(sigBytes);
-    const signatureHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
-
     const targetPath = `/api/agents/${encodeURIComponent(expectedAgentId)}/heartbeat`;
+    const dateStr = new Date().toUTCString();
+    const headers = { host: '127.0.0.1', date: dateStr };
+    const signatureHeader = signRequest('POST', targetPath, headers, keypair.secretKey, did);
+
     const res = await request(app)
       .post(targetPath)
+      .set('Host', headers.host)
       .set('Signature', signatureHeader)
       .set('Date', dateStr)
       .send({});

@@ -37,9 +37,116 @@ function rejectIfNotApproved(agent, res) {
 }
 
 /**
+ * Shared signature verification core used by both verifyHttpSignatureOnly
+ * (global gate) and authenticateHttpSignature (route middleware).
+ *
+ * Returns:
+ *   { ok: true, agent }           — signature valid, agent approved
+ *   { ok: false, reason, agent? } — verification failed with specific reason
+ *
+ * Handles: header parsing → agent resolution → approval gate → algorithm
+ * validation → signed header requirements → timestamp freshness → signing
+ * string construction → key iteration → Ed25519 verify.
+ *
+ * Callers add their own authorization checks and response handling on top.
+ */
+async function _verifySignatureCore(req, sigHeader) {
+  const params = parseSignatureHeader(sigHeader);
+  if (!params.keyId || !params.signature) {
+    return { ok: false, reason: 'INVALID_PARAMS' };
+  }
+
+  // Algorithm validation: only Ed25519 is supported.
+  // Prevents algorithm confusion if another algorithm is ever added.
+  if (params.algorithm && params.algorithm !== 'ed25519') {
+    return { ok: false, reason: 'UNSUPPORTED_ALGORITHM' };
+  }
+
+  // Resolve agent by keyId (supports agent_id, DID seed, or DID web)
+  let agent;
+  if (params.keyId.startsWith('did:web:')) {
+    agent = await resolveDIDWebAgent(params.keyId, req);
+  } else if (params.keyId.startsWith('did:seed:')) {
+    agent = await storage.getAgentByDid(params.keyId);
+  } else {
+    agent = await storage.getAgent(params.keyId);
+  }
+
+  if (!agent) return { ok: false, reason: 'AGENT_NOT_FOUND', keyId: params.keyId };
+
+  // Approval status gate
+  if (agent.registration_status === 'pending') {
+    return { ok: false, reason: 'REGISTRATION_PENDING', agent };
+  }
+  if (agent.registration_status === 'rejected') {
+    return { ok: false, reason: 'REGISTRATION_REJECTED', agent };
+  }
+
+  // Build canonical signing string
+  const headersToSign = params.headers
+    ? params.headers.split(' ')
+    : ['(request-target)', 'host', 'date'];
+
+  // (request-target) must always be signed to bind the signature to the URL.
+  // Without this, a signature over 'date' alone is path-agnostic and can be
+  // replayed on any endpoint for that agent within the time window.
+  if (!headersToSign.includes('(request-target)')) {
+    return { ok: false, reason: 'REQUEST_TARGET_REQUIRED' };
+  }
+
+  // Replay protection: 'date' must always be signed to prevent replay attacks.
+  if (!headersToSign.includes('date')) {
+    return { ok: false, reason: 'DATE_REQUIRED' };
+  }
+
+  // Validate Date header freshness (must be within +/- 5 minutes)
+  const dateHeader = req.headers['date'];
+  if (!dateHeader) {
+    return { ok: false, reason: 'DATE_MISSING' };
+  }
+  if (!validateTimestamp(dateHeader)) {
+    return { ok: false, reason: 'REQUEST_EXPIRED' };
+  }
+
+  const signingLines = headersToSign.map(h => {
+    if (h === '(request-target)') {
+      return `(request-target): ${req.method.toLowerCase()} ${req.originalUrl}`;
+    }
+    const val = req.headers[h.toLowerCase()];
+    if (!val) throw new Error(`Missing header: ${h}`);
+    return `${h.toLowerCase()}: ${val}`;
+  });
+  const signingString = signingLines.join('\n');
+
+  // Verify against active public keys
+  const sigBytes = fromBase64(params.signature);
+  const message = Buffer.from(signingString, 'utf8');
+
+  const activeKeys = agent._did_web_keys
+    ? agent._did_web_keys
+    : agent.public_keys
+      ? agent.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
+      : [{ public_key: agent.public_key }];
+
+  for (const keyEntry of activeKeys) {
+    try {
+      const pubKey = fromBase64(keyEntry.public_key);
+      if (nacl.sign.detached.verify(message, sigBytes, pubKey)) {
+        const { _did_web_keys, ...agentForRequest } = agent;
+        return { ok: true, agent: agentForRequest };
+      }
+    } catch {
+      // Skip malformed key entries
+    }
+  }
+
+  return { ok: false, reason: 'SIGNATURE_INVALID' };
+}
+
+/**
  * Verify an HTTP Signature header without sending a response.
  * Returns { verified: true, agent } if the signature is valid,
- * or { verified: false } if missing/invalid.
+ * or { verified: false, reason? } if missing/invalid.
  * Used by the global API key gate to bypass requireApiKey for signed requests.
  */
 export async function verifyHttpSignatureOnly(req) {
@@ -47,46 +154,10 @@ export async function verifyHttpSignatureOnly(req) {
   if (!sigHeader) return { verified: false };
 
   try {
-    const params = parseSignatureHeader(sigHeader);
-    if (!params.keyId || !params.signature) return { verified: false };
+    const result = await _verifySignatureCore(req, sigHeader);
 
-    // Resolve agent by keyId
-    let agent;
-    if (params.keyId.startsWith('did:web:')) {
-      agent = await resolveDIDWebAgent(params.keyId, req);
-    } else if (params.keyId.startsWith('did:seed:')) {
-      agent = await storage.getAgentByDid(params.keyId);
-    } else {
-      agent = await storage.getAgent(params.keyId);
-    }
-
-    if (!agent) return { verified: false };
-
-    // Reject unapproved agents with a specific reason so the global gate
-    // can return the correct error code (403 REGISTRATION_PENDING/REJECTED)
-    // instead of a misleading 401 SIGNATURE_INVALID.
-    if (agent.registration_status === 'pending') {
-      return { verified: false, reason: 'REGISTRATION_PENDING' };
-    }
-    if (agent.registration_status === 'rejected') {
-      return { verified: false, reason: 'REGISTRATION_REJECTED' };
-    }
-
-    // Build canonical signing string
-    const headersToSign = params.headers
-      ? params.headers.split(' ')
-      : ['(request-target)', 'host', 'date'];
-
-    // Replay protection: 'date' must always be signed to prevent replay attacks.
-    // If the client omits 'date' from the signed headers list, reject.
-    if (!headersToSign.includes('date')) {
-      return { verified: false };
-    }
-
-    // Validate Date header freshness (must be within +/- 5 minutes)
-    const dateHeader = req.headers['date'];
-    if (!dateHeader || !validateTimestamp(dateHeader)) {
-      return { verified: false };
+    if (!result.ok) {
+      return { verified: false, reason: result.reason };
     }
 
     // Authorization check: signing agent must match target agent in URL.
@@ -95,44 +166,12 @@ export async function verifyHttpSignatureOnly(req) {
     const agentPathMatch = req.path.match(/^\/agents\/([^/]+)/);
     if (agentPathMatch) {
       const targetAgentId = decodeURIComponent(agentPathMatch[1]);
-      if (targetAgentId !== 'register' && agent.agent_id !== targetAgentId) {
+      if (targetAgentId !== 'register' && result.agent.agent_id !== targetAgentId) {
         return { verified: false };
       }
     }
 
-    const signingLines = headersToSign.map(h => {
-      if (h === '(request-target)') {
-        return `(request-target): ${req.method.toLowerCase()} ${req.originalUrl}`;
-      }
-      const val = req.headers[h.toLowerCase()];
-      if (!val) throw new Error(`Missing header: ${h}`);
-      return `${h.toLowerCase()}: ${val}`;
-    });
-    const signingString = signingLines.join('\n');
-
-    // Verify against active public keys
-    const sigBytes = fromBase64(params.signature);
-    const message = Buffer.from(signingString, 'utf8');
-
-    const activeKeys = agent._did_web_keys
-      ? agent._did_web_keys
-      : agent.public_keys
-        ? agent.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
-        : [{ public_key: agent.public_key }];
-
-    for (const keyEntry of activeKeys) {
-      try {
-        const pubKey = fromBase64(keyEntry.public_key);
-        if (nacl.sign.detached.verify(message, sigBytes, pubKey)) {
-          const { _did_web_keys, ...agentForRequest } = agent;
-          return { verified: true, agent: agentForRequest };
-        }
-      } catch {
-        // Skip malformed key entries
-      }
-    }
-
-    return { verified: false };
+    return { verified: true, agent: result.agent };
   } catch {
     return { verified: false };
   }
@@ -190,119 +229,38 @@ export async function authenticateHttpSignature(req, res, next) {
   }
 
   try {
-    // Parse Signature header
-    const params = parseSignatureHeader(sigHeader);
+    const result = await _verifySignatureCore(req, sigHeader);
 
-    if (!params.keyId || !params.signature) {
-      return res.status(400).json({
-        error: 'INVALID_SIGNATURE_HEADER',
-        message: 'Signature header must include keyId and signature'
-      });
+    if (!result.ok) {
+      // Map core reasons to HTTP responses
+      const reasonMap = {
+        INVALID_PARAMS: [400, 'INVALID_SIGNATURE_HEADER', 'Signature header must include keyId and signature'],
+        UNSUPPORTED_ALGORITHM: [400, 'UNSUPPORTED_ALGORITHM', 'Only ed25519 signatures are supported'],
+        AGENT_NOT_FOUND: [404, 'AGENT_NOT_FOUND', `Agent for keyId not found`],
+        REGISTRATION_PENDING: [403, 'REGISTRATION_PENDING', 'Agent registration is pending approval'],
+        REGISTRATION_REJECTED: [403, 'REGISTRATION_REJECTED', 'Agent registration has been rejected'],
+        REQUEST_TARGET_REQUIRED: [400, 'INSUFFICIENT_SIGNED_HEADERS', 'Signed headers must include (request-target)'],
+        DATE_REQUIRED: [400, 'DATE_HEADER_REQUIRED', 'The "date" header must be included in the signed headers list'],
+        DATE_MISSING: [400, 'DATE_HEADER_REQUIRED', 'Date header is required for HTTP signature authentication'],
+        REQUEST_EXPIRED: [403, 'REQUEST_EXPIRED', 'Date header is outside the acceptable time window (+-5 minutes)'],
+        SIGNATURE_INVALID: [403, 'SIGNATURE_INVALID', 'HTTP signature verification failed'],
+      };
+      const [status, error, message] = reasonMap[result.reason] || [400, 'SIGNATURE_VERIFICATION_FAILED', 'Signature verification failed'];
+      return res.status(status).json({ error, message });
     }
-
-    // Resolve agent by keyId (supports agent_id, DID seed, or DID web)
-    let agent;
-    if (params.keyId.startsWith('did:web:')) {
-      agent = await resolveDIDWebAgent(params.keyId, req);
-    } else if (params.keyId.startsWith('did:seed:')) {
-      agent = await storage.getAgentByDid(params.keyId);
-    } else {
-      agent = await storage.getAgent(params.keyId);
-    }
-
-    if (!agent) {
-      return res.status(404).json({
-        error: 'AGENT_NOT_FOUND',
-        message: `Agent for keyId ${params.keyId} not found`
-      });
-    }
-
-    // Approval status gate
-    if (rejectIfNotApproved(agent, res)) return;
 
     // Authorization check: signing agent must match target agent in URL.
     // Without this, Agent A could sign with their own valid key and
     // perform actions on Agent B's resources.
     const targetAgentId = req.params.agentId || req.params.agent_id;
-    if (targetAgentId && agent.agent_id !== targetAgentId) {
+    if (targetAgentId && result.agent.agent_id !== targetAgentId) {
       return res.status(403).json({
         error: 'FORBIDDEN',
         message: 'Signature keyId does not match target agent'
       });
     }
 
-    // Build canonical signing string
-    const headersToSign = params.headers
-      ? params.headers.split(' ')
-      : ['(request-target)', 'host', 'date'];
-
-    // Replay protection: 'date' must always be signed to prevent replay attacks.
-    if (!headersToSign.includes('date')) {
-      return res.status(400).json({
-        error: 'DATE_HEADER_REQUIRED',
-        message: 'The "date" header must be included in the signed headers list'
-      });
-    }
-
-    // Validate Date header freshness (must be within +/- 5 minutes)
-    const dateHeader = req.headers['date'];
-    if (!dateHeader) {
-      return res.status(400).json({
-        error: 'DATE_HEADER_REQUIRED',
-        message: 'Date header is required for HTTP signature authentication'
-      });
-    }
-    if (!validateTimestamp(dateHeader)) {
-      return res.status(403).json({
-        error: 'REQUEST_EXPIRED',
-        message: 'Date header is outside the acceptable time window (+-5 minutes)'
-      });
-    }
-
-    const signingLines = headersToSign.map(h => {
-      if (h === '(request-target)') {
-        return `(request-target): ${req.method.toLowerCase()} ${req.originalUrl}`;
-      }
-      const val = req.headers[h.toLowerCase()];
-      if (!val) throw new Error(`Missing header: ${h}`);
-      return `${h.toLowerCase()}: ${val}`;
-    });
-    const signingString = signingLines.join('\n');
-
-    // For DID web agents: verify against keys fetched during resolution
-    // For regular agents: verify against all active public keys
-    const sigBytes = fromBase64(params.signature);
-    const message = Buffer.from(signingString, 'utf8');
-
-    const activeKeys = agent._did_web_keys
-      ? agent._did_web_keys
-      : agent.public_keys
-        ? agent.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
-        : [{ public_key: agent.public_key }];
-
-    let verified = false;
-    for (const keyEntry of activeKeys) {
-      try {
-        const pubKey = fromBase64(keyEntry.public_key);
-        if (nacl.sign.detached.verify(message, sigBytes, pubKey)) {
-          verified = true;
-          break;
-        }
-      } catch {
-        // Skip malformed key entries
-      }
-    }
-
-    if (!verified) {
-      return res.status(403).json({
-        error: 'SIGNATURE_INVALID',
-        message: 'HTTP signature verification failed'
-      });
-    }
-
-    // Clean up transient DID web keys before attaching to request
-    const { _did_web_keys, ...agentForRequest } = agent;
-    req.agent = agentForRequest;
+    req.agent = result.agent;
     req.authMethod = 'http-signature';
     next();
   } catch (error) {
