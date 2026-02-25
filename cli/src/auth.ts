@@ -169,8 +169,11 @@ export function signEnvelope(
   envelope: object,
   secretKey: string,
 ): object {
-  const privateKey = fromBase64(secretKey);
   const env = envelope as AdmpEnvelope;
+  if (!env.from) {
+    throw new Error('signEnvelope: envelope.from is required to derive the signing key ID');
+  }
+  const privateKey = fromBase64(secretKey);
   const signature = signMessage(env, privateKey);
   return { ...env, signature };
 }

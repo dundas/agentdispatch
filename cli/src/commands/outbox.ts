@@ -82,6 +82,10 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
+      if (!opts.body && !opts.html) {
+        error('At least one of --body or --html is required', 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
       const payload: Record<string, unknown> = { to: opts.to, subject: opts.subject };
       if (opts.body) payload.body = opts.body;
       if (opts.html) payload.html = opts.html;

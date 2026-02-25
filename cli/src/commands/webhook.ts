@@ -13,8 +13,8 @@ export function register(program: Command): void {
     .command('set')
     .description('Set or update the webhook URL and signing secret')
     .requiredOption('--url <url>', 'Webhook endpoint URL')
-    .requiredOption('--secret <secret>', 'Webhook signing secret')
-    .addHelpText('after', '\nExample:\n  admp webhook set --url https://myapp.com/hook --secret s3cr3t')
+    .requiredOption('--secret <secret>', 'Webhook signing secret (caution: visible in shell history — prefer ADMP_WEBHOOK_SECRET env var)')
+    .addHelpText('after', '\nSecurity note: --secret appears in shell history. Use ADMP_WEBHOOK_SECRET env var or clear history after use.\n\nExample:\n  admp webhook set --url https://myapp.com/hook --secret s3cr3t')
     .action(async (opts: { url: string; secret: string }) => {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);

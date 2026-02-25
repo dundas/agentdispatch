@@ -31,11 +31,20 @@ export function register(program: Command): void {
       let res: RegisterResponse;
       try {
         const url = new URL('/api/agents/register', baseUrl);
-        const httpRes = await fetch(url.toString(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
+        const timeoutMs = parseInt(process.env.ADMP_TIMEOUT ?? '30000', 10);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        let httpRes: Response;
+        try {
+          httpRes = await fetch(url.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
         if (!httpRes.ok) {
           const d = await httpRes.json() as Record<string, unknown>;
           error(String(d.error ?? d.message ?? httpRes.statusText), String(d.code ?? 'ERROR'));
@@ -43,7 +52,12 @@ export function register(program: Command): void {
         }
         res = await httpRes.json() as RegisterResponse;
       } catch (err: unknown) {
-        error(`Could not connect to ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`);
+        const isTimeout = err instanceof Error && err.name === 'AbortError';
+        error(
+          isTimeout
+            ? `Request timed out — set ADMP_TIMEOUT (ms) to override`
+            : `Could not connect to ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`
+        );
         process.exit(1);
       }
 

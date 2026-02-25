@@ -20,7 +20,7 @@ export function register(program: Command): void {
       // Resolve the reply recipient: explicit --to or fetch from original message status
       let toAgentId = opts.to;
       if (!toAgentId) {
-        // api_key is only needed to authenticate the status lookup
+        // Throw early if api_key is absent — the status fetch will need it for auth
         requireConfig(['api_key']);
         const status = await client.request<{ from?: string }>(
           'GET',
