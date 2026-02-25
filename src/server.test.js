@@ -3422,13 +3422,12 @@ test('trust model: DID web — approval_required policy → shadow agent starts 
       .set('Date', dateStr)
       .send({});
 
-    // After Fix 1: pending agent's signature verification returns { verified: false }
-    // at the global gate, which now returns 401 instead of falling through to
-    // route-level auth (which would have returned 403 REGISTRATION_PENDING).
-    // The important behavior is preserved: the request is denied and the shadow
-    // agent is still created with pending status.
-    assert.equal(res.status, 401, `Expected 401 SIGNATURE_INVALID, got ${res.status}: ${JSON.stringify(res.body)}`);
-    assert.equal(res.body.error, 'SIGNATURE_INVALID');
+    // S2 fix: pending DID:web agents now get an actionable 403 REGISTRATION_PENDING
+    // instead of a misleading 401 SIGNATURE_INVALID. The global gate propagates
+    // the specific reason from verifyHttpSignatureOnly so agents know to wait
+    // for approval rather than debugging their signature implementation.
+    assert.equal(res.status, 403, `Expected 403 REGISTRATION_PENDING, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.error, 'REGISTRATION_PENDING');
 
     // Shadow agent should be persisted with pending status
     const shadowAgent = await storage.getAgentByDid(did);

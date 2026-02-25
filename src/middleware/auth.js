@@ -62,9 +62,14 @@ export async function verifyHttpSignatureOnly(req) {
 
     if (!agent) return { verified: false };
 
-    // Reject unapproved agents
-    if (agent.registration_status === 'pending' || agent.registration_status === 'rejected') {
-      return { verified: false };
+    // Reject unapproved agents with a specific reason so the global gate
+    // can return the correct error code (403 REGISTRATION_PENDING/REJECTED)
+    // instead of a misleading 401 SIGNATURE_INVALID.
+    if (agent.registration_status === 'pending') {
+      return { verified: false, reason: 'REGISTRATION_PENDING' };
+    }
+    if (agent.registration_status === 'rejected') {
+      return { verified: false, reason: 'REGISTRATION_REJECTED' };
     }
 
     // Build canonical signing string
@@ -598,18 +603,42 @@ async function resolveDIDWebAgent(did, req) {
 
       let didDoc;
       try {
-        const resp = await fetch(didUrl, { signal: controller.signal });
-        if (!resp.ok) return null;
+        // Use redirect: 'manual' to prevent SSRF via redirect — an attacker
+        // controlling a public domain could redirect /.well-known/did.json
+        // to an internal address, bypassing isBlockedDIDWebHost.
+        const resp = await fetch(didUrl, { signal: controller.signal, redirect: 'manual' });
 
-        // Check Content-Length header if present (fast reject for oversized docs)
-        const contentLength = parseInt(resp.headers.get('content-length'), 10);
-        if (contentLength > DID_DOC_MAX_BYTES) return null;
+        // Handle redirects: validate the redirect target against the SSRF blocklist
+        if (resp.status >= 300 && resp.status < 400) {
+          const location = resp.headers.get('location');
+          if (!location) return null;
+          try {
+            const redirectUrl = new URL(location, didUrl);
+            if (isBlockedDIDWebHost(redirectUrl.hostname)) return null;
+            // Follow one validated redirect
+            const redirectResp = await fetch(redirectUrl.href, { signal: controller.signal, redirect: 'error' });
+            if (!redirectResp.ok) return null;
+            const contentLength = parseInt(redirectResp.headers.get('content-length'), 10);
+            if (contentLength > DID_DOC_MAX_BYTES) return null;
+            const bodyText = await redirectResp.text();
+            if (Buffer.byteLength(bodyText, 'utf8') > DID_DOC_MAX_BYTES) return null;
+            didDoc = JSON.parse(bodyText);
+          } catch {
+            return null;
+          }
+        } else {
+          if (!resp.ok) return null;
 
-        // Read body with byte cap as fallback (Content-Length can be spoofed)
-        const bodyText = await resp.text();
-        if (Buffer.byteLength(bodyText, 'utf8') > DID_DOC_MAX_BYTES) return null;
+          // Check Content-Length header if present (fast reject for oversized docs)
+          const contentLength = parseInt(resp.headers.get('content-length'), 10);
+          if (contentLength > DID_DOC_MAX_BYTES) return null;
 
-        didDoc = JSON.parse(bodyText);
+          // Read body with byte cap as fallback (Content-Length can be spoofed)
+          const bodyText = await resp.text();
+          if (Buffer.byteLength(bodyText, 'utf8') > DID_DOC_MAX_BYTES) return null;
+
+          didDoc = JSON.parse(bodyText);
+        }
       } finally {
         clearTimeout(timeout);
       }
