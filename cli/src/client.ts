@@ -1,6 +1,12 @@
 import { ResolvedConfig } from './config.js';
 import { buildAuthHeaders } from './auth.js';
 
+// The deployed server mounts routes under /api/ (see src/server.js line 109:
+// app.use('/api/agents', agentRoutes)). The ADMP whitepaper and OpenAPI spec
+// use /v1/ as the path prefix — that is aspirational. Until the server is
+// updated, all CLI commands use the live /api/ prefix.
+const _API_PREFIX = '/api'; // documented divergence from /v1/ spec
+
 export class AdmpError extends Error {
   code: string;
   status: number;
@@ -36,8 +42,10 @@ export class AdmpClient {
     };
 
     if (auth === 'signature') {
-      // buildAuthHeaders generates its own Date and Signature headers
-      const authHeaders = buildAuthHeaders(method, url.pathname, host, this.config.secret_key, this.config.agent_id);
+      // Include query string in signed path so the server can verify GET requests
+      // that carry query params (e.g. groups messages, outbox messages).
+      const signedPath = url.pathname + url.search;
+      const authHeaders = buildAuthHeaders(method, signedPath, host, this.config.secret_key, this.config.agent_id);
       Object.assign(headers, authHeaders);
     } else if (auth === 'api-key') {
       if (!this.config.api_key) {
@@ -49,6 +57,7 @@ export class AdmpClient {
       }
       headers['X-Api-Key'] = this.config.api_key;
     }
+    // auth === 'none': no auth headers added (e.g. public endpoints)
 
     // Default 30-second timeout; pull --timeout commands add a 5s buffer via their body param
     const timeoutMs = parseInt(process.env.ADMP_TIMEOUT ?? '30000', 10);

@@ -75,9 +75,13 @@ function signMessage(envelope: AdmpEnvelope, secretKey: Uint8Array): EnvelopeSig
   const base = createSigningBase(envelope);
   const message = Buffer.from(base, 'utf8');
   const signature = nacl.sign.detached(message, secretKey);
+  const kid = envelope.from.replace('agent://', '');
+  if (!kid) {
+    throw new Error('signMessage: envelope.from must not be bare "agent://" — no agent ID');
+  }
   return {
     alg: 'ed25519',
-    kid: envelope.from.replace('agent://', ''),
+    kid,
     sig: toBase64(signature),
   };
 }

@@ -44,10 +44,6 @@ export function maskSecret(value: string | undefined): string {
   return value.length <= 8 ? '***' : value.slice(0, 8) + '...';
 }
 
-export function json(data: unknown): void {
-  console.log(JSON.stringify(data, null, 2));
-}
-
 export function printMessage(envelope: Record<string, unknown>): void {
   if (isJsonMode()) {
     console.log(JSON.stringify(envelope, null, 2));
