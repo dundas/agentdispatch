@@ -192,6 +192,7 @@ curl -X POST https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fmy-agent/inb
 ```bash
 curl -X POST https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Frecipient/messages \
   -H "Content-Type: application/json" \
+  -H "X-Api-Key: YOUR_API_KEY" \
   -d '{
     "version": "1.0",
     "from": "agent://my-agent",
@@ -206,6 +207,8 @@ curl -X POST https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Frecipient/me
     }
   }'
 ```
+
+> **Note:** The `X-Api-Key` header is required when the server has `API_KEY_REQUIRED=true` (default in production). You can also use `Authorization: Bearer YOUR_API_KEY`.
 
 Response (201):
 

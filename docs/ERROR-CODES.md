@@ -74,7 +74,7 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `REPLY_FAILED` | 400 | No | Reply failed | Verify original message exists |
 | `MESSAGE_NOT_FOUND` | 404 | No | Message ID not found | Message may have been acked or expired |
 | `MESSAGE_EXPIRED` | 410 | No | Message purged (ephemeral or TTL) | Message data is gone permanently |
-| `STATS_FAILED` | 500 | Yes | Failed to retrieve inbox stats | Transient storage error |
+| `STATS_FAILED` | 500 | Yes | Failed to retrieve inbox stats | Transient storage error. **Note:** This code also appears in [System Errors](#system-errors) for the `GET /api/stats` endpoint — context determines which endpoint failed. |
 | `RECLAIM_FAILED` | 400 | Yes | Lease reclaim failed | Transient error, retry |
 
 ## Group Errors
@@ -152,7 +152,7 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 |------|------|-----------|-------------|------|
 | `NOT_FOUND` | 404 | No | Endpoint doesn't exist | Check URL path |
 | `INTERNAL_ERROR` | 500 | Yes | Unhandled server error | Transient, retry with backoff |
-| `STATS_FAILED` | 500 | Yes | System stats retrieval failed | Transient error |
+| `STATS_FAILED` | 500 | Yes | System stats retrieval failed | Transient error. **Note:** This code also appears in [Message and Inbox Errors](#message-and-inbox-errors) for `GET /api/agents/:agentId/inbox/stats` — context determines which endpoint failed. |
 | `DISCOVERY_FAILED` | 500 | Yes | Public key directory failed | Transient error |
 | `DID_DOCUMENT_FAILED` | 500 | Yes | DID document generation failed | Transient error |
 | `WEBHOOK_FAILED` | 500 | Yes | Mailgun webhook processing failed | Transient error |

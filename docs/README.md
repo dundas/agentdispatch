@@ -21,3 +21,11 @@ To regenerate after source changes:
 ```
 
 This runs the docs-generator skill in Claude Code, reading all source files listed in `docs-generator.json` and regenerating the output files.
+
+## Staleness Warning
+
+There is no CI check that validates docs against source code. If route handlers, error codes, or authentication logic change in `src/`, these docs will drift. Consider adding a CI step or running `/docs-generator --diff` before releases to detect drift.
+
+## Last Generated
+
+These docs were generated on **2026-02-25** from commit history on the `docs/generated-documentation` branch.
