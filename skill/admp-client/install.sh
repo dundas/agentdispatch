@@ -1,8 +1,11 @@
 #!/usr/bin/env sh
 # install.sh — Install the admp-client skill into AI agent skill directories
 #
-# Usage:
+# Usage (run from repo root):
 #   ./skill/admp-client/install.sh
+#
+# Must be run from the repository root so that relative paths
+# (.claude/skills, .gemini/skills, .codex/skills) resolve correctly.
 #
 # Installs SKILL.md into any detected skill directories:
 #   .claude/skills/admp-client/

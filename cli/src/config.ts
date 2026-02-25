@@ -1,6 +1,6 @@
 import { homedir } from 'os';
 import { join, dirname } from 'path';
-import { mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync, existsSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync, unlinkSync, existsSync } from 'fs';
 
 export interface AdmpConfig {
   base_url: string;
@@ -35,7 +35,13 @@ export function saveConfig(config: Partial<AdmpConfig>): void {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
   chmodSync(tmp, 0o600);
-  renameSync(tmp, path);
+  try {
+    renameSync(tmp, path);
+  } catch (err) {
+    // Clean up the temp file if rename fails to avoid leaving sensitive data behind
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+    throw err;
+  }
 }
 
 export function resolveConfig(): Partial<ResolvedConfig> {

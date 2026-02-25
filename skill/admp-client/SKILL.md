@@ -223,6 +223,7 @@ function signRequest(method, path, host, agentId, secretKeyB64) {
     `date: ${date}`,
   ].join('\n');
   const privateKey = fromBase64(secretKeyB64);
+  if (privateKey.length !== 64) throw new Error(`secretKey must be 64 bytes; got ${privateKey.length}`);
   const sig = nacl.sign.detached(Buffer.from(signingString, 'utf8'), privateKey);
   const signature = `keyId="${agentId}",algorithm="ed25519",` +
     `headers="(request-target) host date",signature="${toBase64(sig)}"`;

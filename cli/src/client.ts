@@ -67,7 +67,9 @@ export class AdmpClient {
     // auth === 'none': no auth headers added (e.g. public endpoints)
 
     // Use caller-supplied override (e.g. pull long-poll + 5s buffer), else env/default.
-    const timeoutMs = timeoutOverrideMs ?? parseInt(process.env.ADMP_TIMEOUT ?? '30000', 10);
+    // Validate env value to guard against ADMP_TIMEOUT=abc (parseInt → NaN → fires immediately).
+    const envTimeout = parseInt(process.env.ADMP_TIMEOUT ?? '', 10);
+    const timeoutMs = timeoutOverrideMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 

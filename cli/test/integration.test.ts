@@ -10,8 +10,6 @@
 import { test, expect, describe } from 'bun:test';
 import { AdmpClient } from '../src/client.js';
 import { resolveConfig } from '../src/config.js';
-import { buildAuthHeaders, signEnvelope } from '../src/auth.js';
-import nacl from 'tweetnacl';
 
 const BASE_URL = process.env.ADMP_BASE_URL;
 const HAVE_SERVER = !!BASE_URL;
@@ -67,10 +65,12 @@ describe('Integration: rotate-key', () => {
 });
 
 describe('Integration: groups', () => {
-  serverTest('create → join → send → list messages', async () => {
-    const config = resolveConfig();
-    if (!config.agent_id || !config.secret_key) return;
+  const config = resolveConfig();
+  const groupsTest = (HAVE_SERVER && config.agent_id && config.secret_key)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? serverTest : (test as any).skip as typeof test;
 
+  groupsTest('create → join → send → list messages', async () => {
     const client = new AdmpClient(config as any);
     const group = await client.request<{ group_id: string }>(
       'POST', '/api/groups', { name: `test-group-${Date.now()}`, access: 'open' }, 'signature'

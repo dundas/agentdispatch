@@ -52,10 +52,10 @@ export function register(program: Command): void {
 
         printMessage(res);
       } catch (err) {
-        // Treat as empty only when the server signals an inbox-specific code.
-        // Re-throw AGENT_NOT_FOUND or any non-404 so misconfiguration is visible.
-        if (err instanceof AdmpError && err.status === 404 &&
-            err.code !== 'AGENT_NOT_FOUND' && err.code !== 'NOT_FOUND') {
+        // Use an allowlist: only treat as empty inbox for codes the server
+        // explicitly emits for "no messages" — anything else surfaces as an error.
+        const INBOX_EMPTY_CODES = new Set(['INBOX_EMPTY', 'NO_MESSAGES']);
+        if (err instanceof AdmpError && err.status === 404 && INBOX_EMPTY_CODES.has(err.code)) {
           if (isJsonMode()) {
             console.log(JSON.stringify({ message: 'Inbox empty' }));
           } else {
