@@ -2127,7 +2127,7 @@ test('valid HTTP signature passes auth', async () => {
   assert.equal(res.body.agent_id, agentId);
 });
 
-test('invalid HTTP signature returns 403', async () => {
+test('invalid HTTP signature returns 401 (rejected at global gate)', async () => {
   const agent = await registerAgent('httpsig-invalid');
   const agentId = agent.agent_id;
   const path = `/api/agents/${encodeURIComponent(agentId)}`;
@@ -2147,7 +2147,9 @@ test('invalid HTTP signature returns 403', async () => {
     .set('date', headers.date)
     .set('signature', sigHeader);
 
-  assert.equal(res.status, 403);
+  // After Fix 1: invalid signature is rejected at the global API key gate (401)
+  // instead of being forwarded to authenticateHttpSignature (403)
+  assert.equal(res.status, 401);
   assert.equal(res.body.error, 'SIGNATURE_INVALID');
 });
 
@@ -3344,7 +3346,7 @@ test('trust model: DID web — deduplication: same DID resolves to existing shad
   }
 });
 
-test('trust model: DID web — fetch failure → AGENT_NOT_FOUND (fail closed)', async () => {
+test('trust model: DID web — fetch failure → rejected at global gate (fail closed)', async () => {
   const domain = `did-web-unreachable-${Date.now()}.example.com`;
   const did = `did:web:${domain}`;
   const shadowAgentId = `did-web:${domain}`;
@@ -3356,17 +3358,21 @@ test('trust model: DID web — fetch failure → AGENT_NOT_FOUND (fail closed)',
 
   try {
     // Sign some content (invalid signature but DID resolution fails first anyway)
-    const sigHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="invalidsig"`;
+    const sigHeader = `keyId="${did}",algorithm="ed25519",headers="(request-target) host date",signature="invalidsig"`;
     const targetPath = `/api/agents/${encodeURIComponent(shadowAgentId)}/heartbeat`;
 
     const res = await request(app)
       .post(targetPath)
       .set('Signature', sigHeader)
       .set('Date', new Date().toUTCString())
+      .set('Host', '127.0.0.1')
       .send({});
 
-    assert.equal(res.status, 404, 'failed DID fetch must return 404 (fail closed)');
-    assert.equal(res.body.error, 'AGENT_NOT_FOUND');
+    // After Fix 1: invalid/unverifiable signature is rejected at the global gate
+    // with 401 instead of falling through to route-level auth (404).
+    // The system still fails closed — the request is denied.
+    assert.equal(res.status, 401, 'failed DID fetch must be rejected (fail closed)');
+    assert.equal(res.body.error, 'SIGNATURE_INVALID');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -3416,9 +3422,13 @@ test('trust model: DID web — approval_required policy → shadow agent starts 
       .set('Date', dateStr)
       .send({});
 
-    // With approval_required policy, shadow agent should be created as pending → 403
-    assert.equal(res.status, 403, `Expected 403 REGISTRATION_PENDING, got ${res.status}: ${JSON.stringify(res.body)}`);
-    assert.equal(res.body.error, 'REGISTRATION_PENDING');
+    // After Fix 1: pending agent's signature verification returns { verified: false }
+    // at the global gate, which now returns 401 instead of falling through to
+    // route-level auth (which would have returned 403 REGISTRATION_PENDING).
+    // The important behavior is preserved: the request is denied and the shadow
+    // agent is still created with pending status.
+    assert.equal(res.status, 401, `Expected 401 SIGNATURE_INVALID, got ${res.status}: ${JSON.stringify(res.body)}`);
+    assert.equal(res.body.error, 'SIGNATURE_INVALID');
 
     // Shadow agent should be persisted with pending status
     const shadowAgent = await storage.getAgentByDid(did);
@@ -3596,4 +3606,271 @@ test('trust model: tenant creation rejects invalid registration_policy', async (
     process.env.MASTER_API_KEY = savedMaster;
     process.env.API_KEY_REQUIRED = savedRequired;
   }
+});
+
+// ============ SECURITY FIX TESTS ============
+
+// --- Fix 1: Reject invalid signatures (don't fall through to API key) ---
+
+test('Fix1: invalid Signature header returns 401 even when valid API key present', async () => {
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-master-key-fix1';
+
+  try {
+    const agent = await registerAgent('fix1-bad-sig');
+    const agentId = agent.agent_id;
+    const path = `/api/agents/${encodeURIComponent(agentId)}`;
+
+    // Create a bogus signature with a different key
+    const bogusKeyPair = nacl.sign.keyPair();
+    const headers = {
+      host: '127.0.0.1',
+      date: new Date().toUTCString()
+    };
+    const sigHeader = signRequest('GET', path, headers, bogusKeyPair.secretKey, agentId);
+
+    // Send with BOTH invalid Signature AND valid API key
+    const res = await request(app)
+      .get(path)
+      .set('host', headers.host)
+      .set('date', headers.date)
+      .set('signature', sigHeader)
+      .set('x-api-key', 'test-master-key-fix1');
+
+    // Should reject with 401 SIGNATURE_INVALID, NOT succeed via API key
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error, 'SIGNATURE_INVALID');
+  } finally {
+    process.env.API_KEY_REQUIRED = savedRequired;
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+test('Fix1: no Signature header still falls through to requireApiKey', async () => {
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-master-key-fix1b';
+
+  try {
+    const agent = await registerAgent('fix1-no-sig');
+    const agentId = agent.agent_id;
+    const path = `/api/agents/${encodeURIComponent(agentId)}`;
+
+    // No Signature header, but valid API key — should succeed
+    const res = await request(app)
+      .get(path)
+      .set('x-api-key', 'test-master-key-fix1b');
+
+    assert.equal(res.status, 200);
+  } finally {
+    process.env.API_KEY_REQUIRED = savedRequired;
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+test('Fix1: valid Signature header bypasses API key (existing behavior preserved)', async () => {
+  const savedRequired = process.env.API_KEY_REQUIRED;
+  const savedMaster = process.env.MASTER_API_KEY;
+  process.env.API_KEY_REQUIRED = 'true';
+  process.env.MASTER_API_KEY = 'test-master-key-fix1c';
+
+  try {
+    const agent = await registerAgent('fix1-valid-sig');
+    const agentId = agent.agent_id;
+    const secretKey = fromBase64(agent.secret_key);
+    const path = `/api/agents/${encodeURIComponent(agentId)}`;
+
+    const headers = {
+      host: '127.0.0.1',
+      date: new Date().toUTCString()
+    };
+    const sigHeader = signRequest('GET', path, headers, secretKey, agentId);
+
+    // Valid Signature, no API key — should succeed
+    const res = await request(app)
+      .get(path)
+      .set('host', headers.host)
+      .set('date', headers.date)
+      .set('signature', sigHeader);
+
+    assert.equal(res.status, 200);
+  } finally {
+    process.env.API_KEY_REQUIRED = savedRequired;
+    process.env.MASTER_API_KEY = savedMaster;
+  }
+});
+
+// --- Fix 2: Replay protection — validate Date header freshness ---
+
+test('Fix2: stale Date header rejected by verifyHttpSignatureOnly (global gate)', async () => {
+  const agent = await registerAgent('fix2-stale-date');
+  const agentId = agent.agent_id;
+  const secretKey = fromBase64(agent.secret_key);
+  const path = `/api/agents/${encodeURIComponent(agentId)}`;
+
+  // Date 10 minutes in the past
+  const staleDate = new Date(Date.now() - 10 * 60 * 1000).toUTCString();
+  const headers = {
+    host: '127.0.0.1',
+    date: staleDate
+  };
+  const sigHeader = signRequest('GET', path, headers, secretKey, agentId);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', staleDate)
+    .set('signature', sigHeader);
+
+  // Should be rejected — stale date means potential replay
+  assert.ok([401, 403].includes(res.status), `Expected 401 or 403, got ${res.status}`);
+});
+
+test('Fix2: missing Date header rejected by authenticateHttpSignature', async () => {
+  const agent = await registerAgent('fix2-missing-date');
+  const agentId = agent.agent_id;
+  const secretKey = fromBase64(agent.secret_key);
+  const path = `/api/agents/${encodeURIComponent(agentId)}/messages`;
+
+  // Sign WITHOUT date in headers list
+  const headers = {
+    host: '127.0.0.1'
+  };
+  const sigHeader = signRequest('GET', path, headers, secretKey, agentId, ['(request-target)', 'host']);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('signature', sigHeader);
+
+  // Should be rejected — date must always be signed
+  assert.ok([400, 401, 403].includes(res.status), `Expected 400/401/403, got ${res.status}`);
+});
+
+test('Fix2: stale Date header rejected by authenticateHttpSignature', async () => {
+  const sender = await registerAgent('fix2-stale-auth');
+  const recipient = await registerAgent('fix2-stale-recip');
+  const secretKey = fromBase64(sender.secret_key);
+  const path = `/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`;
+
+  // Date 10 minutes in the past
+  const staleDate = new Date(Date.now() - 10 * 60 * 1000).toUTCString();
+  const headers = {
+    host: '127.0.0.1',
+    date: staleDate
+  };
+  const sigHeader = signRequest('POST', path, headers, secretKey, sender.agent_id);
+
+  const envelope = {
+    version: '1.0',
+    id: `msg-fix2-${Date.now()}`,
+    type: 'task.request',
+    from: sender.agent_id,
+    to: recipient.agent_id,
+    subject: 'replay-test',
+    body: { test: true },
+    timestamp: new Date().toISOString(),
+    ttl_sec: 3600
+  };
+  envelope.signature = signMessage(envelope, fromBase64(sender.secret_key));
+
+  const res = await request(app)
+    .post(path)
+    .set('host', headers.host)
+    .set('date', staleDate)
+    .set('signature', sigHeader)
+    .send(envelope);
+
+  // Should be rejected due to stale date
+  assert.ok([400, 401, 403].includes(res.status), `Expected 400/401/403, got ${res.status}`);
+});
+
+test('Fix2: fresh Date header passes (existing behavior)', async () => {
+  const agent = await registerAgent('fix2-fresh-date');
+  const agentId = agent.agent_id;
+  const secretKey = fromBase64(agent.secret_key);
+  const path = `/api/agents/${encodeURIComponent(agentId)}`;
+
+  const headers = {
+    host: '127.0.0.1',
+    date: new Date().toUTCString()
+  };
+  const sigHeader = signRequest('GET', path, headers, secretKey, agentId);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', headers.date)
+    .set('signature', sigHeader);
+
+  assert.equal(res.status, 200);
+});
+
+// --- Fix 3: Authorization check in verifyHttpSignatureOnly ---
+
+test('Fix3: Agent A signing request targeting Agent B resources is rejected', async () => {
+  const agentA = await registerAgent('fix3-agent-a');
+  const agentB = await registerAgent('fix3-agent-b');
+  const secretKeyA = fromBase64(agentA.secret_key);
+
+  // Agent A signs a request targeting Agent B's endpoint
+  const path = `/api/agents/${encodeURIComponent(agentB.agent_id)}/messages`;
+  const headers = {
+    host: '127.0.0.1',
+    date: new Date().toUTCString()
+  };
+  const sigHeader = signRequest('GET', path, headers, secretKeyA, agentA.agent_id);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', headers.date)
+    .set('signature', sigHeader);
+
+  // Should be rejected — Agent A cannot access Agent B's resources
+  assert.ok([401, 403].includes(res.status), `Expected 401 or 403, got ${res.status}`);
+});
+
+test('Fix3: Agent A signing request targeting own resources is allowed', async () => {
+  const agentA = await registerAgent('fix3-agent-own');
+  const secretKeyA = fromBase64(agentA.secret_key);
+
+  // Agent A signs a request targeting own endpoint
+  const path = `/api/agents/${encodeURIComponent(agentA.agent_id)}`;
+  const headers = {
+    host: '127.0.0.1',
+    date: new Date().toUTCString()
+  };
+  const sigHeader = signRequest('GET', path, headers, secretKeyA, agentA.agent_id);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', headers.date)
+    .set('signature', sigHeader);
+
+  assert.equal(res.status, 200);
+});
+
+test('Fix3: non-agent paths (e.g. /api/stats) skip authorization check', async () => {
+  const agent = await registerAgent('fix3-stats');
+  const secretKey = fromBase64(agent.secret_key);
+
+  const path = '/api/stats';
+  const headers = {
+    host: '127.0.0.1',
+    date: new Date().toUTCString()
+  };
+  const sigHeader = signRequest('GET', path, headers, secretKey, agent.agent_id);
+
+  const res = await request(app)
+    .get(path)
+    .set('host', headers.host)
+    .set('date', headers.date)
+    .set('signature', sigHeader);
+
+  assert.equal(res.status, 200);
 });

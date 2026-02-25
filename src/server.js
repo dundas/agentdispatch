@@ -20,7 +20,7 @@ import groupRoutes from './routes/groups.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
 import discoveryRoutes from './routes/discovery.js';
 import keysRoutes from './routes/keys.js';
-import { requireApiKey } from './middleware/auth.js';
+import { requireApiKey, verifyHttpSignatureOnly } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
 import { storage } from './storage/index.js';
@@ -76,9 +76,29 @@ logger.info(
   { apiKeyRequired: process.env.API_KEY_REQUIRED === 'true' },
   `API key enforcement: ${process.env.API_KEY_REQUIRED === 'true' ? 'enabled' : 'disabled'} (API_KEY_REQUIRED=${process.env.API_KEY_REQUIRED ?? 'unset'})`
 );
-app.use('/api', (req, res, next) => {
+app.use('/api', async (req, res, next) => {
   // Always allow agent self-registration without an API key
   if (req.method === 'POST' && req.path === '/agents/register') return next();
+
+  // If request has a valid HTTP Signature, bypass API key requirement.
+  // This lets agents authenticate with their registered Ed25519 keypair
+  // instead of needing a separate API key.
+  if (req.headers['signature']) {
+    const result = await verifyHttpSignatureOnly(req);
+    if (result.verified) {
+      req.agent = result.agent;
+      req.authMethod = 'http-signature';
+      return next();
+    }
+    // The presence of a Signature header signals intent to use cryptographic auth.
+    // If verification fails, reject immediately — do NOT fall through to API key.
+    // This prevents an attacker from bypassing signature checks with a stolen API key.
+    return res.status(401).json({
+      error: 'SIGNATURE_INVALID',
+      message: 'HTTP signature verification failed'
+    });
+  }
+
   return requireApiKey(req, res, next);
 });
 

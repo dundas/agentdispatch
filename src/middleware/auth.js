@@ -11,7 +11,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { storage } from '../storage/index.js';
 import nacl from 'tweetnacl';
-import { fromBase64, toBase64, hashApiKey } from '../utils/crypto.js';
+import { fromBase64, toBase64, hashApiKey, validateTimestamp } from '../utils/crypto.js';
 
 /**
  * Rejects the response if the agent's registration is not approved.
@@ -34,6 +34,103 @@ function rejectIfNotApproved(agent, res) {
     return true;
   }
   return false;
+}
+
+/**
+ * Verify an HTTP Signature header without sending a response.
+ * Returns { verified: true, agent } if the signature is valid,
+ * or { verified: false } if missing/invalid.
+ * Used by the global API key gate to bypass requireApiKey for signed requests.
+ */
+export async function verifyHttpSignatureOnly(req) {
+  const sigHeader = req.headers['signature'];
+  if (!sigHeader) return { verified: false };
+
+  try {
+    const params = parseSignatureHeader(sigHeader);
+    if (!params.keyId || !params.signature) return { verified: false };
+
+    // Resolve agent by keyId
+    let agent;
+    if (params.keyId.startsWith('did:web:')) {
+      agent = await resolveDIDWebAgent(params.keyId, req);
+    } else if (params.keyId.startsWith('did:seed:')) {
+      agent = await storage.getAgentByDid(params.keyId);
+    } else {
+      agent = await storage.getAgent(params.keyId);
+    }
+
+    if (!agent) return { verified: false };
+
+    // Reject unapproved agents
+    if (agent.registration_status === 'pending' || agent.registration_status === 'rejected') {
+      return { verified: false };
+    }
+
+    // Build canonical signing string
+    const headersToSign = params.headers
+      ? params.headers.split(' ')
+      : ['(request-target)', 'host', 'date'];
+
+    // Replay protection: 'date' must always be signed to prevent replay attacks.
+    // If the client omits 'date' from the signed headers list, reject.
+    if (!headersToSign.includes('date')) {
+      return { verified: false };
+    }
+
+    // Validate Date header freshness (must be within +/- 5 minutes)
+    const dateHeader = req.headers['date'];
+    if (!dateHeader || !validateTimestamp(dateHeader)) {
+      return { verified: false };
+    }
+
+    // Authorization check: signing agent must match target agent in URL.
+    // Without this, Agent A could sign with their own valid key and
+    // access Agent B's resources via the global API key bypass.
+    const agentPathMatch = req.path.match(/^\/agents\/([^/]+)/);
+    if (agentPathMatch) {
+      const targetAgentId = decodeURIComponent(agentPathMatch[1]);
+      if (targetAgentId !== 'register' && agent.agent_id !== targetAgentId) {
+        return { verified: false };
+      }
+    }
+
+    const signingLines = headersToSign.map(h => {
+      if (h === '(request-target)') {
+        return `(request-target): ${req.method.toLowerCase()} ${req.originalUrl}`;
+      }
+      const val = req.headers[h.toLowerCase()];
+      if (!val) throw new Error(`Missing header: ${h}`);
+      return `${h.toLowerCase()}: ${val}`;
+    });
+    const signingString = signingLines.join('\n');
+
+    // Verify against active public keys
+    const sigBytes = fromBase64(params.signature);
+    const message = Buffer.from(signingString, 'utf8');
+
+    const activeKeys = agent._did_web_keys
+      ? agent._did_web_keys
+      : agent.public_keys
+        ? agent.public_keys.filter(k => k.active || (k.deactivate_at && k.deactivate_at > Date.now()))
+        : [{ public_key: agent.public_key }];
+
+    for (const keyEntry of activeKeys) {
+      try {
+        const pubKey = fromBase64(keyEntry.public_key);
+        if (nacl.sign.detached.verify(message, sigBytes, pubKey)) {
+          const { _did_web_keys, ...agentForRequest } = agent;
+          return { verified: true, agent: agentForRequest };
+        }
+      } catch {
+        // Skip malformed key entries
+      }
+    }
+
+    return { verified: false };
+  } catch {
+    return { verified: false };
+  }
 }
 
 /**
@@ -133,6 +230,29 @@ export async function authenticateHttpSignature(req, res, next) {
     const headersToSign = params.headers
       ? params.headers.split(' ')
       : ['(request-target)', 'host', 'date'];
+
+    // Replay protection: 'date' must always be signed to prevent replay attacks.
+    if (!headersToSign.includes('date')) {
+      return res.status(400).json({
+        error: 'DATE_HEADER_REQUIRED',
+        message: 'The "date" header must be included in the signed headers list'
+      });
+    }
+
+    // Validate Date header freshness (must be within +/- 5 minutes)
+    const dateHeader = req.headers['date'];
+    if (!dateHeader) {
+      return res.status(400).json({
+        error: 'DATE_HEADER_REQUIRED',
+        message: 'Date header is required for HTTP signature authentication'
+      });
+    }
+    if (!validateTimestamp(dateHeader)) {
+      return res.status(403).json({
+        error: 'REQUEST_EXPIRED',
+        message: 'Date header is outside the acceptable time window (+-5 minutes)'
+      });
+    }
 
     const signingLines = headersToSign.map(h => {
       if (h === '(request-target)') {
