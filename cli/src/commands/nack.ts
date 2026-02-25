@@ -15,7 +15,11 @@ export function register(program: Command): void {
       const client = new AdmpClient(config);
 
       const body: Record<string, unknown> = {};
-      if (opts.extend) body.extend = parseInt(opts.extend, 10);
+      if (opts.extend) {
+        const n = parseInt(opts.extend, 10);
+        if (isNaN(n) || n <= 0) throw new Error(`--extend must be a positive integer, got: ${opts.extend}`);
+        body.extend = n;
+      }
       if (opts.requeue) body.requeue = true;
 
       await client.request(

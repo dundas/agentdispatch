@@ -9,12 +9,7 @@ export interface AdmpConfig {
   api_key?: string;
 }
 
-export interface ResolvedConfig extends AdmpConfig {
-  base_url: string;
-  agent_id: string;
-  secret_key: string;
-  api_key?: string;
-}
+export type ResolvedConfig = Required<AdmpConfig>;
 
 export function getConfigPath(): string {
   return join(homedir(), '.admp', 'config.json');

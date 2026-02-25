@@ -121,9 +121,10 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
+      const params = new URLSearchParams({ limit: opts.limit });
       const res = await client.request<{ messages: Array<{ id: string; from: string; subject: string; timestamp: string }> }>(
         'GET',
-        `/api/groups/${groupId}/messages?limit=${opts.limit}`,
+        `/api/groups/${groupId}/messages?${params}`,
         undefined,
         'signature'
       );

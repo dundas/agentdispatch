@@ -30,20 +30,24 @@ export class AdmpClient {
   ): Promise<T> {
     const url = new URL(path, this.config.base_url);
     const host = url.hostname;
-    const date = new Date().toUTCString();
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Date': date,
     };
 
     if (auth === 'signature') {
+      // buildAuthHeaders generates its own Date and Signature headers
       const authHeaders = buildAuthHeaders(method, url.pathname, host, this.config.secret_key, this.config.agent_id);
       Object.assign(headers, authHeaders);
     } else if (auth === 'api-key') {
-      if (this.config.api_key) {
-        headers['X-Api-Key'] = this.config.api_key;
+      if (!this.config.api_key) {
+        throw new AdmpError(
+          'api_key not set — run `admp config set api_key <key>` or set ADMP_API_KEY',
+          'INVALID_API_KEY',
+          401
+        );
       }
+      headers['X-Api-Key'] = this.config.api_key;
     }
 
     let res: Response;

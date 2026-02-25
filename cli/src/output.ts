@@ -1,4 +1,4 @@
-const NO_COLOR = process.env.NO_COLOR === '1' || process.env.NO_COLOR === 'true';
+const NO_COLOR = 'NO_COLOR' in process.env;
 
 function green(s: string): string  { return NO_COLOR ? s : `\x1b[32m${s}\x1b[0m`; }
 function yellow(s: string): string { return NO_COLOR ? s : `\x1b[33m${s}\x1b[0m`; }
