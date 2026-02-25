@@ -46,8 +46,7 @@ program.parseAsync(process.argv).catch((err: unknown) => {
     process.exit(1);
   }
   if (err instanceof Error) {
-    const isNetwork = err.message.includes('Could not connect');
-    error(err.message, isNetwork ? 'NETWORK_ERROR' : 'ERROR');
+    error(err.message, 'ERROR');
     process.exit(1);
   }
   error(String(err));

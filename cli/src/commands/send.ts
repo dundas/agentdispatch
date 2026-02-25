@@ -10,7 +10,7 @@ function parseBody(raw: string): unknown {
     try {
       return JSON.parse(readFileSync(raw.slice(1), 'utf8'));
     } catch {
-      error(`Could not read body file: ${raw.slice(1)}`);
+      error(`Could not read body file: ${raw.slice(1)}`, 'FILE_NOT_FOUND');
       process.exit(1);
     }
   }

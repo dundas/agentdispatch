@@ -2,12 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success } from '../output.js';
-
-function maskSecret(s: string | undefined): string {
-  if (!s) return '(not set)';
-  return s.length <= 8 ? '***' : s.slice(0, 8) + '...';
-}
+import { success, maskSecret } from '../output.js';
 
 export function register(program: Command): void {
   const cmd = program

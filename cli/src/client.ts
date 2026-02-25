@@ -50,20 +50,31 @@ export class AdmpClient {
       headers['X-Api-Key'] = this.config.api_key;
     }
 
+    // Default 30-second timeout; pull --timeout commands add a 5s buffer via their body param
+    const timeoutMs = parseInt(process.env.ADMP_TIMEOUT ?? '30000', 10);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
     let res: Response;
     try {
       res = await fetch(url.toString(), {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
       throw new AdmpError(
-        `Could not connect to ${this.config.base_url}: ${msg}`,
-        'NETWORK_ERROR',
+        isTimeout
+          ? `Request timed out after ${timeoutMs}ms — set ADMP_TIMEOUT to override`
+          : `Could not connect to ${this.config.base_url}: ${msg}`,
+        isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR',
         0
       );
+    } finally {
+      clearTimeout(timer);
     }
 
     if (res.status === 204) {

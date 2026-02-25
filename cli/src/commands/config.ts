@@ -1,14 +1,8 @@
 import { Command } from 'commander';
 import { loadConfig, resolveConfig, saveConfig, AdmpConfig } from '../config.js';
-import { isJsonMode, error } from '../output.js';
+import { isJsonMode, error, maskSecret } from '../output.js';
 
 const VALID_KEYS: (keyof AdmpConfig)[] = ['base_url', 'agent_id', 'secret_key', 'api_key'];
-
-function maskSecret(value: string | undefined): string {
-  if (!value) return '(not set)';
-  if (value.length <= 8) return '***';
-  return value.slice(0, 8) + '...';
-}
 
 export function register(program: Command): void {
   const cmd = program

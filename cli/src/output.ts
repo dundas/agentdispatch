@@ -39,6 +39,11 @@ export function error(msg: string, code?: string): void {
   process.stderr.write(prefix + msg + '\n');
 }
 
+export function maskSecret(value: string | undefined): string {
+  if (!value) return '(not set)';
+  return value.length <= 8 ? '***' : value.slice(0, 8) + '...';
+}
+
 export function json(data: unknown): void {
   console.log(JSON.stringify(data, null, 2));
 }

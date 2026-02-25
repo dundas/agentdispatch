@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { signEnvelope } from '../auth.js';
-import { success } from '../output.js';
+import { success, error } from '../output.js';
 
 export function register(program: Command): void {
   program
@@ -42,7 +42,8 @@ export function register(program: Command): void {
       try {
         body = JSON.parse(opts.body);
       } catch {
-        body = opts.body;
+        error('--body must be valid JSON', 'INVALID_ARGUMENT');
+        process.exit(1);
       }
 
       const envelope: Record<string, unknown> = {

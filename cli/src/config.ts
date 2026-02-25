@@ -21,6 +21,7 @@ export function loadConfig(): Partial<AdmpConfig> {
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as Partial<AdmpConfig>;
   } catch {
+    process.stderr.write(`Warning: config file at ${path} is not valid JSON — ignoring\n`);
     return {};
   }
 }
