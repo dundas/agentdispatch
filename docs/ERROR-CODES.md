@@ -28,7 +28,6 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 |------|------|-----------|-------------|------|
 | `API_KEY_REQUIRED` | 401 | No | No API key provided | Include `X-Api-Key` header or `Authorization: Bearer` |
 | `INVALID_API_KEY` | 401 | No | API key not recognized or expired | Check key is correct and not expired. Expired keys return this same error to avoid leaking key existence |
-| `MASTER_KEY_REQUIRED` | 401 | No | Endpoint requires the master API key | Use `MASTER_API_KEY` for admin endpoints (key issuance, approval) |
 | `SIGNATURE_INVALID` | 403 | No | HTTP Signature header verification failed | Verify signing string matches: method, path, host, date headers. Check Ed25519 keypair. **Not the same as `INVALID_SIGNATURE`** — this code is for the HTTP `Signature:` header; `INVALID_SIGNATURE` is for the message envelope `signature` field. |
 | `INVALID_SIGNATURE_HEADER` | 400 | No | Signature header missing keyId or signature | Format: `keyId="id",algorithm="ed25519",headers="(request-target) host date",signature="base64"` |
 | `UNSUPPORTED_ALGORITHM` | 400 | No | Signature algorithm is not ed25519 | Only ed25519 is supported |

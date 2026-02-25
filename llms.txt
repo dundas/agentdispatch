@@ -149,12 +149,12 @@ GET  /.well-known/agent-keys.json                     — JWKS-style public key 
 GET  /api/agents/:agentId/did.json                    — W3C DID document for agent (no auth)
 
 ### Tenant Management
-POST   /api/agents/tenants                            — Create tenant
+POST   /api/agents/tenants                            — Create tenant [API Key]
   Body: { tenant_id, name?, metadata?, registration_policy? }
   Policies: "open" | "approval_required"
-GET    /api/agents/tenants/:tenantId                  — Get tenant
-GET    /api/agents/tenants/:tenantId/agents            — List tenant agents
-DELETE /api/agents/tenants/:tenantId                   — Delete tenant
+GET    /api/agents/tenants/:tenantId                  — Get tenant [API Key]
+GET    /api/agents/tenants/:tenantId/agents            — List tenant agents [API Key]
+DELETE /api/agents/tenants/:tenantId                   — Delete tenant [API Key]
 
 ### Approval Workflow [Master Key Required]
 GET  /api/agents/tenants/:tenantId/pending            — List pending agents

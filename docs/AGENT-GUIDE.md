@@ -175,8 +175,13 @@ const headers = signRequest('POST', '/api/agents/agent%3A%2F%2Fmy-agent/inbox/pu
 ```bash
 DATE=$(date -u +"%a, %d %b %Y %H:%M:%S GMT")
 
-# Build signing string (replace with your actual values)
-SIGNING_STRING="(request-target): post /api/agents/agent%3A%2F%2Fmy-agent/inbox/pull\nhost: agentdispatch.fly.dev\ndate: ${DATE}"
+# Build signing string — must use actual newlines (0x0a), not literal \n
+SIGNING_STRING=$(printf '%s
+%s
+%s' \
+  "(request-target): post /api/agents/agent%3A%2F%2Fmy-agent/inbox/pull" \
+  "host: agentdispatch.fly.dev" \
+  "date: ${DATE}")
 
 # Sign with your Ed25519 secret key (use a helper script or tweetnacl-cli)
 SIGNATURE="<base64-signature>"
