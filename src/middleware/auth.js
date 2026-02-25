@@ -386,7 +386,9 @@ export async function requireApiKey(req, res, next) {
       console.error('issued key lookup failed:', err.message);
     }
 
-    return res.status(403).json({
+    // 401 for all bad-credential scenarios — do not use 403 here, which would
+    // leak that the key format was recognized but didn't match any record.
+    return res.status(401).json({
       error: 'INVALID_API_KEY',
       message: 'Invalid API key'
     });
@@ -449,21 +451,21 @@ function base58btcDecode(multibase) {
   }
 
   // Ed25519 with multicodec prefix is exactly 34 bytes.
+  // Reject anything that isn't exactly 34 bytes — shorter keys would be silently
+  // zero-padded, which could produce an all-zero public key that an attacker
+  // could craft signatures against.
   const ED25519_MULTIBASE_BYTES = 34;
-  if (result.length > ED25519_MULTIBASE_BYTES) {
+  if (result.length !== ED25519_MULTIBASE_BYTES) {
     throw new Error(`Invalid key length: expected ${ED25519_MULTIBASE_BYTES} bytes, got ${result.length}`);
   }
-  const padded = result.length < ED25519_MULTIBASE_BYTES
-    ? new Uint8Array([...new Uint8Array(ED25519_MULTIBASE_BYTES - result.length), ...result])
-    : result;
 
   // Verify the 2-byte multicodec prefix is Ed25519 (0xed 0x01) before stripping.
   // Other key types use different prefixes and must not be silently decoded as Ed25519.
-  if (padded[0] !== 0xed || padded[1] !== 0x01) {
-    throw new Error(`Unsupported key type: expected Ed25519 multicodec prefix 0xed01, got 0x${padded[0].toString(16).padStart(2, '0')}${padded[1].toString(16).padStart(2, '0')}`);
+  if (result[0] !== 0xed || result[1] !== 0x01) {
+    throw new Error(`Unsupported key type: expected Ed25519 multicodec prefix 0xed01, got 0x${result[0].toString(16).padStart(2, '0')}${result[1].toString(16).padStart(2, '0')}`);
   }
 
-  return padded.slice(2);
+  return result.slice(2);
 }
 
 // Short-lived in-process cache for DID document keys (5-minute TTL per DID).
@@ -642,10 +644,6 @@ async function resolveDIDWebAgent(did, req) {
     }
 
     // Check for existing shadow agent.
-    // NOTE: There is a narrow race between the getAgentByDid check and createAgent
-    // for the first request from a given DID. The memory backend overwrites silently;
-    // the Mech backend may return an error on duplicate writes. The race window is
-    // small and for federated agents it is acceptable — the second write is idempotent.
     const existing = await storage.getAgentByDid(did);
     if (existing) {
       // Attach fresh keys for this request's signature verification
@@ -707,7 +705,16 @@ async function resolveDIDWebAgent(did, req) {
       blocked_agents: []
     };
 
-    await storage.createAgent(shadowAgent);
+    try {
+      await storage.createAgent(shadowAgent);
+    } catch {
+      // Race condition: another request created the agent between our
+      // getAgentByDid check and createAgent call. Retry the lookup once
+      // (optimistic upsert pattern) rather than surfacing a 500.
+      const raceWinner = await storage.getAgentByDid(did);
+      if (raceWinner) return { ...raceWinner, _did_web_keys: didWebKeys };
+      return null;
+    }
 
     return { ...shadowAgent, _did_web_keys: didWebKeys };
   } catch {

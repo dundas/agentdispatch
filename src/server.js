@@ -54,12 +54,17 @@ if (!process.env.MASTER_API_KEY) {
 }
 
 // Warn when DID:web federation is open without an allowlist — any internet domain
-// serving a valid DID document will get an auto-approved shadow agent.
-if ((process.env.REGISTRATION_POLICY || 'open') === 'open' && !process.env.DID_WEB_ALLOWED_DOMAINS) {
+// serving a valid DID document can register shadow agents (pending by default, but
+// the outbound DID resolution still creates an SSRF surface via DNS rebinding).
+// DID_WEB_ALLOWED_DOMAINS closes both the auto-approval and SSRF gaps.
+if (process.env.NODE_ENV !== 'test' &&
+    (process.env.REGISTRATION_POLICY || 'open') === 'open' &&
+    !process.env.DID_WEB_ALLOWED_DOMAINS) {
   console.warn(
     'WARNING: REGISTRATION_POLICY is "open" and DID_WEB_ALLOWED_DOMAINS is not set. ' +
-    'Any external domain serving a DID document can auto-register shadow agents. ' +
-    'Set REGISTRATION_POLICY=approval_required or DID_WEB_ALLOWED_DOMAINS for production use.'
+    'Any external domain can trigger outbound DID document fetches (SSRF via DNS rebinding) ' +
+    'and register shadow agents. Set DID_WEB_ALLOWED_DOMAINS to restrict which domains can ' +
+    'federate, or REGISTRATION_POLICY=approval_required to require manual approval.'
   );
 }
 

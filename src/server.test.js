@@ -466,7 +466,7 @@ test('requireApiKey rejects invalid API key', async () => {
   await requireApiKey(req, res, next);
 
   assert.equal(nextCalled, false);
-  assert.equal(statusCode, 403);
+  assert.equal(statusCode, 401);
   assert.equal(body.error, 'INVALID_API_KEY');
 
   process.env.API_KEY_REQUIRED = ORIGINAL_API_KEY_REQUIRED;
@@ -2556,11 +2556,11 @@ test('requireApiKey master key: exact match required (case-sensitive, prefix rej
 
     // Wrong case must be rejected (constant-time comparison is case-sensitive)
     const wrongCase = await request(app).get('/api/stats').set('x-api-key', masterKey.toUpperCase());
-    assert.equal(wrongCase.status, 403, 'wrong-case key must be rejected');
+    assert.equal(wrongCase.status, 401, 'wrong-case key must be rejected');
 
     // Key prefix must be rejected (different length → different key)
     const prefix = await request(app).get('/api/stats').set('x-api-key', masterKey.slice(0, -1));
-    assert.equal(prefix.status, 403, 'prefix of master key must be rejected');
+    assert.equal(prefix.status, 401, 'prefix of master key must be rejected');
   } finally {
     process.env.API_KEY_REQUIRED = savedRequired;
     process.env.MASTER_API_KEY = savedMaster;
@@ -2718,11 +2718,11 @@ test('revoked issued key is rejected by requireApiKey (unit test)', async () => 
   assert.equal(revokeRes.status, 200);
   assert.equal(revokeRes.body.revoked, true);
 
-  // Confirm it is rejected after revocation
+  // Confirm it is rejected after revocation (401 — same as unknown key to avoid leaking existence)
   const harnessRevoked = makeMiddlewareHarness(issuedKey);
   await requireApiKey(harnessRevoked.req, harnessRevoked.res, harnessRevoked.next);
   assert.equal(harnessRevoked.wasNextCalled(), false);
-  assert.equal(harnessRevoked.getStatus(), 403);
+  assert.equal(harnessRevoked.getStatus(), 401);
   assert.equal(harnessRevoked.getBody().error, 'INVALID_API_KEY');
 
   process.env.MASTER_API_KEY = savedMaster;
