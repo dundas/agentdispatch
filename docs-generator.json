@@ -10,7 +10,6 @@
     { "path": "src/routes/groups.js", "extractor": "rest-api", "provides": "Group creation, membership, messaging, join/leave endpoints" },
     { "path": "src/routes/outbox.js", "extractor": "rest-api", "provides": "Outbound email via Mailgun — domain config, send, message queries, webhooks" },
     { "path": "src/routes/discovery.js", "extractor": "rest-api", "provides": "Public key directory (.well-known/agent-keys.json) and DID document endpoints" },
-    { "path": "src/routes/keys.js", "extractor": "rest-api", "provides": "API key issuance, listing, and revocation (admin endpoints)" },
     { "path": "src/middleware/auth.js", "extractor": "generic", "provides": "Authentication model: HTTP Signatures, API keys, DID:web federation, enrollment tokens" },
     { "path": "src/services/agent.service.js", "extractor": "generic", "provides": "Agent lifecycle: registration modes, approval workflow, key rotation" },
     { "path": "openapi.yaml", "extractor": "openapi", "provides": "OpenAPI 3.1 spec for supplementary endpoint documentation" },

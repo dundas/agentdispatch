@@ -68,7 +68,7 @@ Pass via `X-Api-Key` header or `Authorization: Bearer <key>`.
 | Key Type | Scope |
 |----------|-------|
 | **Master key** (`MASTER_API_KEY` env var) | Full admin access. Required for key issuance, agent approval/rejection, and tenant management. |
-| **Issued keys** (created via `POST /api/keys/issue`) | Client integration access. Scoped by `client_id`. Optional expiry via `expires_in_days`. |
+| **Issued keys** (created by the master key holder) | Client integration access. Scoped, optional expiry. Single-use enrollment tokens are issued keys with `single_use: true`. |
 | **Enrollment tokens** (single-use issued keys) | Scoped to a specific `target_agent_id`. Consumed on first use. |
 
 API key authentication is only enforced when `API_KEY_REQUIRED=true` is set on the server.
@@ -1035,71 +1035,6 @@ W3C DID document for a specific agent.
 
 ---
 
-### Admin (Master Key Required)
-
-These endpoints require the master API key via `X-Api-Key` or `Authorization: Bearer`.
-
-#### POST /api/keys/issue
-Issue a new API key for client integrations.
-
-- **Auth:** Master key.
-- **Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `client_id` | string | Yes | Client identifier (1-100 chars, alphanumeric + `_-`). |
-| `description` | string | No | Key description (max 500 chars). |
-| `expires_in_days` | number | No | Key expiry in days (must be positive). |
-| `single_use` | boolean | No | If `true`, key is consumed after first use. |
-| `target_agent_id` | string | No | Scope key to a specific agent. Agent must exist. |
-
-- **Response (201):**
-
-```json
-{
-  "key_id": "uuid",
-  "api_key": "admp_hex...",
-  "client_id": "my-integration",
-  "description": "",
-  "created_at": "2026-02-25T12:00:00.000Z",
-  "expires_at": null,
-  "single_use": false,
-  "target_agent_id": null,
-  "warning": "Store this API key securely \u2014 it will not be shown again"
-}
-```
-
-The raw `api_key` is only returned once.
-
-- **Errors:** `400 INVALID_CLIENT_ID`, `400 INVALID_EXPIRES_IN_DAYS`, `400 AGENT_NOT_FOUND` (target agent)
-
----
-
-#### GET /api/keys
-List all issued keys (metadata only, no raw keys).
-
-- **Auth:** Master key.
-- **Response (200):** Array of key metadata objects.
-
----
-
-#### DELETE /api/keys/:keyId
-Revoke an issued key.
-
-- **Auth:** Master key.
-- **Response (200):**
-
-```json
-{
-  "revoked": true,
-  "key_id": "uuid"
-}
-```
-
-- **Error:** `404 KEY_NOT_FOUND`
-
----
-
 #### POST /api/agents/tenants
 Create a new tenant.
 
@@ -1491,7 +1426,7 @@ A rejected agent:
 - **Keep your clock synchronized.** The Date header must be within +/- 5 minutes of server time. Use NTP.
 - **Store secret keys securely.** For legacy registration, the `secret_key` is only returned once. Losing it means re-registration.
 - **Prefer import mode in production.** Generate your keypair locally and only share the public key. The server never sees your private key.
-- **Use enrollment tokens for automated provisioning.** Issue single-use tokens scoped to specific agents via `POST /api/keys/issue` with `single_use: true` and `target_agent_id`.
+- **Use enrollment tokens for automated provisioning.** Single-use API keys scoped to specific agents can be issued by your ADMP operator (admin function).
 
 ### Messaging Patterns
 

@@ -14,7 +14,6 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 - [Message and Inbox Errors](#message-and-inbox-errors)
 - [Group Errors](#group-errors)
 - [Outbox (Email) Errors](#outbox-email-errors)
-- [Admin / Key Management Errors](#admin--key-management-errors)
 - [Tenant Errors](#tenant-errors)
 - [System Errors](#system-errors)
 - [Identity Verification Errors](#identity-verification-errors)
@@ -117,18 +116,6 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `BODY_REQUIRED` | 400 | No | No body or html content | Include `body` or `html` field |
 | `OUTBOX_MESSAGE_NOT_FOUND` | 404 | No | Outbox message not found | Check message ID |
 | `OUTBOX_FETCH_FAILED` | 500 | Yes | Failed to fetch outbox data | Transient error |
-
-## Admin / Key Management Errors
-
-| Code | HTTP | Retryable | Description | Hint |
-|------|------|-----------|-------------|------|
-| `INVALID_CLIENT_ID` | 400 | No | `client_id` missing or invalid format | Must be 1-100 chars matching `/^[a-zA-Z0-9_-]+$/` |
-| `INVALID_EXPIRES_IN_DAYS` | 400 | No | `expires_in_days` invalid | Must be a positive finite number |
-| `INVALID_DESCRIPTION` | 400 | No | Description too long | Max 500 characters |
-| `KEY_ISSUANCE_FAILED` | 500 | Yes | Key creation failed | Transient storage error |
-| `KEY_NOT_FOUND` | 404 | No | Key ID not found | Check `key_id` |
-| `LIST_KEYS_FAILED` | 500 | Yes | Failed to list keys | Transient error |
-| `REVOKE_KEY_FAILED` | 500 | Yes | Key revocation failed | Transient error |
 
 ## Tenant Errors
 

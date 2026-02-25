@@ -64,7 +64,6 @@ graph TB
                 R_GROUPS["/api/groups/*"<br/>CRUD, Membership,<br/>Join/Leave, Fanout]
                 R_OUTBOX["/api/agents/:id/outbox/*"<br/>Domain Config, Send,<br/>Message Queries]
                 R_DISCOVERY["/.well-known/agent-keys.json"<br/>"/api/agents/:id/did.json"<br/>Key Directory & DID Docs]
-                R_KEYS["/api/keys/*"<br/>Issue, List, Revoke]
                 R_WEBHOOKS["/api/webhooks/mailgun"<br/>Delivery Status]
             end
 
@@ -335,8 +334,6 @@ src/
                               #   message queries; /api/webhooks/mailgun
     discovery.js              # /.well-known/agent-keys.json — JWKS key directory
                               # /api/agents/:id/did.json — W3C DID document
-    keys.js                   # /api/keys/* — issue, list, revoke API keys (master key required)
-
   services/
     agent.service.js          # Agent lifecycle: register (3 modes), heartbeat, approve/reject,
                               #   trust management, webhook config, key rotation
@@ -705,9 +702,6 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/keys/issue` | Issue scoped API key |
-| `GET` | `/api/keys` | List issued keys (hashes only) |
-| `DELETE` | `/api/keys/:keyId` | Revoke key |
 | `POST` | `/api/agents/:agentId/approve` | Approve pending agent |
 | `POST` | `/api/agents/:agentId/reject` | Reject agent |
 | `GET` | `/api/agents/tenants/:tenantId/pending` | List pending agents |

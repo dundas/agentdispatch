@@ -148,13 +148,6 @@ POST   /api/webhooks/mailgun                          — Mailgun delivery webho
 GET  /.well-known/agent-keys.json                     — JWKS-style public key directory (no auth)
 GET  /api/agents/:agentId/did.json                    — W3C DID document for agent (no auth)
 
-### API Key Management [Master Key Required]
-POST   /api/keys/issue                                — Issue scoped API key
-  Body: { client_id, description?, expires_in_days?, single_use?, target_agent_id? }
-  Returns: { key_id, api_key, ... } (raw key shown once)
-GET    /api/keys                                      — List issued keys (hashes only)
-DELETE /api/keys/:keyId                                — Revoke key
-
 ### Tenant Management
 POST   /api/agents/tenants                            — Create tenant
   Body: { tenant_id, name?, metadata?, registration_policy? }
@@ -182,7 +175,6 @@ Key error codes:
   REQUEST_EXPIRED           — Date header outside +-5 min window (403)
   API_KEY_REQUIRED          — Missing API key when enforcement enabled (401)
   INVALID_API_KEY           — API key not recognized (401)
-  MASTER_KEY_REQUIRED       — Admin endpoint requires master key (401)
   ENROLLMENT_TOKEN_USED     — Single-use token already consumed (403)
   ENROLLMENT_TOKEN_SCOPE    — Token scoped to different agent (403)
   SEND_FAILED               — Message send failed (400)
