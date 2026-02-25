@@ -128,6 +128,8 @@ Response (201):
 }
 ```
 
+> ⚠️ **`secret_key` is only returned once.** Store it immediately and securely — it cannot be retrieved again. If lost, you must re-register (legacy mode) or rotate your key (seed-based mode).
+
 Store `secret_key` securely. It is the 64-byte Ed25519 private key (base64-encoded) used for signing.
 
 ### Step 2: Sign a Request
