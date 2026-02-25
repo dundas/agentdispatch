@@ -567,6 +567,23 @@ router.post('/:agentId/approve', requireMasterKey, async (req, res) => {
 router.post('/:agentId/reject', requireMasterKey, async (req, res) => {
   try {
     const { reason } = req.body;
+
+    // Validate rejection reason: must be a string, max 500 characters
+    if (reason !== undefined && reason !== null) {
+      if (typeof reason !== 'string') {
+        return res.status(400).json({
+          error: 'INVALID_REASON',
+          message: 'reason must be a string'
+        });
+      }
+      if (reason.length > 500) {
+        return res.status(400).json({
+          error: 'REASON_TOO_LONG',
+          message: 'reason must not exceed 500 characters'
+        });
+      }
+    }
+
     const agent = await agentService.reject(req.params.agentId, reason);
     res.json({
       agent_id: agent.agent_id,

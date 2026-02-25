@@ -329,94 +329,105 @@ function parseSignatureHeader(header) {
  * Accepts MASTER_API_KEY or any valid issued key from storage.
  */
 export async function requireApiKey(req, res, next) {
-  const apiKeyRequired = process.env.API_KEY_REQUIRED === 'true';
+  try {
+    const apiKeyRequired = process.env.API_KEY_REQUIRED === 'true';
 
-  if (!apiKeyRequired) {
-    return next();
-  }
-
-  const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-
-  if (!apiKey) {
-    return res.status(401).json({
-      error: 'API_KEY_REQUIRED',
-      message: 'API key is required'
-    });
-  }
-
-  // Check master key first using constant-time comparison to prevent timing attacks
-  const masterKey = process.env.MASTER_API_KEY;
-  if (masterKey) {
-    const masterBuf = Buffer.from(masterKey);
-    const inputBuf = Buffer.from(apiKey);
-    if (masterBuf.length === inputBuf.length && timingSafeEqual(masterBuf, inputBuf)) {
-      req.apiKeyType = 'master';
+    if (!apiKeyRequired) {
       return next();
     }
-  }
 
-  // Check issued keys by hash
-  try {
-    const keyHash = hashApiKey(apiKey);
-    const issuedKey = await storage.getIssuedKeyByHash(keyHash);
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
 
-    if (issuedKey && !issuedKey.revoked) {
-      if (issuedKey.expires_at && Date.now() > issuedKey.expires_at) {
-        return res.status(403).json({
-          error: 'API_KEY_EXPIRED',
-          message: 'API key has expired'
-        });
+    if (!apiKey) {
+      return res.status(401).json({
+        error: 'API_KEY_REQUIRED',
+        message: 'API key is required'
+      });
+    }
+
+    // Check master key first using constant-time comparison to prevent timing attacks
+    const masterKey = process.env.MASTER_API_KEY;
+    if (masterKey) {
+      const masterBuf = Buffer.from(masterKey);
+      const inputBuf = Buffer.from(apiKey);
+      if (masterBuf.length === inputBuf.length && timingSafeEqual(masterBuf, inputBuf)) {
+        req.apiKeyType = 'master';
+        return next();
       }
+    }
 
-      // Single-use enrollment token: check if already consumed
-      if (issuedKey.single_use && issuedKey.used_at) {
-        return res.status(403).json({
-          error: 'ENROLLMENT_TOKEN_USED',
-          message: 'This enrollment token has already been used'
-        });
-      }
+    // Check issued keys by hash
+    try {
+      const keyHash = hashApiKey(apiKey);
+      const issuedKey = await storage.getIssuedKeyByHash(keyHash);
 
-      // Single-use token scope: validate against requested agent path.
-      // A scoped token is only valid for its designated agent's endpoints.
-      // Requests to non-agent paths (e.g. /api/stats) are denied — the token
-      // is intended for a specific agent, not general API access.
-      if (issuedKey.target_agent_id) {
-        // req.params not populated yet (middleware runs before route matching)
-        // Parse agent ID directly from req.path
-        const match = req.path.match(/^\/agents\/([^/]+)/);
-        const requestedAgentId = match ? decodeURIComponent(match[1]) : null;
-        if (!requestedAgentId || (requestedAgentId !== 'register' && requestedAgentId !== issuedKey.target_agent_id)) {
+      if (issuedKey && !issuedKey.revoked) {
+        if (issuedKey.expires_at && Date.now() > issuedKey.expires_at) {
           return res.status(403).json({
-            error: 'ENROLLMENT_TOKEN_SCOPE',
-            message: 'This enrollment token is scoped to a different agent'
+            error: 'API_KEY_EXPIRED',
+            message: 'API key has expired'
           });
         }
-      }
 
-      // Burn single-use token on first valid use.
-      // NOTE: There is an inherent TOCTOU race: two concurrent requests carrying
-      // the same token may both pass the used_at check before either write completes.
-      // This is acceptable for the intended 1:1 enrollment scenario (token is
-      // pre-shared with a single agent). Do not use single-use tokens for
-      // high-concurrency access control.
-      if (issuedKey.single_use) {
-        await storage.updateIssuedKey(issuedKey.key_id, { used_at: Date.now() });
-      }
+        // Single-use enrollment token: check if already consumed
+        if (issuedKey.single_use && issuedKey.used_at) {
+          return res.status(403).json({
+            error: 'ENROLLMENT_TOKEN_USED',
+            message: 'This enrollment token has already been used'
+          });
+        }
 
-      req.apiKeyType = 'issued';
-      req.apiKeyId = issuedKey.key_id;
-      req.apiKeyClientId = issuedKey.client_id;
-      return next();
+        // Single-use token scope: validate against requested agent path.
+        // A scoped token is only valid for its designated agent's endpoints.
+        // Requests to non-agent paths (e.g. /api/stats) are denied — the token
+        // is intended for a specific agent, not general API access.
+        if (issuedKey.target_agent_id) {
+          // req.params not populated yet (middleware runs before route matching)
+          // Parse agent ID directly from req.path
+          const match = req.path.match(/^\/agents\/([^/]+)/);
+          const requestedAgentId = match ? decodeURIComponent(match[1]) : null;
+          if (!requestedAgentId || (requestedAgentId !== 'register' && requestedAgentId !== issuedKey.target_agent_id)) {
+            return res.status(403).json({
+              error: 'ENROLLMENT_TOKEN_SCOPE',
+              message: 'This enrollment token is scoped to a different agent'
+            });
+          }
+        }
+
+        // Burn single-use token on first valid use.
+        // NOTE: There is an inherent TOCTOU race: two concurrent requests carrying
+        // the same token may both pass the used_at check before either write completes.
+        // This is acceptable for the intended 1:1 enrollment scenario (token is
+        // pre-shared with a single agent). Do not use single-use tokens for
+        // high-concurrency access control.
+        if (issuedKey.single_use) {
+          await storage.updateIssuedKey(issuedKey.key_id, { used_at: Date.now() });
+        }
+
+        req.apiKeyType = 'issued';
+        req.apiKeyId = issuedKey.key_id;
+        req.apiKeyClientId = issuedKey.client_id;
+        return next();
+      }
+    } catch (err) {
+      // Storage lookup failure → deny; log for observability
+      console.error('issued key lookup failed:', err.message);
     }
-  } catch (err) {
-    // Storage lookup failure → deny; log for observability
-    console.error('issued key lookup failed:', err.message);
-  }
 
-  return res.status(403).json({
-    error: 'INVALID_API_KEY',
-    message: 'Invalid API key'
-  });
+    return res.status(403).json({
+      error: 'INVALID_API_KEY',
+      message: 'Invalid API key'
+    });
+  } catch (err) {
+    // Guard against unhandled exceptions (e.g. hashApiKey or Buffer.from throwing).
+    // Express 4 does not forward async rejections to the error handler, so an
+    // uncaught throw here would hang the request.
+    console.error('requireApiKey unexpected error:', err.message);
+    return res.status(500).json({
+      error: 'INTERNAL_ERROR',
+      message: 'Internal server error'
+    });
+  }
 }
 
 // Lookup table for base58 alphabet — avoids BigInt arithmetic in the hot auth path.
@@ -503,6 +514,14 @@ const _DID_KEY_CACHE_MAX = 1000;
  * post-connect IP check or an explicit allow-list configured at the network layer.
  */
 function isBlockedDIDWebHost(domain) {
+  // Allowlist mode: if DID_WEB_ALLOWED_DOMAINS is set (comma-separated),
+  // ONLY those domains are permitted for DID:web resolution.
+  const allowedDomains = process.env.DID_WEB_ALLOWED_DOMAINS;
+  if (allowedDomains) {
+    const allowed = allowedDomains.split(',').map(d => d.trim()).filter(Boolean);
+    return !allowed.includes(domain);
+  }
+
   // Strip IPv6 brackets (e.g. [::1] → ::1)
   const host = domain.startsWith('[') ? domain.slice(1, -1) : domain;
 
@@ -526,6 +545,9 @@ function isBlockedDIDWebHost(domain) {
       (o[0] === 172 && o[1] >= 16 && o[1] <= 31) ||             // 172.16.0.0/12 RFC 1918
       (o[0] === 192 && o[1] === 168) ||                          // 192.168.0.0/16 RFC 1918
       (o[0] === 169 && o[1] === 254) ||                          // 169.254.0.0/16 link-local
+      (o[0] === 100 && o[1] >= 64 && o[1] <= 127) ||            // 100.64.0.0/10 CGNAT/shared (cloud metadata)
+      (o[0] === 100 && o[1] === 100 && o[2] === 100 && o[3] === 200) || // 100.100.100.200 Alibaba Cloud metadata
+      (o[0] === 192 && o[1] === 0 && o[2] === 0) ||             // 192.0.0.0/24 IETF Protocol Assignments
       o[0] === 0                                                 // 0.0.0.0/8
     ) {
       return true;
@@ -572,11 +594,22 @@ async function resolveDIDWebAgent(did, req) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
 
+      const DID_DOC_MAX_BYTES = 65536; // 64 KB
+
       let didDoc;
       try {
         const resp = await fetch(didUrl, { signal: controller.signal });
         if (!resp.ok) return null;
-        didDoc = await resp.json();
+
+        // Check Content-Length header if present (fast reject for oversized docs)
+        const contentLength = parseInt(resp.headers.get('content-length'), 10);
+        if (contentLength > DID_DOC_MAX_BYTES) return null;
+
+        // Read body with byte cap as fallback (Content-Length can be spoofed)
+        const bodyText = await resp.text();
+        if (Buffer.byteLength(bodyText, 'utf8') > DID_DOC_MAX_BYTES) return null;
+
+        didDoc = JSON.parse(bodyText);
       } finally {
         clearTimeout(timeout);
       }
@@ -631,6 +664,13 @@ async function resolveDIDWebAgent(did, req) {
     // Use decoded domain + path segments as agent_id to avoid collisions between
     // multi-path DIDs sharing the same domain (e.g. did:web:host:alice vs did:web:host:bob)
     const agentIdPath = [domain, ...pathSegments].join('/');
+
+    // Namespace collision guard: if a non-federated agent already occupies
+    // this agent_id, fail closed rather than silently overwriting it.
+    const collisionCheck = await storage.getAgent(`did-web:${agentIdPath}`);
+    if (collisionCheck && collisionCheck.agent_type !== 'federated') {
+      return null;
+    }
 
     const shadowAgent = {
       agent_id: `did-web:${agentIdPath}`,

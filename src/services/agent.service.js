@@ -138,6 +138,9 @@ export class AgentService {
       // Idempotent: already approved, return as-is
       return agent;
     }
+    // Design decision: re-approving a previously rejected agent is intentional.
+    // An admin should be able to change their mind and approve an agent that was
+    // previously rejected, so we do not block this transition.
     return await storage.updateAgent(agentId, { registration_status: 'approved' });
   }
 

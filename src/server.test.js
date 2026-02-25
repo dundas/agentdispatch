@@ -3261,7 +3261,7 @@ test('trust model: DID web — shadow agent created from DID document', async ()
   globalThis.fetch = async (url, init) => {
     if (url === didDocUrl) {
       const body = JSON.stringify(didDoc);
-      return { ok: true, json: async () => didDoc, text: async () => body };
+      return { ok: true, json: async () => didDoc, text: async () => body, headers: new Map([['content-length', String(Buffer.byteLength(body))]]) };
     }
     return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
   };
@@ -3318,7 +3318,7 @@ test('trust model: DID web — deduplication: same DID resolves to existing shad
   globalThis.fetch = async (url, init) => {
     if (url === didDocUrlDedup) {
       const body = JSON.stringify(didDoc);
-      return { ok: true, json: async () => didDoc, text: async () => body };
+      return { ok: true, json: async () => didDoc, text: async () => body, headers: new Map([['content-length', String(Buffer.byteLength(body))]]) };
     }
     return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
   };
@@ -3401,7 +3401,7 @@ test('trust model: DID web — approval_required policy → shadow agent starts 
   globalThis.fetch = async (url, init) => {
     if (url === didDocUrl) {
       const body = JSON.stringify(didDoc);
-      return { ok: true, json: async () => didDoc, text: async () => body };
+      return { ok: true, json: async () => didDoc, text: async () => body, headers: new Map([['content-length', String(Buffer.byteLength(body))]]) };
     }
     return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
   };
@@ -3873,4 +3873,65 @@ test('Fix3: non-agent paths (e.g. /api/stats) skip authorization check', async (
     .set('signature', sigHeader);
 
   assert.equal(res.status, 200);
+});
+
+test('trust model: DID web with path segments — resolves URL and creates shadow agent', async () => {
+  const domain = `did-web-path-${Date.now()}.example.com`;
+  const did = `did:web:${domain}:users:alice`;
+  const expectedUrl = `https://${domain}/users/alice/did.json`;
+  const expectedAgentId = `did-web:${domain}/users/alice`;
+  const keypair = nacl.sign.keyPair();
+  const pubKeyB64 = toBase64(keypair.publicKey);
+
+  const didDoc = {
+    '@context': ['https://www.w3.org/ns/did/v1'],
+    id: did,
+    verificationMethod: [{
+      id: `${did}#key-1`,
+      type: 'Ed25519VerificationKey2020',
+      controller: did,
+      publicKeyBase64: pubKeyB64
+    }]
+  };
+
+  const originalFetch = globalThis.fetch;
+  let fetchedUrl = null;
+  globalThis.fetch = async (url, init) => {
+    if (url === expectedUrl) {
+      fetchedUrl = url;
+      const body = JSON.stringify(didDoc);
+      return { ok: true, json: async () => didDoc, text: async () => body, headers: new Map([['content-length', String(Buffer.byteLength(body))]]) };
+    }
+    return originalFetch ? originalFetch(url, init) : Promise.reject(new Error('no fetch'));
+  };
+
+  try {
+    const dateStr = new Date().toUTCString();
+    const sigBytes = nacl.sign.detached(Buffer.from(`date: ${dateStr}`), keypair.secretKey);
+    const sigB64 = toBase64(sigBytes);
+    const signatureHeader = `keyId="${did}",algorithm="ed25519",headers="date",signature="${sigB64}"`;
+
+    const targetPath = `/api/agents/${encodeURIComponent(expectedAgentId)}/heartbeat`;
+    const res = await request(app)
+      .post(targetPath)
+      .set('Signature', signatureHeader)
+      .set('Date', dateStr)
+      .send({});
+
+    // Auth should succeed (not 401/403)
+    assert.notEqual(res.status, 401, 'DID web with path segments auth should not return 401');
+    assert.notEqual(res.status, 403, `DID web with path segments auth should not return 403 (got: ${JSON.stringify(res.body)})`);
+
+    // Verify the correct URL was fetched (path segments mapped correctly)
+    assert.equal(fetchedUrl, expectedUrl, `DID document should be fetched from ${expectedUrl}`);
+
+    // Verify shadow agent was created with the correct agent_id
+    const shadowAgent = await storage.getAgentByDid(did);
+    assert.ok(shadowAgent, 'shadow agent must be created for did:web with path segments');
+    assert.equal(shadowAgent.agent_id, expectedAgentId, `agent_id should be ${expectedAgentId}`);
+    assert.equal(shadowAgent.registration_mode, 'did-web');
+    assert.equal(shadowAgent.registration_status, 'approved');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

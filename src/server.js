@@ -78,7 +78,7 @@ logger.info(
 );
 app.use('/api', async (req, res, next) => {
   // Always allow agent self-registration without an API key
-  if (req.method === 'POST' && req.path === '/agents/register') return next();
+  if (req.method === 'POST' && req.path.replace(/\/$/, '') === '/agents/register') return next();
 
   // If request has a valid HTTP Signature, bypass API key requirement.
   // This lets agents authenticate with their registered Ed25519 keypair
