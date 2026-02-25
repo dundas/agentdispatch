@@ -67,11 +67,11 @@
   - [x] 2.9 Implement `admp config set <key> <value>` — loads existing config, sets the key, saves
   - [x] 2.10 Write unit tests in `cli/src/config.test.ts` covering: load missing file returns `{}`, save creates file with mode 0600, resolveConfig env override, requireConfig throws on missing field
 
-- [ ] 3.0 Implement HTTP Signature auth module
-  - [ ] 3.1 Create `cli/src/auth.ts` — copy the `signRequest` function logic from `src/utils/crypto.js` (do not import — keep CLI standalone). Include `toBase64`, `fromBase64`, and `signRequest` as local functions.
-  - [ ] 3.2 Implement `buildAuthHeaders(method: string, path: string, host: string, secretKey: string, agentId: string): Record<string, string>` — returns `{ Date, Signature }` headers ready to merge into a fetch call
-  - [ ] 3.3 Implement `signEnvelope(envelope: object, secretKey: string, agentId: string): object` — adds `signature` field to a message envelope using the message-level signing format from `src/utils/crypto.js`
-  - [ ] 3.4 Write unit tests in `cli/src/auth.test.ts` covering: `buildAuthHeaders` produces valid Signature header format (keyId, algorithm, headers, signature fields present), `signEnvelope` adds signature field, roundtrip sign+verify using tweetnacl
+- [x] 3.0 Implement HTTP Signature auth module
+  - [x] 3.1 Create `cli/src/auth.ts` — copy the `signRequest` function logic from `src/utils/crypto.js` (do not import — keep CLI standalone). Include `toBase64`, `fromBase64`, and `signRequest` as local functions.
+  - [x] 3.2 Implement `buildAuthHeaders(method: string, path: string, host: string, secretKey: string, agentId: string): Record<string, string>` — returns `{ Date, Signature }` headers ready to merge into a fetch call
+  - [x] 3.3 Implement `signEnvelope(envelope: object, secretKey: string, agentId: string): object` — adds `signature` field to a message envelope using the message-level signing format from `src/utils/crypto.js`
+  - [x] 3.4 Write unit tests in `cli/src/auth.test.ts` covering: `buildAuthHeaders` produces valid Signature header format (keyId, algorithm, headers, signature fields present), `signEnvelope` adds signature field, roundtrip sign+verify using tweetnacl
 
 - [ ] 4.0 Implement HTTP client and core messaging commands
   - [ ] 4.1 Create `cli/src/client.ts` — `AdmpClient` class with constructor `(config: ResolvedConfig)` and a private `request(method, path, body?, useApiKey?)` method that: sets `Content-Type`, adds `Date` header, adds `Signature` header via `buildAuthHeaders` (or `X-Api-Key` when `useApiKey` is true), calls `fetch`, throws `AdmpError` on non-2xx
