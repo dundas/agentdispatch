@@ -46,7 +46,8 @@ export function register(program: Command): void {
           clearTimeout(timer);
         }
         if (!httpRes.ok) {
-          const d = await httpRes.json() as Record<string, unknown>;
+          let d: Record<string, unknown> = {};
+          try { d = await httpRes.json() as Record<string, unknown>; } catch { /* non-JSON error body (e.g. HTML 502 from proxy) */ }
           error(String(d.error ?? d.message ?? httpRes.statusText), String(d.code ?? 'ERROR'));
           process.exit(1);
         }

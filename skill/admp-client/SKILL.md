@@ -194,6 +194,51 @@ host: agentdispatch.fly.dev
 date: Thu, 01 Jan 2026 00:00:00 GMT
 ```
 
+## JavaScript Helper
+
+Self-contained `signRequest` function — paste into your project to make signed ADMP calls without the CLI:
+
+```js
+import nacl from 'tweetnacl'; // npm install tweetnacl
+
+/** base64 string → Uint8Array */
+function fromBase64(s) { return new Uint8Array(Buffer.from(s, 'base64')); }
+/** Uint8Array → base64 string */
+function toBase64(b) { return Buffer.from(b).toString('base64'); }
+
+/**
+ * Build Date + Signature headers for an ADMP HTTP request.
+ * @param {string} method  - 'GET' | 'POST' | 'DELETE'
+ * @param {string} path    - e.g. '/api/agents/my-agent/inbox/pull'
+ * @param {string} host    - e.g. 'agentdispatch.fly.dev'
+ * @param {string} agentId - your agent ID (used as keyId)
+ * @param {string} secretKeyB64 - base64-encoded 64-byte nacl secret key
+ * @returns {{ Date: string, Signature: string }}
+ */
+function signRequest(method, path, host, agentId, secretKeyB64) {
+  const date = new Date().toUTCString();
+  const signingString = [
+    `(request-target): ${method.toLowerCase()} ${path}`,
+    `host: ${host}`,
+    `date: ${date}`,
+  ].join('\n');
+  const privateKey = fromBase64(secretKeyB64);
+  const sig = nacl.sign.detached(Buffer.from(signingString, 'utf8'), privateKey);
+  const signature = `keyId="${agentId}",algorithm="ed25519",` +
+    `headers="(request-target) host date",signature="${toBase64(sig)}"`;
+  return { Date: date, Signature: signature };
+}
+
+// Usage:
+const host = 'agentdispatch.fly.dev';
+const path = '/api/agents/my-agent/inbox/pull';
+const authHeaders = signRequest('POST', path, host, process.env.ADMP_AGENT_ID, process.env.ADMP_SECRET_KEY);
+const res = await fetch(`https://${host}${path}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', ...authHeaders },
+});
+```
+
 ---
 
 ## Error Codes

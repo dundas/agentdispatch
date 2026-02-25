@@ -58,7 +58,9 @@ const ENV_NAMES: Record<string, string> = {
 export function requireConfig(fields: (keyof AdmpConfig)[]): ResolvedConfig {
   const config = resolveConfig();
   for (const field of fields) {
-    if (!config[field]) {
+    // Use null/empty-string check (not falsy) so future numeric/boolean fields
+    // with a value of 0 or false are not incorrectly treated as unset.
+    if (config[field] == null || config[field] === '') {
       const envName = ENV_NAMES[field] ?? field.toUpperCase();
       throw new Error(
         `${field} not set — run \`admp init\` or set ${envName}`

@@ -66,6 +66,10 @@ export function register(program: Command): void {
           error('--ttl must be a positive integer', 'INVALID_ARGUMENT');
           process.exit(1);
         }
+        if (n > 86400) {
+          error('--ttl max is 86400 seconds (24 h per ADMP spec)', 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
         envelope.ttl_sec = n;
       }
       if (opts.ephemeral) envelope.ephemeral = true;

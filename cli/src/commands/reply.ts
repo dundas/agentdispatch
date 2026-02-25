@@ -58,6 +58,11 @@ export function register(program: Command): void {
         timestamp: new Date().toISOString(),
       };
 
+      // Dual-signing design: signEnvelope adds an Ed25519 body/from/to/timestamp
+      // signature field inside the JSON payload; client.request('signature') also
+      // adds HTTP Signature headers (request-target/host/date) over the transport.
+      // Both use config.secret_key and derive kid from config.agent_id so the
+      // server sees a single consistent signing identity.
       const signed = signEnvelope(envelope, config.secret_key);
 
       const res = await client.request<{ message_id: string; status: string }>(

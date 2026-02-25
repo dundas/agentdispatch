@@ -18,6 +18,8 @@ export function register(program: Command): void {
     .description('Get delivery status of a sent message')
     .addHelpText('after', '\nExample:\n  admp status msg_abc123')
     .action(async (messageId: string) => {
+      // Note: agent_id is intentionally omitted — /api/messages/:id/status uses
+      // api_key auth (cross-agent lookup) and does not embed agent_id in the path.
       const config = requireConfig(['base_url', 'api_key']);
       const client = new AdmpClient(config);
 

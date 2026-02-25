@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success, maskSecret } from '../output.js';
+import { success, maskSecret, error } from '../output.js';
 
 export function register(program: Command): void {
   const cmd = program
@@ -13,16 +13,21 @@ export function register(program: Command): void {
     .command('set')
     .description('Set or update the webhook URL and signing secret')
     .requiredOption('--url <url>', 'Webhook endpoint URL')
-    .requiredOption('--secret <secret>', 'Webhook signing secret (caution: visible in shell history — prefer ADMP_WEBHOOK_SECRET env var)')
-    .addHelpText('after', '\nSecurity note: --secret appears in shell history. Use ADMP_WEBHOOK_SECRET env var or clear history after use.\n\nExample:\n  admp webhook set --url https://myapp.com/hook --secret s3cr3t')
-    .action(async (opts: { url: string; secret: string }) => {
+    .option('--secret <secret>', 'Webhook signing secret (use ADMP_WEBHOOK_SECRET env var to avoid shell history exposure)')
+    .addHelpText('after', '\nSecurity note: --secret appears in shell history. Set ADMP_WEBHOOK_SECRET instead to avoid exposure.\n\nExample:\n  ADMP_WEBHOOK_SECRET=s3cr3t admp webhook set --url https://myapp.com/hook\n  admp webhook set --url https://myapp.com/hook --secret s3cr3t')
+    .action(async (opts: { url: string; secret?: string }) => {
+      const secret = process.env.ADMP_WEBHOOK_SECRET ?? opts.secret;
+      if (!secret) {
+        error('Webhook secret required — pass --secret or set ADMP_WEBHOOK_SECRET', 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
       await client.request(
         'POST',
         `/api/agents/${config.agent_id}/webhook`,
-        { url: opts.url, secret: opts.secret },
+        { url: opts.url, secret },
         'signature'
       );
 

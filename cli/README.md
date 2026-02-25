@@ -124,6 +124,25 @@ admp inbox stats --json
 
 All requests are signed with **Ed25519 HTTP Signatures**. The `secret_key` is stored locally in `~/.admp/config.json` with mode `0600` and never transmitted. The server verifies each request independently.
 
+## Local Development
+
+Clone the repo, install dependencies, and build before running:
+
+```bash
+cd cli
+bun install
+bun run build          # compiles src/ → dist/ (gitignored, must be built locally)
+node bin/admp.js --help
+```
+
+`dist/` is gitignored, so you must run `bun run build` after cloning or any time you modify `src/`.
+
+Run tests:
+
+```bash
+bun test               # unit + integration tests
+```
+
 ## License
 
 MIT
