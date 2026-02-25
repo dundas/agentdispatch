@@ -32,7 +32,8 @@ export function register(program: Command): void {
         `Base URL [${existing.base_url ?? 'https://agentdispatch.fly.dev'}]: `
       );
       const agent_id = await prompt(rl, `Agent ID [${existing.agent_id ?? ''}]: `);
-      const secret_key = await prompt(rl, `Secret key [${existing.secret_key ? '***' : ''}]: `);
+      process.stdout.write('Note: secret key input is not masked — paste carefully.\n');
+      const secret_key = await prompt(rl, `Secret key [${existing.secret_key ? '(keep existing)' : '(not set)'}]: `);
       const api_key = await prompt(rl, `API key (optional) [${existing.api_key ?? ''}]: `);
 
       rl.close();

@@ -1,34 +1,32 @@
-import { test, expect, afterEach } from 'bun:test';
+import { test, expect, beforeAll, afterAll } from 'bun:test';
 import { existsSync, statSync, rmSync } from 'fs';
-import { homedir } from 'os';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { loadConfig, saveConfig, resolveConfig, requireConfig } from './config.js';
 
-const configPath = join(homedir(), '.admp', 'config.json');
+// Redirect all config operations to a temp file so tests never touch ~/.admp/config.json
+const TEST_CONFIG = join(tmpdir(), `admp-test-${process.pid}.json`);
 
-afterEach(() => {
-  // Restore env vars that tests may have set
-  delete process.env._ADMP_TEST_RESTORE;
+beforeAll(() => {
+  process.env.ADMP_CONFIG_PATH = TEST_CONFIG;
+});
+
+afterAll(() => {
+  delete process.env.ADMP_CONFIG_PATH;
+  if (existsSync(TEST_CONFIG)) rmSync(TEST_CONFIG);
 });
 
 test('loadConfig returns {} when file does not exist', () => {
-  if (existsSync(configPath)) {
-    // File already exists — just verify it parses without error
-    const result = loadConfig();
-    expect(typeof result).toBe('object');
-  } else {
-    const result = loadConfig();
-    expect(result).toEqual({});
-  }
+  const result = loadConfig();
+  expect(result).toEqual({});
 });
 
 test('saveConfig writes file and sets mode 0600', () => {
-  const uniqueId = `test-agent-${Date.now()}`;
-  saveConfig({ base_url: 'http://test.local', agent_id: uniqueId, secret_key: 'sk_test' });
+  saveConfig({ base_url: 'http://test.local', agent_id: 'test-agent', secret_key: 'sk_test' });
 
-  expect(existsSync(configPath)).toBe(true);
+  expect(existsSync(TEST_CONFIG)).toBe(true);
 
-  const stat = statSync(configPath);
+  const stat = statSync(TEST_CONFIG);
   const mode = stat.mode & 0o777;
   expect(mode).toBe(0o600);
 });
@@ -62,17 +60,11 @@ test('resolveConfig defaults base_url to production server', () => {
   const saved = process.env.ADMP_BASE_URL;
   delete process.env.ADMP_BASE_URL;
 
-  // Temporarily clear the file-based base_url by saving a config without it
-  const existing = loadConfig();
-  const noBaseUrl = { ...existing };
-  delete noBaseUrl.base_url;
-  saveConfig(noBaseUrl as any);
-
+  // Temp config has no base_url
+  saveConfig({ agent_id: 'test', secret_key: 'sk' });
   const config = resolveConfig();
   expect(config.base_url).toBe('https://agentdispatch.fly.dev');
 
-  // Restore file state
-  saveConfig({ ...noBaseUrl, base_url: existing.base_url } as any);
   if (saved !== undefined) process.env.ADMP_BASE_URL = saved;
 });
 
@@ -80,11 +72,10 @@ test('requireConfig throws a friendly error for missing required field', () => {
   const saved = process.env.ADMP_AGENT_ID;
   delete process.env.ADMP_AGENT_ID;
 
-  const fileConfig = loadConfig();
-  if (!fileConfig.agent_id) {
-    expect(() => requireConfig(['agent_id'])).toThrow('agent_id not set');
-    expect(() => requireConfig(['agent_id'])).toThrow('ADMP_AGENT_ID');
-  }
+  // Temp config has no agent_id
+  saveConfig({ base_url: 'http://test.local', secret_key: 'sk' });
+  expect(() => requireConfig(['agent_id'])).toThrow('agent_id not set');
+  expect(() => requireConfig(['agent_id'])).toThrow('ADMP_AGENT_ID');
 
   if (saved !== undefined) process.env.ADMP_AGENT_ID = saved;
 });

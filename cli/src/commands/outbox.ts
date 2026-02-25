@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success, isJsonMode } from '../output.js';
+import { success, isJsonMode, error } from '../output.js';
 
 export function register(program: Command): void {
   const cmd = program
@@ -108,7 +108,12 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
-      const params = new URLSearchParams({ limit: opts.limit });
+      const limitN = parseInt(opts.limit, 10);
+      if (isNaN(limitN) || limitN <= 0) {
+        error('--limit must be a positive integer', 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
+      const params = new URLSearchParams({ limit: String(limitN) });
       if (opts.status) params.set('status', opts.status);
 
       const res = await client.request<{ messages: Array<{ id: string; to: string; subject: string; status: string; created_at: string }> }>(

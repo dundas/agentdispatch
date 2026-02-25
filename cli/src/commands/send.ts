@@ -17,7 +17,8 @@ function parseBody(raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch {
-    return raw;
+    error('--body must be valid JSON (or @file.json to read from file)', 'INVALID_ARGUMENT');
+    process.exit(1);
   }
 }
 

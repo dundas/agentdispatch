@@ -12,7 +12,7 @@ export interface AdmpConfig {
 export type ResolvedConfig = Required<AdmpConfig>;
 
 export function getConfigPath(): string {
-  return join(homedir(), '.admp', 'config.json');
+  return process.env.ADMP_CONFIG_PATH ?? join(homedir(), '.admp', 'config.json');
 }
 
 export function loadConfig(): Partial<AdmpConfig> {
