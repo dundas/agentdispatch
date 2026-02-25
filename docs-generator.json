@@ -1,0 +1,60 @@
+{
+  "project": "Agent Dispatch (ADMP)",
+  "description": "Universal inbox for autonomous AI agents — standardized messaging infrastructure with at-least-once delivery, Ed25519 authentication, and DID federation",
+  "baseUrl": "https://agentdispatch.fly.dev",
+  "_baseUrl_note": "Update baseUrl here and regenerate docs if the production URL changes",
+  "sources": [
+    { "path": "src/server.js", "extractor": "rest-api", "provides": "Express app setup, global auth middleware, route mounting" },
+    { "path": "src/routes/agents.js", "extractor": "rest-api", "provides": "Agent registration, heartbeat, trust, webhook, key rotation, identity, tenant, approval endpoints" },
+    { "path": "src/routes/inbox.js", "extractor": "rest-api", "provides": "Message send, pull, ack, nack, reply, status, inbox stats endpoints" },
+    { "path": "src/routes/groups.js", "extractor": "rest-api", "provides": "Group creation, membership, messaging, join/leave endpoints" },
+    { "path": "src/routes/outbox.js", "extractor": "rest-api", "provides": "Outbound email via Mailgun — domain config, send, message queries, webhooks" },
+    { "path": "src/routes/discovery.js", "extractor": "rest-api", "provides": "Public key directory (.well-known/agent-keys.json) and DID document endpoints" },
+    { "path": "src/middleware/auth.js", "extractor": "generic", "provides": "Authentication model: HTTP Signatures, API keys, DID:web federation, enrollment tokens" },
+    { "path": "src/services/agent.service.js", "extractor": "generic", "provides": "Agent lifecycle: registration modes, approval workflow, key rotation" },
+    { "path": "openapi.yaml", "extractor": "openapi", "provides": "OpenAPI 3.1 spec for supplementary endpoint documentation" },
+    { "path": "Dockerfile", "extractor": "architecture", "provides": "Container build and runtime config" },
+    { "path": "fly.toml", "extractor": "architecture", "provides": "Fly.io deployment topology and env vars" },
+    { "path": "docker-compose.yml", "extractor": "architecture", "provides": "Local multi-service dev topology" },
+    { "path": "package.json", "extractor": "architecture", "provides": "Dependencies, scripts, and metadata" },
+    { "path": "whitepaper/v1.md", "extractor": "generic", "provides": "ADMP v1.0 specification (protocol semantics, message format, security model)" }
+  ],
+  "outputs": [
+    {
+      "type": "llms-txt",
+      "path": "llms.txt",
+      "maxLines": 250,
+      "audience": "AI agents integrating with ADMP"
+    },
+    {
+      "type": "agent-guide",
+      "path": "docs/AGENT-GUIDE.md",
+      "audience": "AI agents using the API directly"
+    },
+    {
+      "type": "architecture",
+      "path": "docs/ARCHITECTURE.md",
+      "diagrams": ["component", "data-flow", "deployment"],
+      "includeEnvVars": true,
+      "includeSecuritySection": true
+    },
+    {
+      "type": "error-codes",
+      "path": "docs/ERROR-CODES.md",
+      "audience": "Developers and AI agents handling errors"
+    },
+    {
+      "type": "api-reference",
+      "path": "docs/API-REFERENCE.md",
+      "audience": "Developers integrating with the ADMP HTTP API"
+    }
+  ],
+  "validate": [],
+  "deploy": null,
+  "regenerate": "To regenerate docs, run: /docs-generator (in Claude Code) or invoke the docs-generator skill with this config.",
+  "rules": {
+    "sourceIsTruth": true,
+    "preserveExamples": true,
+    "addTimestamp": true
+  }
+}

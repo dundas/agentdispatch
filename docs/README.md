@@ -1,0 +1,37 @@
+# ADMP Documentation
+
+Generated documentation for the Agent Dispatch Messaging Protocol.
+
+| File | Audience | Description |
+|------|----------|-------------|
+| [AGENT-GUIDE.md](AGENT-GUIDE.md) | AI agents & developers | Full integration guide with code examples |
+| [API-REFERENCE.md](API-REFERENCE.md) | Developers | Complete endpoint reference (50+ endpoints) |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Operators & contributors | System architecture with Mermaid diagrams |
+| [ERROR-CODES.md](ERROR-CODES.md) | Developers & agents | All error codes with retry guidance |
+| [../llms.txt](../llms.txt) | AI agents | Concise machine-readable reference |
+
+## Regenerating
+
+These docs are generated from source code using the [docs-generator config](../docs-generator.json).
+
+To regenerate after source changes:
+
+```
+/docs-generator
+```
+
+This runs the docs-generator skill in Claude Code, reading all source files listed in `docs-generator.json` and regenerating the output files.
+
+**Without Claude Code:** The generator reads each source file in `docs-generator.json` → `sources[]`, extracts endpoint signatures, error codes, and architecture details using the specified `extractor` type, then writes the output files listed in `outputs[]`. You can replicate this manually by reading the source files and updating the docs to match.
+
+## Updating the Base URL
+
+If the production URL changes, update `baseUrl` in `docs-generator.json` and run `/docs-generator` to regenerate all files. The URL appears in 39+ places across the doc files.
+
+## Staleness Warning
+
+There is no CI check that validates docs against source code. If route handlers, error codes, or authentication logic change in `src/`, these docs will drift. Consider adding a CI step or running `/docs-generator --diff` before releases to detect drift.
+
+## Last Generated
+
+These docs were generated on **2026-02-25**. Run `/docs-generator` to check for drift against current source.
