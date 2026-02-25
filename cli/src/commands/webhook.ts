@@ -21,6 +21,17 @@ export function register(program: Command): void {
         error('Webhook secret required — pass --secret or set ADMP_WEBHOOK_SECRET', 'INVALID_ARGUMENT');
         process.exit(1);
       }
+      // Validate URL client-side and reject non-HTTPS schemes before storing.
+      try {
+        const parsed = new URL(opts.url);
+        if (parsed.protocol !== 'https:') {
+          error('Webhook URL must use HTTPS', 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
+      } catch {
+        error(`Invalid webhook URL: ${opts.url}`, 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 

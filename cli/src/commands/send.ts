@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
+import { isAbsolute } from 'path';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { signEnvelope } from '../auth.js';
@@ -7,10 +8,16 @@ import { success, error } from '../output.js';
 
 function parseBody(raw: string): unknown {
   if (raw.startsWith('@')) {
+    const filePath = raw.slice(1);
+    // Reject absolute paths and directory traversal to prevent reading arbitrary files.
+    if (isAbsolute(filePath) || filePath.includes('..')) {
+      error('File path must be relative and must not contain ..', 'INVALID_ARGUMENT');
+      process.exit(1);
+    }
     try {
-      return JSON.parse(readFileSync(raw.slice(1), 'utf8'));
+      return JSON.parse(readFileSync(filePath, 'utf8'));
     } catch {
-      error(`Could not read body file: ${raw.slice(1)}`, 'FILE_NOT_FOUND');
+      error(`Could not read body file: ${filePath}`, 'FILE_NOT_FOUND');
       process.exit(1);
     }
   }

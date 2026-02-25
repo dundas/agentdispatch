@@ -106,9 +106,11 @@ export class AdmpClient {
     }
 
     if (!res.ok) {
-      const d = data as Record<string, unknown>;
-      const code = (d?.code as string) ?? 'UNKNOWN_ERROR';
-      const message = (d?.error as string) ?? (d?.message as string) ?? res.statusText;
+      const d = typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
+      const code = typeof d.code === 'string' ? d.code : 'UNKNOWN_ERROR';
+      const message = typeof d.error === 'string' ? d.error
+        : typeof d.message === 'string' ? d.message
+        : res.statusText;
       throw new AdmpError(message, code, res.status);
     }
 

@@ -6,6 +6,52 @@ function prompt(rl: ReturnType<typeof createInterface>, question: string): Promi
   return new Promise(resolve => rl.question(question, resolve));
 }
 
+/**
+ * Prompt for a secret value with character-by-character echo suppression.
+ * In TTY mode, shows '*' for each character typed. Falls back to cleartext
+ * readline in non-interactive (piped) contexts where raw mode is unavailable.
+ */
+function promptSecret(question: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    // Non-TTY (piped/CI): readline cannot mask; warn and read cleartext.
+    process.stderr.write('Warning: input not masked (non-interactive terminal)\n');
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise<string>(resolve => {
+      rl.question(question, answer => { rl.close(); resolve(answer); });
+    });
+  }
+
+  process.stdout.write(question);
+  return new Promise<string>((resolve) => {
+    const chars: Buffer[] = [];
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+
+    const handler = (char: Buffer) => {
+      const str = char.toString('utf8');
+      if (str === '\r' || str === '\n') {
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdin.removeListener('data', handler);
+        process.stdout.write('\n');
+        resolve(Buffer.concat(chars).toString('utf8'));
+      } else if (str === '\u0003') { // Ctrl-C
+        process.stdin.setRawMode(false);
+        process.exit(1);
+      } else if (str === '\u007f' || str === '\b') { // Backspace
+        if (chars.length > 0) {
+          chars.pop();
+          process.stdout.write('\b \b');
+        }
+      } else {
+        chars.push(char);
+        process.stdout.write('*');
+      }
+    };
+    process.stdin.on('data', handler);
+  });
+}
+
 export function register(program: Command): void {
   program
     .command('init')
@@ -25,22 +71,26 @@ export function register(program: Command): void {
       }
 
       const existing = loadConfig();
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
 
+      // Prompt for non-secret fields first using readline.
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
       const base_url = await prompt(
         rl,
         `Base URL [${existing.base_url ?? 'https://agentdispatch.fly.dev'}]: `
       );
       const agent_id = await prompt(rl, `Agent ID [${existing.agent_id ?? ''}]: `);
-      process.stdout.write(
-        'Note: secret key input is not masked — terminal echoing may expose it in screen\n' +
-        'recordings or shared sessions. To avoid this, set ADMP_SECRET_KEY and run:\n' +
-        '  admp init --from-env\n'
-      );
-      const secret_key = await prompt(rl, `Secret key [${existing.secret_key ? '(keep existing)' : '(not set)'}]: `);
-      const api_key = await prompt(rl, `API key (optional) [${existing.api_key ?? ''}]: `);
-
       rl.close();
+
+      // Prompt for secret key with echo suppressed (shows * per character in TTY mode).
+      // Prefer ADMP_SECRET_KEY env var + --from-env to avoid terminal exposure entirely.
+      const secret_key = await promptSecret(
+        `Secret key [${existing.secret_key ? '(keep existing)' : '(not set)'}]: `
+      );
+
+      // Prompt for optional API key using a new readline interface.
+      const rl2 = createInterface({ input: process.stdin, output: process.stdout });
+      const api_key = await prompt(rl2, `API key (optional) [${existing.api_key ?? ''}]: `);
+      rl2.close();
 
       saveConfig({
         base_url: base_url.trim() || existing.base_url || 'https://agentdispatch.fly.dev',

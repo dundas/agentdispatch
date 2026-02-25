@@ -54,7 +54,37 @@ test('signEnvelope adds signature.alg, signature.kid, and signature.sig to the e
   expect(signed.signature.sig.length).toBeGreaterThan(0);
 });
 
-// ── 4. Roundtrip: sign then verify with nacl.sign.detached.verify ─────────────
+// ── 4. signEnvelope throws when envelope.from is missing ─────────────────────
+test('signEnvelope throws when envelope.from is missing', () => {
+  const envelope = {
+    version: '1.0',
+    id: 'no-from-test',
+    type: 'task.request',
+    // from: intentionally omitted
+    to: 'agent://target.example.com',
+    subject: 'test',
+    timestamp: new Date().toISOString(),
+    body: {},
+  };
+  expect(() => signEnvelope(envelope, secretKeyB64)).toThrow(/envelope\.from is required/);
+});
+
+// ── 5. signEnvelope throws on bare 'agent://' from (empty kid) ────────────────
+test('signEnvelope throws when envelope.from is bare agent://', () => {
+  const envelope = {
+    version: '1.0',
+    id: 'bare-agent-test',
+    type: 'task.request',
+    from: 'agent://',
+    to: 'agent://target.example.com',
+    subject: 'test',
+    timestamp: new Date().toISOString(),
+    body: {},
+  };
+  expect(() => signEnvelope(envelope, secretKeyB64)).toThrow(/must not be bare/);
+});
+
+// ── 6. Roundtrip: sign then verify with nacl.sign.detached.verify ─────────────
 test('signEnvelope roundtrip: verify with nacl.sign.detached.verify returns true', () => {
   const envelope = {
     version: '1.0',
