@@ -1279,12 +1279,9 @@ acked --> purged (ephemeral messages: body stripped, metadata preserved)
 | **400** | `INVALID_TIMESTAMP` | Message timestamp is outside allowed window. | No -- use current time. |
 | **400** | `AGENT_ID_REQUIRED` | Agent ID missing from request. | No -- provide agent ID. |
 | **400** | `SEED_AND_TENANT_REQUIRED` | Key rotation requires seed and tenant_id. | No -- provide fields. |
-| **400** | `INVALID_CLIENT_ID` | client_id is missing, empty, or contains invalid characters. | No -- fix client_id. |
-| **400** | `INVALID_EXPIRES_IN_DAYS` | expires_in_days must be a positive finite number. | No -- fix value. |
 | **401** | `API_KEY_REQUIRED` | No API key provided when required. | No -- provide key. |
 | **401** | `INVALID_API_KEY` | API key is invalid, expired, or unrecognized. | No -- use valid key. |
 | **401** | `SIGNATURE_INVALID` | HTTP signature verification failed (at global gate). | No -- fix signature. |
-| **401** | `MASTER_KEY_REQUIRED` | Endpoint requires the master API key. | No -- use master key. |
 | **403** | `REGISTRATION_PENDING` | Agent registration is pending admin approval. | Yes -- wait for approval, then retry. |
 | **403** | `REGISTRATION_REJECTED` | Agent registration has been rejected. | No -- contact admin. |
 | **403** | `REQUEST_EXPIRED` | Date header is outside +/- 5 minute window. | Yes -- use current timestamp. |
@@ -1297,7 +1294,6 @@ acked --> purged (ephemeral messages: body stripped, metadata preserved)
 | **404** | `MESSAGE_NOT_FOUND` | Message ID not found. | No -- verify message ID. |
 | **404** | `RECIPIENT_NOT_FOUND` | Message recipient not found. | No -- verify recipient exists. |
 | **404** | `GROUP_NOT_FOUND` | Group not found. | No -- verify group ID. |
-| **404** | `KEY_NOT_FOUND` | API key ID not found. | No -- verify key ID. |
 | **409** | `TENANT_EXISTS` | Tenant already exists. | No -- use different tenant_id. |
 | **410** | `MESSAGE_EXPIRED` | Message has been purged (ephemeral or TTL expired). Body is null; metadata may still be available. | No -- message is gone. |
 | **500** | `INTERNAL_ERROR` | Unexpected server error. | Yes -- with backoff. |
