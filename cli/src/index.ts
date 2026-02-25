@@ -2,6 +2,26 @@ import { Command } from 'commander';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { AdmpError } from './client.js';
+import { error } from './output.js';
+
+// Static imports so the single-file build bundles everything
+import * as initCmd from './commands/init.js';
+import * as configCmd from './commands/config.js';
+import * as registerCmd from './commands/register.js';
+import * as agentCmd from './commands/agent.js';
+import * as sendCmd from './commands/send.js';
+import * as pullCmd from './commands/pull.js';
+import * as ackCmd from './commands/ack.js';
+import * as nackCmd from './commands/nack.js';
+import * as replyCmd from './commands/reply.js';
+import * as statusCmd from './commands/status.js';
+import * as inboxCmd from './commands/inbox.js';
+import * as heartbeatCmd from './commands/heartbeat.js';
+import * as rotateKeyCmd from './commands/rotate-key.js';
+import * as webhookCmd from './commands/webhook.js';
+import * as groupsCmd from './commands/groups.js';
+import * as outboxCmd from './commands/outbox.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
@@ -11,41 +31,30 @@ export const program = new Command();
 program
   .name('admp')
   .description('Agent Dispatch Messaging Protocol CLI')
-  .version(pkg.version);
+  .version(pkg.version)
+  .option('--json', 'Output raw JSON (machine-readable)');
 
-async function main() {
-  // Register sub-commands — each module exports register(program)
-  const modules = [
-    './commands/init.js',
-    './commands/config.js',
-    './commands/register.js',
-    './commands/send.js',
-    './commands/pull.js',
-    './commands/ack.js',
-    './commands/nack.js',
-    './commands/reply.js',
-    './commands/status.js',
-    './commands/inbox.js',
-    './commands/heartbeat.js',
-    './commands/rotate-key.js',
-    './commands/webhook.js',
-    './commands/groups.js',
-    './commands/outbox.js',
-  ];
+const commandModules = [
+  initCmd, configCmd, registerCmd, agentCmd,
+  sendCmd, pullCmd, ackCmd, nackCmd, replyCmd,
+  statusCmd, inboxCmd, heartbeatCmd, rotateKeyCmd,
+  webhookCmd, groupsCmd, outboxCmd,
+];
 
-  for (const mod of modules) {
-    try {
-      const m = await import(mod) as { register: (p: Command) => void };
-      m.register(program);
-    } catch {
-      // Module not yet implemented — skip during development
-    }
-  }
-
-  program.parse(process.argv);
+for (const mod of commandModules) {
+  mod.register(program);
 }
 
-main().catch(err => {
-  console.error(err.message);
+program.parseAsync(process.argv).catch((err: unknown) => {
+  if (err instanceof AdmpError) {
+    error(err.message, err.code);
+    process.exit(1);
+  }
+  if (err instanceof Error) {
+    const isNetwork = err.message.includes('Could not connect');
+    error(err.message, isNetwork ? 'NETWORK_ERROR' : 'ERROR');
+    process.exit(1);
+  }
+  error(String(err));
   process.exit(1);
 });

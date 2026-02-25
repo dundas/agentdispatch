@@ -87,58 +87,58 @@
   - [x] 4.11 Implement `admp status <message-id>` — GET `/api/messages/:messageId/status` with API key auth; print status, timestamps
   - [x] 4.12 Implement `admp inbox stats` — GET `/api/agents/:agentId/inbox/stats` with HTTP Signature auth; print queued, leased, total counts
 
-- [ ] 5.0 Implement agent management commands
-  - [ ] 5.1 Implement `admp heartbeat` with optional `--metadata <json>`; POST `/api/agents/:agentId/heartbeat`; print confirmation with timestamp
-  - [ ] 5.2 Implement `admp rotate-key --seed <hex>` — POST `/api/agents/:agentId/rotate-key`, update `secret_key` in config with returned new key, print ⚠ warning to save new key
-  - [ ] 5.3 Implement `admp webhook set --url <url> --secret <secret>` — POST `/api/agents/:agentId/webhook`
-  - [ ] 5.4 Implement `admp webhook get` — GET `/api/agents/:agentId/webhook`; print url and masked secret
-  - [ ] 5.5 Implement `admp webhook delete` — DELETE `/api/agents/:agentId/webhook` after confirmation prompt
+- [x] 5.0 Implement agent management commands
+  - [x] 5.1 Implement `admp heartbeat` with optional `--metadata <json>`; POST `/api/agents/:agentId/heartbeat`; print confirmation with timestamp
+  - [x] 5.2 Implement `admp rotate-key --seed <hex>` — POST `/api/agents/:agentId/rotate-key`, update `secret_key` in config with returned new key, print ⚠ warning to save new key
+  - [x] 5.3 Implement `admp webhook set --url <url> --secret <secret>` — POST `/api/agents/:agentId/webhook`
+  - [x] 5.4 Implement `admp webhook get` — GET `/api/agents/:agentId/webhook`; print url and masked secret
+  - [x] 5.5 Implement `admp webhook delete` — DELETE `/api/agents/:agentId/webhook` after confirmation prompt
 
-- [ ] 6.0 Implement groups commands
-  - [ ] 6.1 Implement `admp groups create --name <name> --access <open|key-protected|invite>` — POST `/api/groups`; print group_id
-  - [ ] 6.2 Implement `admp groups list` — GET `/api/agents/:agentId/groups`; print table of group_id, name, role, member_count
-  - [ ] 6.3 Implement `admp groups join <group-id> --key <key>` — POST `/api/groups/:groupId/join`
-  - [ ] 6.4 Implement `admp groups leave <group-id>` — POST `/api/groups/:groupId/leave` after confirmation
-  - [ ] 6.5 Implement `admp groups send <group-id> --subject <subject> --body <json>` — POST `/api/groups/:groupId/messages`
-  - [ ] 6.6 Implement `admp groups messages <group-id> --limit <n>` — GET `/api/groups/:groupId/messages`; print message table with from, subject, timestamp
+- [x] 6.0 Implement groups commands
+  - [x] 6.1 Implement `admp groups create --name <name> --access <open|key-protected|invite>` — POST `/api/groups`; print group_id
+  - [x] 6.2 Implement `admp groups list` — GET `/api/agents/:agentId/groups`; print table of group_id, name, role, member_count
+  - [x] 6.3 Implement `admp groups join <group-id> --key <key>` — POST `/api/groups/:groupId/join`
+  - [x] 6.4 Implement `admp groups leave <group-id>` — POST `/api/groups/:groupId/leave` after confirmation
+  - [x] 6.5 Implement `admp groups send <group-id> --subject <subject> --body <json>` — POST `/api/groups/:groupId/messages`
+  - [x] 6.6 Implement `admp groups messages <group-id> --limit <n>` — GET `/api/groups/:groupId/messages`; print message table with from, subject, timestamp
 
-- [ ] 7.0 Implement outbox commands
-  - [ ] 7.1 Implement `admp outbox domain set --domain <domain>` — POST `/api/agents/:agentId/outbox/domain`
-  - [ ] 7.2 Implement `admp outbox domain verify` — POST `/api/agents/:agentId/outbox/domain/verify`; print DNS verification status
-  - [ ] 7.3 Implement `admp outbox domain delete` — DELETE `/api/agents/:agentId/outbox/domain` after confirmation
-  - [ ] 7.4 Implement `admp outbox send --to <email> --subject <subject> --body <text> --html <html> --from-name <name>` — POST `/api/agents/:agentId/outbox/send`; print message_id and status
-  - [ ] 7.5 Implement `admp outbox messages --status <status> --limit <n>` — GET `/api/agents/:agentId/outbox/messages`; print table with recipient, subject, status, timestamp
+- [x] 7.0 Implement outbox commands
+  - [x] 7.1 Implement `admp outbox domain set --domain <domain>` — POST `/api/agents/:agentId/outbox/domain`
+  - [x] 7.2 Implement `admp outbox domain verify` — POST `/api/agents/:agentId/outbox/domain/verify`; print DNS verification status
+  - [x] 7.3 Implement `admp outbox domain delete` — DELETE `/api/agents/:agentId/outbox/domain` after confirmation
+  - [x] 7.4 Implement `admp outbox send --to <email> --subject <subject> --body <text> --html <html> --from-name <name>` — POST `/api/agents/:agentId/outbox/send`; print message_id and status
+  - [x] 7.5 Implement `admp outbox messages --status <status> --limit <n>` — GET `/api/agents/:agentId/outbox/messages`; print table with recipient, subject, status, timestamp
 
-- [ ] 8.0 Output formatting, error handling, and UX polish
-  - [ ] 8.1 Add global `--json` option to root commander program; update all commands to check `isJsonMode()` and output raw JSON instead of formatted output
-  - [ ] 8.2 Add global error handler: catch `AdmpError` and print `error.code: error.message` to stderr then `process.exit(1)`; catch network errors with friendly "Could not connect to <base_url>" message
-  - [ ] 8.3 Ensure all commands have `.description()` and `.addHelpText('after', 'Example: ...')` with a concrete usage example
-  - [ ] 8.4 Add `--version` to root program reading from `package.json`
-  - [ ] 8.5 Respect `NO_COLOR=1` env var in `cli/src/output.ts` — strip ANSI codes when set
-  - [ ] 8.6 Add `admp agent get` command to GET `/api/agents/:agentId` and display agent details (useful for debugging config)
-  - [ ] 8.7 Test all `--help` outputs manually for clarity and accuracy; fix any misleading descriptions
+- [x] 8.0 Output formatting, error handling, and UX polish
+  - [x] 8.1 Add global `--json` option to root commander program; update all commands to check `isJsonMode()` and output raw JSON instead of formatted output
+  - [x] 8.2 Add global error handler: catch `AdmpError` and print `error.code: error.message` to stderr then `process.exit(1)`; catch network errors with friendly "Could not connect to <base_url>" message
+  - [x] 8.3 Ensure all commands have `.description()` and `.addHelpText('after', 'Example: ...')` with a concrete usage example
+  - [x] 8.4 Add `--version` to root program reading from `package.json`
+  - [x] 8.5 Respect `NO_COLOR=1` env var in `cli/src/output.ts` — strip ANSI codes when set
+  - [x] 8.6 Add `admp agent get` command to GET `/api/agents/:agentId` and display agent details (useful for debugging config)
+  - [x] 8.7 Test all `--help` outputs manually for clarity and accuracy; fix any misleading descriptions
 
-- [ ] 9.0 Tests
-  - [ ] 9.1 Complete unit tests in `cli/src/config.test.ts` (see task 2.10)
-  - [ ] 9.2 Complete unit tests in `cli/src/auth.test.ts` (see task 3.4)
-  - [ ] 9.3 Create `cli/test/integration.test.ts` — start a local ADMP server (or use `ADMP_BASE_URL` env pointing to one), then test the full flow: register → send → pull → ack
-  - [ ] 9.4 Add integration test for `rotate-key`: register with seed, rotate, verify old key no longer works and new key does
-  - [ ] 9.5 Add integration test for groups: create group → join → send group message → list messages
-  - [ ] 9.6 Add test for `--json` flag: verify every command outputs valid parseable JSON when `--json` is set
-  - [ ] 9.7 Run `bun test` in `cli/` and fix all failures before marking this task complete
+- [x] 9.0 Tests
+  - [x] 9.1 Complete unit tests in `cli/src/config.test.ts` (see task 2.10)
+  - [x] 9.2 Complete unit tests in `cli/src/auth.test.ts` (see task 3.4)
+  - [x] 9.3 Create `cli/test/integration.test.ts` — start a local ADMP server (or use `ADMP_BASE_URL` env pointing to one), then test the full flow: register → send → pull → ack
+  - [x] 9.4 Add integration test for `rotate-key`: register with seed, rotate, verify old key no longer works and new key does
+  - [x] 9.5 Add integration test for groups: create group → join → send group message → list messages
+  - [x] 9.6 Add test for `--json` flag: verify every command outputs valid parseable JSON when `--json` is set
+  - [x] 9.7 Run `bun test` in `cli/` and fix all failures before marking this task complete
 
-- [ ] 10.0 Build and publish configuration
-  - [ ] 10.1 Verify `bun build cli/src/index.ts --target node --outfile cli/dist/index.js` produces a standalone Node.js file
-  - [ ] 10.2 Test the built binary: `node cli/bin/admp.js --help` and `node cli/bin/admp.js register --help`
-  - [ ] 10.3 Test on Node.js 18 and Node.js 20 (use `nvm use 18` / `nvm use 20`)
-  - [ ] 10.4 Add `cli/.npmignore` to exclude `src/`, `test/`, `tsconfig.json`, `bun.lock` from published package
-  - [ ] 10.5 Add `"files": ["dist/", "bin/", "README.md"]` to `cli/package.json`
-  - [ ] 10.6 Write `cli/README.md` with: installation (`npm install -g @agentdispatch/cli`), quick start (register + send + pull + ack), all commands with examples, config reference, environment variables table
-  - [ ] 10.7 Run `npm pack --dry-run` in `cli/` and verify the package contents are correct (no src, no secrets, correct entry point)
+- [x] 10.0 Build and publish configuration
+  - [x] 10.1 Verify `bun build cli/src/index.ts --target node --outfile cli/dist/index.js` produces a standalone Node.js file
+  - [x] 10.2 Test the built binary: `node cli/bin/admp.js --help` and `node cli/bin/admp.js register --help`
+  - [x] 10.3 Test on Node.js 18 and Node.js 20 (use `nvm use 18` / `nvm use 20`)
+  - [x] 10.4 Add `cli/.npmignore` to exclude `src/`, `test/`, `tsconfig.json`, `bun.lock` from published package
+  - [x] 10.5 Add `"files": ["dist/", "bin/", "README.md"]` to `cli/package.json`
+  - [x] 10.6 Write `cli/README.md` with: installation (`npm install -g @agentdispatch/cli`), quick start (register + send + pull + ack), all commands with examples, config reference, environment variables table
+  - [x] 10.7 Run `npm pack --dry-run` in `cli/` and verify the package contents are correct (no src, no secrets, correct entry point)
 
-- [ ] 11.0 Write `admp-client` skill
-  - [ ] 11.1 Create `skill/admp-client/` directory
-  - [ ] 11.2 Write `skill/admp-client/SKILL.md` with the following sections (total ≤400 lines):
+- [x] 11.0 Write `admp-client` skill
+  - [x] 11.1 Create `skill/admp-client/` directory
+  - [x] 11.2 Write `skill/admp-client/SKILL.md` with the following sections (total ≤400 lines):
     - **What is ADMP** (3 sentences: universal inbox, at-least-once delivery, Ed25519 auth)
     - **Authentication** — API key header (`X-Api-Key`), HTTP Signature construction with `printf` signing string example (JS + curl), signing string format `(request-target)\nhost\ndate`
     - **Quick Start** — register (curl), send a message (curl with `X-Api-Key`), pull (curl with Signature), ack (curl with Signature)
@@ -148,12 +148,12 @@
     - **Key Error Codes** — table of the 15 most common codes with HTTP status, retryable, fix hint
     - **Best Practices for AI Agents** — store secret_key immediately, use import mode in production, always ack/nack, set TTL on messages, use correlation_id for request/response pairs, check lease_until before processing
     - **JavaScript Helper** — 30-line self-contained `signRequest` function using `tweetnacl` that an agent can paste into their project
-  - [ ] 11.3 Verify `skill/admp-client/SKILL.md` is ≤400 lines with `wc -l skill/admp-client/SKILL.md`
-  - [ ] 11.4 Write `skill/admp-client/install.sh` — POSIX shell script that:
+  - [x] 11.3 Verify `skill/admp-client/SKILL.md` is ≤400 lines with `wc -l skill/admp-client/SKILL.md`
+  - [x] 11.4 Write `skill/admp-client/install.sh` — POSIX shell script that:
     - Detects which skill directories exist (`.claude/skills/`, `.gemini/skills/`, `.codex/skills/`)
     - Creates `admp-client/` subdirectory in each found dir
     - Copies `SKILL.md` into each
     - Prints confirmation: "Installed admp-client skill to: .claude/skills/admp-client/"
     - Exits 0 on success, prints error and exits 1 if no skill directories found
-  - [ ] 11.5 Make `install.sh` executable (`chmod +x skill/admp-client/install.sh`) and test it in a temp directory with `.claude/skills/` present
-  - [ ] 11.6 Test skill by reading only `SKILL.md` and verifying you can write a working register + send + pull + ack sequence from it alone (no other docs)
+  - [x] 11.5 Make `install.sh` executable (`chmod +x skill/admp-client/install.sh`) and test it in a temp directory with `.claude/skills/` present
+  - [x] 11.6 Test skill by reading only `SKILL.md` and verifying you can write a working register + send + pull + ack sequence from it alone (no other docs)
