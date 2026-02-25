@@ -41,6 +41,8 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
+      // POST (not GET): the server records a verified_at timestamp on success,
+      // making this a stateful operation despite having no request body.
       const res = await client.request<{ verified: boolean; checks?: unknown[] }>(
         'POST',
         `/api/agents/${config.agent_id}/outbox/domain/verify`,

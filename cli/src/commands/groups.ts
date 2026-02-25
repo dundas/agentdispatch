@@ -48,10 +48,11 @@ export function register(program: Command): void {
       if (isJsonMode()) { console.log(JSON.stringify(groups, null, 2)); return; }
 
       if (groups.length === 0) { console.log('No groups.'); return; }
-      console.log(`\n${'GROUP ID'.padEnd(36)} ${'NAME'.padEnd(24)} ${'ROLE'.padEnd(10)} MEMBERS`);
-      console.log('─'.repeat(80));
+      const idWidth = Math.max('GROUP ID'.length, ...groups.map(g => g.group_id.length));
+      console.log(`\n${'GROUP ID'.padEnd(idWidth)} ${'NAME'.padEnd(24)} ${'ROLE'.padEnd(10)} MEMBERS`);
+      console.log('─'.repeat(idWidth + 1 + 24 + 1 + 10 + 1 + 7));
       for (const g of groups) {
-        console.log(`${g.group_id.padEnd(36)} ${String(g.name).slice(0, 24).padEnd(24)} ${g.role.padEnd(10)} ${g.member_count}`);
+        console.log(`${g.group_id.padEnd(idWidth)} ${String(g.name).slice(0, 24).padEnd(24)} ${g.role.padEnd(10)} ${g.member_count}`);
       }
       console.log('');
     });
@@ -80,9 +81,16 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
 
       const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await new Promise<string>(r => rl.question(`Leave group ${groupId}? (y/N) `, r));
-      rl.close();
-      if (answer.trim().toLowerCase() !== 'y') { console.log('Aborted.'); return; }
+      let answer = 'n';
+      try {
+        answer = await new Promise<string>(r => rl.question(`Leave group ${groupId}? (y/N) `, r));
+      } finally {
+        rl.close();
+      }
+      if (answer.trim().toLowerCase() !== 'y') {
+        success('Aborted');
+        return;
+      }
 
       const client = new AdmpClient(config);
       await client.request('POST', `/api/groups/${groupId}/leave`, undefined, 'signature');

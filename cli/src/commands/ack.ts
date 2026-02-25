@@ -3,6 +3,14 @@ import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { success, error } from '../output.js';
 
+/** Rejects message IDs that contain path-separating characters. */
+function validateMessageId(id: string): void {
+  if (!/^[\w\-]+$/.test(id)) {
+    error('Message ID must contain only alphanumeric characters, hyphens, and underscores', 'INVALID_ARGUMENT');
+    process.exit(1);
+  }
+}
+
 export function register(program: Command): void {
   program
     .command('ack <messageId>')
@@ -10,6 +18,7 @@ export function register(program: Command): void {
     .option('--result <json>', 'Optional result payload as JSON string')
     .addHelpText('after', '\nExample:\n  admp ack msg_abc123\n  admp ack msg_abc123 --result \'{"status":"done"}\'')
     .action(async (messageId: string, opts: { result?: string }) => {
+      validateMessageId(messageId);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 

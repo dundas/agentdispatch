@@ -15,16 +15,17 @@ export function register(program: Command): void {
   program
     .command('register')
     .description('Register a new agent with the ADMP hub')
-    .option('--seed <hex>', 'Deterministic 32-byte seed (hex) for key derivation')
+    .option('--seed <hex>', 'Deterministic 32-byte seed (hex) — prefer ADMP_SEED env var to avoid shell history exposure')
     .option('--name <name>', 'Human-readable agent name')
     .option('--capabilities <list>', 'Comma-separated capability list')
-    .addHelpText('after', '\nExample:\n  admp register --name my-agent\n  admp register --seed abc123...')
+    .addHelpText('after', '\nSecurity note: --seed appears in shell history and ps output. Set ADMP_SEED instead:\n  ADMP_SEED=deadbeef... admp register --name my-agent\n\nExample:\n  admp register --name my-agent\n  admp register --seed abc123...')
     .action(async (opts: { seed?: string; name?: string; capabilities?: string }) => {
       const config = loadConfig();
       const baseUrl = process.env.ADMP_BASE_URL ?? config.base_url ?? 'https://agentdispatch.fly.dev';
 
       const body: Record<string, unknown> = {};
-      if (opts.seed) body.seed = opts.seed;
+      const seed = process.env.ADMP_SEED ?? opts.seed;
+      if (seed) body.seed = seed;
       if (opts.name) body.name = opts.name;
       if (opts.capabilities) body.capabilities = opts.capabilities.split(',').map(s => s.trim());
 

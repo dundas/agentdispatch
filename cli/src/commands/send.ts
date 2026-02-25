@@ -8,7 +8,7 @@ import { success, error } from '../output.js';
 
 const MAX_BODY_FILE_BYTES = 1 * 1024 * 1024; // 1 MB guard
 
-function parseBody(raw: string): unknown {
+function parseBodyOrExit(raw: string): unknown {
   if (raw.startsWith('@')) {
     const filePath = raw.slice(1);
     // Reject absolute paths and directory traversal to prevent reading arbitrary files.
@@ -53,7 +53,7 @@ export function register(program: Command): void {
     .option('--correlation-id <id>', 'Correlation ID for threading')
     .option('--ttl <seconds>', 'Time-to-live in seconds')
     .option('--ephemeral', 'Do not persist message (best-effort delivery)')
-    .addHelpText('after', '\nExamples:\n  admp send --to storage.agent --subject create_user --body \'{"email":"a@b.com"}\'\n  admp send --to analyst --subject report --body @report.json')
+    .addHelpText('after', '\nNote: send requires api_key for transport auth (run `admp config set api_key <key>` or set ADMP_API_KEY).\n\nExamples:\n  admp send --to storage.agent --subject create_user --body \'{"email":"a@b.com"}\'\n  admp send --to analyst --subject report --body @report.json')
     .action(async (opts: {
       to: string;
       subject: string;
@@ -73,7 +73,7 @@ export function register(program: Command): void {
         process.exit(1);
       }
 
-      const body = parseBody(opts.body);
+      const body = parseBodyOrExit(opts.body);
       const timestamp = new Date().toISOString();
 
       const envelope: Record<string, unknown> = {
