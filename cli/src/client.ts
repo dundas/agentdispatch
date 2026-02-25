@@ -1,11 +1,15 @@
-import { ResolvedConfig } from './config.js';
+import { AdmpConfig, ResolvedConfig } from './config.js';
 import { buildAuthHeaders } from './auth.js';
 
-// The deployed server mounts routes under /api/ (see src/server.js line 109:
-// app.use('/api/agents', agentRoutes)). The ADMP whitepaper and OpenAPI spec
-// use /v1/ as the path prefix — that is aspirational. Until the server is
-// updated, all CLI commands use the live /api/ prefix.
-const _API_PREFIX = '/api'; // documented divergence from /v1/ spec
+// NOTE: The deployed server mounts routes under /api/ (see src/server.js:
+//   app.use('/api/agents', agentRoutes)). The ADMP whitepaper and OpenAPI
+//   spec aspirationally use /v1/. All CLI command paths use the live /api/
+//   prefix; if the server is updated to /v1/ the command paths must follow.
+
+// Minimum config for AdmpClient — only base_url is always required.
+// Signature auth additionally requires agent_id + secret_key;
+// api-key auth requires api_key. Both are validated at runtime.
+export type AdmpClientConfig = Pick<AdmpConfig, 'base_url'> & Partial<Omit<AdmpConfig, 'base_url'>>;
 
 export class AdmpError extends Error {
   code: string;
@@ -22,9 +26,9 @@ export class AdmpError extends Error {
 export type AuthMode = 'signature' | 'api-key' | 'none';
 
 export class AdmpClient {
-  private config: ResolvedConfig;
+  private config: AdmpClientConfig;
 
-  constructor(config: ResolvedConfig) {
+  constructor(config: AdmpClientConfig | ResolvedConfig) {
     this.config = config;
   }
 
@@ -46,7 +50,9 @@ export class AdmpClient {
       // Include query string in signed path so the server can verify GET requests
       // that carry query params (e.g. groups messages, outbox messages).
       const signedPath = url.pathname + url.search;
-      const authHeaders = buildAuthHeaders(method, signedPath, host, this.config.secret_key, this.config.agent_id);
+      // secret_key and agent_id are required for signature auth; callers must
+      // call requireConfig(['secret_key', 'agent_id']) before constructing the client.
+      const authHeaders = buildAuthHeaders(method, signedPath, host, this.config.secret_key!, this.config.agent_id!);
       Object.assign(headers, authHeaders);
     } else if (auth === 'api-key') {
       if (!this.config.api_key) {

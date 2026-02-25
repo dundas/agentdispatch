@@ -25,6 +25,21 @@ export function fromBase64(base64: string): Uint8Array {
   return new Uint8Array(Buffer.from(base64, 'base64'));
 }
 
+/**
+ * Decode and validate an Ed25519 secret key from a base64 string.
+ * nacl.sign requires a 64-byte key; surfaces a friendly error if the stored
+ * key is corrupted or truncated rather than an opaque internal failure.
+ */
+export function decodeSecretKey(base64: string): Uint8Array {
+  const key = fromBase64(base64);
+  if (key.length !== 64) {
+    throw new Error(
+      `secret_key is invalid: expected 64 bytes, got ${key.length} — re-run \`admp register\` to obtain a fresh key`
+    );
+  }
+  return key;
+}
+
 // ── SHA-256 ───────────────────────────────────────────────────────────────────
 
 /** SHA-256 hash of input, returned as base64 */
@@ -146,7 +161,7 @@ export function buildAuthHeaders(
   secretKey: string,
   agentId: string,
 ): Record<string, string> {
-  const privateKey = fromBase64(secretKey);
+  const privateKey = decodeSecretKey(secretKey);
   const date = new Date().toUTCString();
 
   const sigHeader = signRequest(
@@ -178,7 +193,7 @@ export function signEnvelope(
   if (!env.from) {
     throw new Error('signEnvelope: envelope.from is required to derive the signing key ID');
   }
-  const privateKey = fromBase64(secretKey);
+  const privateKey = decodeSecretKey(secretKey);
   const signature = signMessage(env, privateKey);
   return { ...env, signature };
 }

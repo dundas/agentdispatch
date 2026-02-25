@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
-import { AdmpClient } from '../client.js';
+import { AdmpClient, AdmpError } from '../client.js';
 import { loadConfig, requireConfig, saveConfig } from '../config.js';
 import { success, warn, error } from '../output.js';
 
@@ -28,37 +28,17 @@ export function register(program: Command): void {
       if (opts.name) body.name = opts.name;
       if (opts.capabilities) body.capabilities = opts.capabilities.split(',').map(s => s.trim());
 
+      // Use AdmpClient with 'none' auth — registration is a public endpoint.
+      const client = new AdmpClient({ base_url: baseUrl });
       let res: RegisterResponse;
       try {
-        const url = new URL('/api/agents/register', baseUrl);
-        const timeoutMs = parseInt(process.env.ADMP_TIMEOUT ?? '30000', 10);
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        let httpRes: Response;
-        try {
-          httpRes = await fetch(url.toString(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-        if (!httpRes.ok) {
-          let d: Record<string, unknown> = {};
-          try { d = await httpRes.json() as Record<string, unknown>; } catch { /* non-JSON error body (e.g. HTML 502 from proxy) */ }
-          error(String(d.error ?? d.message ?? httpRes.statusText), String(d.code ?? 'ERROR'));
-          process.exit(1);
-        }
-        res = await httpRes.json() as RegisterResponse;
+        res = await client.request<RegisterResponse>('POST', '/api/agents/register', body, 'none');
       } catch (err: unknown) {
-        const isTimeout = err instanceof Error && err.name === 'AbortError';
-        error(
-          isTimeout
-            ? `Request timed out — set ADMP_TIMEOUT (ms) to override`
-            : `Could not connect to ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`
-        );
+        if (err instanceof AdmpError) {
+          error(err.message, err.code);
+        } else {
+          error(err instanceof Error ? err.message : String(err));
+        }
         process.exit(1);
       }
 

@@ -48,6 +48,12 @@ export function register(program: Command): void {
       // Checking it here would duplicate that logic without adding user value.
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
 
+      // Validate agent ID to prevent path traversal in the URL.
+      if (!/^[\w.\-]+$/.test(opts.to)) {
+        error('--to must contain only alphanumeric characters, hyphens, underscores, and dots', 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
+
       const body = parseBody(opts.body);
       const timestamp = new Date().toISOString();
 
