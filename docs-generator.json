@@ -2,6 +2,7 @@
   "project": "Agent Dispatch (ADMP)",
   "description": "Universal inbox for autonomous AI agents — standardized messaging infrastructure with at-least-once delivery, Ed25519 authentication, and DID federation",
   "baseUrl": "https://agentdispatch.fly.dev",
+  "_baseUrl_note": "Update baseUrl here and regenerate docs if the production URL changes",
   "sources": [
     { "path": "src/server.js", "extractor": "rest-api", "provides": "Express app setup, global auth middleware, route mounting" },
     { "path": "src/routes/agents.js", "extractor": "rest-api", "provides": "Agent registration, heartbeat, trust, webhook, key rotation, identity, tenant, approval endpoints" },

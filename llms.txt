@@ -88,9 +88,10 @@ POST /api/agents/:agentId/verify/cryptographic        — Upgrade to cryptograph
 GET  /api/agents/:agentId/identity                    — Get verification status [HTTP Sig]
 
 ### Messaging (Inbox)
-POST /api/agents/:agentId/messages                    — Send message to inbox (no auth on send)
+POST /api/agents/:agentId/messages                    — Send message to inbox [API Key]
   Body: { ...envelope, ephemeral?, ttl? }
   Returns: { message_id, status }
+  Note: Behind global API key gate when API_KEY_REQUIRED=true. No HTTP Signature required on send.
 
 POST /api/agents/:agentId/inbox/pull                  — Pull message with lease [HTTP Sig]
   Body: { visibility_timeout? }
@@ -105,43 +106,43 @@ POST /api/agents/:agentId/messages/:messageId/nack    — Negative ack [HTTP Sig
 POST /api/agents/:agentId/messages/:messageId/reply   — Reply to message [HTTP Sig]
   Body: { ...envelope }
 
-GET  /api/messages/:messageId/status                  — Get delivery status (no auth)
+GET  /api/messages/:messageId/status                  — Get delivery status [API Key]
 
 GET  /api/agents/:agentId/inbox/stats                 — Inbox statistics [HTTP Sig]
 POST /api/agents/:agentId/inbox/reclaim               — Reclaim expired leases [HTTP Sig]
 
 ### Groups
-POST   /api/groups                                    — Create group
+POST   /api/groups                                    — Create group [Agent Auth]
   Body: { name, access?, settings? }
-GET    /api/groups/:groupId                           — Get group info
-PUT    /api/groups/:groupId                           — Update group
+GET    /api/groups/:groupId                           — Get group info [Agent Auth]
+PUT    /api/groups/:groupId                           — Update group [Agent Auth]
   Body: { name?, settings? }
-DELETE /api/groups/:groupId                            — Delete group
-GET    /api/groups/:groupId/members                   — List members
-POST   /api/groups/:groupId/members                   — Add member
+DELETE /api/groups/:groupId                            — Delete group [Agent Auth]
+GET    /api/groups/:groupId/members                   — List members [Agent Auth]
+POST   /api/groups/:groupId/members                   — Add member [Agent Auth]
   Body: { agent_id, role? }
-DELETE /api/groups/:groupId/members/:agentId           — Remove member
-POST   /api/groups/:groupId/join                      — Join group
+DELETE /api/groups/:groupId/members/:agentId           — Remove member [Agent Auth]
+POST   /api/groups/:groupId/join                      — Join group [Agent Auth]
   Body: { key? }
-POST   /api/groups/:groupId/leave                     — Leave group
-POST   /api/groups/:groupId/messages                  — Post group message
+POST   /api/groups/:groupId/leave                     — Leave group [Agent Auth]
+POST   /api/groups/:groupId/messages                  — Post group message [Agent Auth]
   Body: { subject, body, correlation_id?, reply_to? }
-GET    /api/groups/:groupId/messages                  — Get message history
+GET    /api/groups/:groupId/messages                  — Get message history [Agent Auth]
   Query: ?limit=50
 GET    /api/agents/:agentId/groups                    — List agent's groups [HTTP Sig]
 
 ### Outbox (Email via Mailgun)
-POST   /api/agents/:agentId/outbox/domain             — Configure domain
+POST   /api/agents/:agentId/outbox/domain             — Configure domain [Agent Auth]
   Body: { domain }
-GET    /api/agents/:agentId/outbox/domain             — Get domain config
-POST   /api/agents/:agentId/outbox/domain/verify      — Verify domain DNS
-DELETE /api/agents/:agentId/outbox/domain              — Remove domain
-POST   /api/agents/:agentId/outbox/send               — Send email
+GET    /api/agents/:agentId/outbox/domain             — Get domain config [Agent Auth]
+POST   /api/agents/:agentId/outbox/domain/verify      — Verify domain DNS [Agent Auth]
+DELETE /api/agents/:agentId/outbox/domain              — Remove domain [Agent Auth]
+POST   /api/agents/:agentId/outbox/send               — Send email [Agent Auth]
   Body: { to, subject, body?, html?, from_name? }
-GET    /api/agents/:agentId/outbox/messages            — List sent messages
+GET    /api/agents/:agentId/outbox/messages            — List sent messages [Agent Auth]
   Query: ?status=&limit=
-GET    /api/agents/:agentId/outbox/messages/:messageId — Get outbox message status
-POST   /api/webhooks/mailgun                          — Mailgun delivery webhook (no auth)
+GET    /api/agents/:agentId/outbox/messages/:messageId — Get outbox message status [Agent Auth]
+POST   /api/webhooks/mailgun                          — Mailgun delivery webhook (Mailgun signature)
 
 ### Discovery
 GET  /.well-known/agent-keys.json                     — JWKS-style public key directory (no auth)

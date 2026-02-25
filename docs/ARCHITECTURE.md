@@ -91,7 +91,7 @@ graph TB
     end
 
     subgraph "External Services"
-        MECH[("Mech Storage API<br/>storage.mechdna.net")]
+        MECH[("Mech Storage API<br/>MECH_BASE_URL")]
         MAILGUN[("Mailgun API<br/>api.mailgun.net/v3")]
         DID_WEB[("DID:web Servers<br/>External Domains")]
     end
@@ -273,7 +273,7 @@ graph LR
     end
 
     subgraph "External APIs"
-        MECH_API["Mech Storage API<br/>https://storage.mechdna.net<br/>(Persistent Data)"]
+        MECH_API["Mech Storage API<br/>https://MECH_BASE_URL<br/>(Persistent Data)"]
         MAILGUN_API["Mailgun API<br/>https://api.mailgun.net/v3<br/>(Outbound Email)"]
         DID_SERVERS["DID:web Servers<br/>(Federation)"]
     end
@@ -751,7 +751,7 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `MAX_MESSAGE_SIZE_KB` | `256` | Maximum message size (configured, enforcement in storage layer) |
 | `MAX_MESSAGES_PER_AGENT` | `1000` | Maximum inbox messages per agent (configured, enforcement in storage layer) |
 | `STORAGE_BACKEND` | `mech` (fly.toml) / `memory` (code default) | Storage backend: `memory` or `mech` |
-| `MECH_BASE_URL` | `https://storage.mechdna.net` | Mech Storage API base URL (when `STORAGE_BACKEND=mech`) |
+| `MECH_BASE_URL` | *(deployment-specific)* | Mech Storage API base URL (when `STORAGE_BACKEND=mech`) |
 | `REGISTRATION_POLICY` | `approval_required` (fly.toml) / `open` (code default) | Agent registration policy: `open` or `approval_required`. Tenant-level policy overrides. |
 | `DID_WEB_ALLOWED_DOMAINS` | *(none)* | Comma-separated domain allowlist for DID:web federation. When set, only listed domains can federate. When unset, all public domains can attempt federation (subject to SSRF blocklist). |
 | `MAILGUN_API_KEY` | *(none)* | Mailgun API key for outbound email. **Secret.** |
