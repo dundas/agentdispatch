@@ -221,6 +221,12 @@ export async function authenticateAgent(req, res, next) {
  *              headers="(request-target) host date",signature="<base64>"
  */
 export async function authenticateHttpSignature(req, res, next) {
+  // Short-circuit: if the global API gate already verified the signature and
+  // set req.agent, skip the duplicate crypto + storage work.
+  if (req.agent && req.authMethod === 'http-signature') {
+    return next();
+  }
+
   const sigHeader = req.headers['signature'];
 
   // No Signature header → fall back to legacy auth

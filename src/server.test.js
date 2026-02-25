@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import nacl from 'tweetnacl';
 
 import app from './server.js';
-import { fromBase64, toBase64, signMessage, signRequest, hkdfSha256, LABEL_ADMP, keypairFromSeed, generateDID } from './utils/crypto.js';
+import { fromBase64, toBase64, signMessage, signRequest, hkdfSha256, LABEL_ADMP, keypairFromSeed, generateDID, hashApiKey } from './utils/crypto.js';
 import { createMechStorage } from './storage/mech.js';
 import { requireApiKey } from './middleware/auth.js';
 import { webhookService } from './services/webhook.service.js';
@@ -2732,12 +2732,14 @@ test('revoked issued key is rejected by requireApiKey (unit test)', async () => 
 test('expired issued key is rejected with INVALID_API_KEY (unit test)', async () => {
   // NOTE: expires_in_days: 0 would be falsy in keys.js and set expires_at=null.
   // Instead we directly insert a key record with a past expires_at into storage.
-  const { createHash, randomBytes } = crypto;
+  const { randomBytes } = crypto;
   const savedRequired = process.env.API_KEY_REQUIRED;
   process.env.API_KEY_REQUIRED = 'true';
 
   const rawKey = `admp_${randomBytes(32).toString('hex')}`;
-  const keyHash = createHash('sha256').update(rawKey).digest('hex');
+  // Use hashApiKey (not raw crypto) so this test stays correct if the hash
+  // algorithm ever changes (e.g. prefix or HMAC).
+  const keyHash = hashApiKey(rawKey);
   const keyId = `test-expired-key-${Date.now()}`;
 
   await storage.createIssuedKey({

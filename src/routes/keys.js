@@ -66,52 +66,55 @@ router.post('/issue', requireMasterKey, async (req, res) => {
     }
   }
 
-  // Validate target_agent_id exists before issuing the key
-  if (target_agent_id) {
-    const targetAgent = await storage.getAgent(target_agent_id);
-    if (!targetAgent) {
-      return res.status(400).json({
-        error: 'AGENT_NOT_FOUND',
-        message: `Target agent ${target_agent_id} not found`
-      });
-    }
-  }
-
-  const rawKey = generateApiKey();
-  const keyHash = hashApiKey(rawKey);
-  const keyId = uuidv4();
-  const now = Date.now();
-
-  const issuedKey = {
-    key_id: keyId,
-    key_hash: keyHash,
-    client_id,
-    description: description || '',
-    created_at: now,
-    expires_at: (expires_in_days != null) ? now + expires_in_days * 86400000 : null,
-    revoked: false,
-    single_use: single_use === true,
-    used_at: null,
-    target_agent_id: target_agent_id || null
-  };
-
+  // Wrap all async operations in try-catch — Express 4 does not forward
+  // unhandled async rejections to the error handler, so a bare await that
+  // throws would hang the request with no response.
   try {
+    // Validate target_agent_id exists before issuing the key
+    if (target_agent_id) {
+      const targetAgent = await storage.getAgent(target_agent_id);
+      if (!targetAgent) {
+        return res.status(400).json({
+          error: 'AGENT_NOT_FOUND',
+          message: `Target agent ${target_agent_id} not found`
+        });
+      }
+    }
+
+    const rawKey = generateApiKey();
+    const keyHash = hashApiKey(rawKey);
+    const keyId = uuidv4();
+    const now = Date.now();
+
+    const issuedKey = {
+      key_id: keyId,
+      key_hash: keyHash,
+      client_id,
+      description: description || '',
+      created_at: now,
+      expires_at: (expires_in_days != null) ? now + expires_in_days * 86400000 : null,
+      revoked: false,
+      single_use: single_use === true,
+      used_at: null,
+      target_agent_id: target_agent_id || null
+    };
+
     await storage.createIssuedKey(issuedKey);
+
+    return res.status(201).json({
+      key_id: keyId,
+      api_key: rawKey,
+      client_id,
+      description: issuedKey.description,
+      created_at: new Date(now).toISOString(),
+      expires_at: issuedKey.expires_at ? new Date(issuedKey.expires_at).toISOString() : null,
+      single_use: issuedKey.single_use,
+      target_agent_id: issuedKey.target_agent_id,
+      warning: 'Store this API key securely — it will not be shown again'
+    });
   } catch (error) {
     return res.status(500).json({ error: 'KEY_ISSUANCE_FAILED', message: error.message });
   }
-
-  return res.status(201).json({
-    key_id: keyId,
-    api_key: rawKey,
-    client_id,
-    description: issuedKey.description,
-    created_at: new Date(now).toISOString(),
-    expires_at: issuedKey.expires_at ? new Date(issuedKey.expires_at).toISOString() : null,
-    single_use: issuedKey.single_use,
-    target_agent_id: issuedKey.target_agent_id,
-    warning: 'Store this API key securely — it will not be shown again'
-  });
 });
 
 /**

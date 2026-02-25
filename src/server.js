@@ -92,7 +92,12 @@ logger.info(
   `API key enforcement: ${process.env.API_KEY_REQUIRED === 'true' ? 'enabled' : 'disabled'} (API_KEY_REQUIRED=${process.env.API_KEY_REQUIRED ?? 'unset'})`
 );
 app.use('/api', async (req, res, next) => {
-  // Always allow agent self-registration without an API key
+  // Always allow agent self-registration without an API key.
+  // NOTE: This exemption means single-use enrollment tokens presented during
+  // registration are NOT burned (requireApiKey is never invoked). This is
+  // intentional — registration creates the agent identity that the token will
+  // subsequently authenticate. The token is burned on the first non-exempt
+  // API call (e.g. heartbeat, inbox pull).
   if (req.method === 'POST' && req.path.replace(/\/$/, '') === '/agents/register') return next();
 
   // If request has a valid HTTP Signature, bypass API key requirement.
