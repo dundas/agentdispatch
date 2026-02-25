@@ -74,14 +74,14 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
 
       const rl = createInterface({ input: process.stdin, output: process.stdout });
-      let answer: string;
+      let answer = 'n';
       try {
         answer = await new Promise<string>(r => rl.question('Delete webhook? (y/N) ', r));
       } finally {
         rl.close();
       }
 
-      if (answer!.trim().toLowerCase() !== 'y') { console.log('Aborted.'); return; }
+      if (answer.trim().toLowerCase() !== 'y') { console.log('Aborted.'); return; }
 
       const client = new AdmpClient(config);
       await client.request('DELETE', `/api/agents/${config.agent_id}/webhook`, undefined, 'signature');

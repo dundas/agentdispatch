@@ -1,6 +1,7 @@
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync, unlinkSync, existsSync } from 'fs';
+import type { AdmpClientConfig } from './client.js';
 
 export interface AdmpConfig {
   base_url: string;
@@ -44,7 +45,9 @@ export function saveConfig(config: Partial<AdmpConfig>): void {
   }
 }
 
-export function resolveConfig(): Partial<ResolvedConfig> {
+// Returns AdmpClientConfig: base_url is always defined (falls back to default),
+// while agent_id, secret_key, and api_key are optional until validated by requireConfig.
+export function resolveConfig(): AdmpClientConfig {
   const file = loadConfig();
   return {
     base_url: process.env.ADMP_BASE_URL ?? file.base_url ?? 'https://agentdispatch.fly.dev',

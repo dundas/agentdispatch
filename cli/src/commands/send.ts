@@ -1,10 +1,12 @@
 import { Command } from 'commander';
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { isAbsolute } from 'path';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { signEnvelope } from '../auth.js';
 import { success, error } from '../output.js';
+
+const MAX_BODY_FILE_BYTES = 1 * 1024 * 1024; // 1 MB guard
 
 function parseBody(raw: string): unknown {
   if (raw.startsWith('@')) {
@@ -14,10 +16,21 @@ function parseBody(raw: string): unknown {
       error('File path must be relative and must not contain ..', 'INVALID_ARGUMENT');
       process.exit(1);
     }
+    // Guard against accidentally loading large binary files into memory.
+    try {
+      const { size } = statSync(filePath);
+      if (size > MAX_BODY_FILE_BYTES) {
+        error(`Body file exceeds 1 MB limit (${size} bytes): ${filePath}`, 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
+    } catch {
+      error(`Could not read body file: ${filePath}`, 'FILE_NOT_FOUND');
+      process.exit(1);
+    }
     try {
       return JSON.parse(readFileSync(filePath, 'utf8'));
     } catch {
-      error(`Could not read body file: ${filePath}`, 'FILE_NOT_FOUND');
+      error(`Could not parse body file as JSON: ${filePath}`, 'INVALID_ARGUMENT');
       process.exit(1);
     }
   }
@@ -50,10 +63,9 @@ export function register(program: Command): void {
       ttl?: string;
       ephemeral?: boolean;
     }) => {
-      // api_key is not listed here because 'api-key' auth mode in AdmpClient.request
-      // already validates it and throws AdmpError('INVALID_API_KEY') with a clear message.
-      // Checking it here would duplicate that logic without adding user value.
-      const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
+      // api_key is required because send uses api-key auth for transport (the receiving
+      // agent's server validates it). secret_key is required for Ed25519 envelope signing.
+      const config = requireConfig(['agent_id', 'secret_key', 'api_key', 'base_url']);
 
       // Validate agent ID to prevent path traversal in the URL.
       if (!/^[\w.\-]+$/.test(opts.to)) {
@@ -90,6 +102,11 @@ export function register(program: Command): void {
       }
       if (opts.ephemeral) envelope.ephemeral = true;
 
+      // Dual-signing design: signEnvelope adds an Ed25519 body/from/to/timestamp
+      // signature field inside the JSON payload; client.request('api-key') adds
+      // an X-Api-Key header for transport auth. Both identities are verified by
+      // the server: the envelope signature proves the message came from this agent,
+      // and the api_key authorizes the sender to deliver to the recipient's inbox.
       const signed = signEnvelope(envelope, config.secret_key);
 
       const client = new AdmpClient(config);

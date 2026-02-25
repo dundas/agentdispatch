@@ -66,6 +66,11 @@ admp send --to analyst --subject report --body @payload.json
 admp pull
 # Prints the full message envelope and leases it for processing.
 # Returns immediately ("Inbox empty") if nothing waiting.
+
+admp pull --timeout 30
+# Long-poll: waits up to 30 s for a message before returning.
+# Max timeout is 300 s (5 min). The client adds a 5 s buffer to avoid
+# racing the server's poll window.
 ```
 
 ### 4. Acknowledge or reject

@@ -27,16 +27,28 @@ function promptSecret(question: string): Promise<string> {
     process.stdin.setRawMode(true);
     process.stdin.resume();
 
+    const cleanup = () => {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+      process.stdin.removeListener('data', handler);
+      process.stdin.removeListener('end', onEnd);
+    };
+
+    const onEnd = () => {
+      // EOF received (piped empty input) — resolve with whatever was typed so far.
+      cleanup();
+      process.stdout.write('\n');
+      resolve(Buffer.concat(chars).toString('utf8'));
+    };
+
     const handler = (char: Buffer) => {
       const str = char.toString('utf8');
       if (str === '\r' || str === '\n') {
-        process.stdin.setRawMode(false);
-        process.stdin.pause();
-        process.stdin.removeListener('data', handler);
+        cleanup();
         process.stdout.write('\n');
         resolve(Buffer.concat(chars).toString('utf8'));
       } else if (str === '\u0003') { // Ctrl-C
-        process.stdin.setRawMode(false);
+        cleanup();
         process.exit(1);
       } else if (str === '\u007f' || str === '\b') { // Backspace
         if (chars.length > 0) {
@@ -49,6 +61,7 @@ function promptSecret(question: string): Promise<string> {
       }
     };
     process.stdin.on('data', handler);
+    process.stdin.once('end', onEnd);
   });
 }
 

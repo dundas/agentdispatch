@@ -14,9 +14,10 @@ import { resolveConfig } from '../src/config.js';
 const BASE_URL = process.env.ADMP_BASE_URL;
 const HAVE_SERVER = !!BASE_URL;
 
-// Use test.skip when the server is not available so CI shows real skips, not passes
+/** Returns test or test.skip based on condition — shows real skips in CI output. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const serverTest = HAVE_SERVER ? test : (test as any).skip as typeof test;
+const skipUnless = (cond: boolean): typeof test => cond ? test : (test as any).skip as typeof test;
+const serverTest = skipUnless(HAVE_SERVER);
 
 describe('Integration: register → send → pull → ack', () => {
   serverTest('server is reachable', async () => {
@@ -55,7 +56,7 @@ describe('Integration: rotate-key', () => {
       agent_id: agentId,
       secret_key: secretKey,
     };
-    const client = new AdmpClient(config as any);
+    const client = new AdmpClient(config);
     const rotated = await client.request<{ secret_key?: string }>(
       'POST', `/api/agents/${agentId}/rotate-key`, {}, 'signature'
     );
@@ -66,12 +67,10 @@ describe('Integration: rotate-key', () => {
 
 describe('Integration: groups', () => {
   const config = resolveConfig();
-  const groupsTest = (HAVE_SERVER && config.agent_id && config.secret_key)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? serverTest : (test as any).skip as typeof test;
+  const groupsTest = skipUnless(HAVE_SERVER && !!config.agent_id && !!config.secret_key);
 
   groupsTest('create → join → send → list messages', async () => {
-    const client = new AdmpClient(config as any);
+    const client = new AdmpClient(config);
     const group = await client.request<{ group_id: string }>(
       'POST', '/api/groups', { name: `test-group-${Date.now()}`, access: 'open' }, 'signature'
     );
