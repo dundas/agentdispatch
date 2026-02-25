@@ -55,17 +55,17 @@
   - [x] 1.6 Create `cli/src/index.ts` that creates a root `commander` program with name `admp`, version from package.json, and registers all sub-command modules (stubs for now)
   - [x] 1.7 Verify `bun run cli/src/index.ts --help` prints the top-level help with no errors
 
-- [ ] 2.0 Implement config module
-  - [ ] 2.1 Create `cli/src/config.ts` with types: `AdmpConfig { base_url, agent_id, secret_key, api_key? }` and `ResolvedConfig` (same shape, all values resolved)
-  - [ ] 2.2 Implement `getConfigPath(): string` — returns `~/.admp/config.json` (expand `~` using `os.homedir()`)
-  - [ ] 2.3 Implement `loadConfig(): Partial<AdmpConfig>` — reads and JSON-parses `~/.admp/config.json`; returns `{}` if file does not exist
-  - [ ] 2.4 Implement `saveConfig(config: AdmpConfig): void` — writes to `~/.admp/config.json`, creates `~/.admp/` dir if needed, sets file mode `0o600`
-  - [ ] 2.5 Implement `resolveConfig(): ResolvedConfig` — merges (env vars override file): `ADMP_BASE_URL` → `base_url` (default `https://agentdispatch.fly.dev`), `ADMP_AGENT_ID` → `agent_id`, `ADMP_SECRET_KEY` → `secret_key`, `ADMP_API_KEY` → `api_key`
-  - [ ] 2.6 Implement `requireConfig(fields: string[]): ResolvedConfig` — calls `resolveConfig()`, throws a user-friendly error for any missing required field (e.g. "agent_id not set — run `admp init` or set ADMP_AGENT_ID")
-  - [ ] 2.7 Implement `admp init` command in `cli/src/commands/init.ts` — interactively prompts for `base_url`, `agent_id`, `secret_key` (using `readline` or `@inquirer/prompts`), then calls `saveConfig()`; add `--from-env` flag to save from env vars without prompting
-  - [ ] 2.8 Implement `admp config show` — prints resolved config, masking `secret_key` to first 8 chars + `...`
-  - [ ] 2.9 Implement `admp config set <key> <value>` — loads existing config, sets the key, saves
-  - [ ] 2.10 Write unit tests in `cli/src/config.test.ts` covering: load missing file returns `{}`, save creates file with mode 0600, resolveConfig env override, requireConfig throws on missing field
+- [x] 2.0 Implement config module
+  - [x] 2.1 Create `cli/src/config.ts` with types: `AdmpConfig { base_url, agent_id, secret_key, api_key? }` and `ResolvedConfig` (same shape, all values resolved)
+  - [x] 2.2 Implement `getConfigPath(): string` — returns `~/.admp/config.json` (expand `~` using `os.homedir()`)
+  - [x] 2.3 Implement `loadConfig(): Partial<AdmpConfig>` — reads and JSON-parses `~/.admp/config.json`; returns `{}` if file does not exist
+  - [x] 2.4 Implement `saveConfig(config: AdmpConfig): void` — writes to `~/.admp/config.json`, creates `~/.admp/` dir if needed, sets file mode `0o600`
+  - [x] 2.5 Implement `resolveConfig(): ResolvedConfig` — merges (env vars override file): `ADMP_BASE_URL` → `base_url` (default `https://agentdispatch.fly.dev`), `ADMP_AGENT_ID` → `agent_id`, `ADMP_SECRET_KEY` → `secret_key`, `ADMP_API_KEY` → `api_key`
+  - [x] 2.6 Implement `requireConfig(fields: string[]): ResolvedConfig` — calls `resolveConfig()`, throws a user-friendly error for any missing required field (e.g. "agent_id not set — run `admp init` or set ADMP_AGENT_ID")
+  - [x] 2.7 Implement `admp init` command in `cli/src/commands/init.ts` — interactively prompts for `base_url`, `agent_id`, `secret_key` (using `readline` or `@inquirer/prompts`), then calls `saveConfig()`; add `--from-env` flag to save from env vars without prompting
+  - [x] 2.8 Implement `admp config show` — prints resolved config, masking `secret_key` to first 8 chars + `...`
+  - [x] 2.9 Implement `admp config set <key> <value>` — loads existing config, sets the key, saves
+  - [x] 2.10 Write unit tests in `cli/src/config.test.ts` covering: load missing file returns `{}`, save creates file with mode 0600, resolveConfig env override, requireConfig throws on missing field
 
 - [ ] 3.0 Implement HTTP Signature auth module
   - [ ] 3.1 Create `cli/src/auth.ts` — copy the `signRequest` function logic from `src/utils/crypto.js` (do not import — keep CLI standalone). Include `toBase64`, `fromBase64`, and `signRequest` as local functions.
