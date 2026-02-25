@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { AdmpClient, AdmpError } from '../client.js';
 import { requireConfig } from '../config.js';
-import { printMessage, success, isJsonMode } from '../output.js';
+import { printMessage, success, isJsonMode, error } from '../output.js';
 
 export function register(program: Command): void {
   program
@@ -14,7 +14,14 @@ export function register(program: Command): void {
       const client = new AdmpClient(config);
 
       const body: Record<string, unknown> = {};
-      if (opts.timeout) body.timeout = parseInt(opts.timeout, 10);
+      if (opts.timeout) {
+        const n = parseInt(opts.timeout, 10);
+        if (isNaN(n) || n <= 0) {
+          error('--timeout must be a positive integer', 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
+        body.timeout = n;
+      }
 
       try {
         const res = await client.request<Record<string, unknown>>(

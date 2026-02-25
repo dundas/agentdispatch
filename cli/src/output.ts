@@ -23,7 +23,10 @@ export function success(msg: string, data?: unknown): void {
 }
 
 export function warn(msg: string): void {
-  if (isJsonMode()) return;
+  if (isJsonMode()) {
+    process.stderr.write(JSON.stringify({ warning: msg }) + '\n');
+    return;
+  }
   console.warn(yellow('⚠') + ' ' + msg);
 }
 

@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { loadConfig, resolveConfig, saveConfig, AdmpConfig } from '../config.js';
+import { isJsonMode } from '../output.js';
 
 const VALID_KEYS: (keyof AdmpConfig)[] = ['base_url', 'agent_id', 'secret_key', 'api_key'];
 
@@ -19,6 +20,15 @@ export function register(program: Command): void {
     .description('Show resolved configuration (secret_key masked)')
     .action(() => {
       const config = resolveConfig();
+      if (isJsonMode()) {
+        console.log(JSON.stringify({
+          base_url: config.base_url ?? null,
+          agent_id: config.agent_id ?? null,
+          secret_key: maskSecret(config.secret_key),
+          api_key: maskSecret(config.api_key),
+        }));
+        return;
+      }
       console.log('base_url:   ', config.base_url ?? '(not set)');
       console.log('agent_id:   ', config.agent_id ?? '(not set)');
       console.log('secret_key: ', maskSecret(config.secret_key));

@@ -59,7 +59,14 @@ export function register(program: Command): void {
       };
 
       if (opts.correlationId) envelope.correlation_id = opts.correlationId;
-      if (opts.ttl) envelope.ttl_sec = parseInt(opts.ttl, 10);
+      if (opts.ttl) {
+        const n = parseInt(opts.ttl, 10);
+        if (isNaN(n) || n <= 0) {
+          error('--ttl must be a positive integer', 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
+        envelope.ttl_sec = n;
+      }
       if (opts.ephemeral) envelope.ephemeral = true;
 
       const signed = signEnvelope(envelope, config.secret_key, config.agent_id);
