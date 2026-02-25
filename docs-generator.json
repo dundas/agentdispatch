@@ -51,6 +51,7 @@
   ],
   "validate": [],
   "deploy": null,
+  "regenerate": "To regenerate docs, run: /docs-generator (in Claude Code) or invoke the docs-generator skill with this config.",
   "rules": {
     "sourceIsTruth": true,
     "preserveExamples": true,

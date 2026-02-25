@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-25T00:00:00Z -->
+<!-- Generated: 2026-02-25T16:24:00Z -->
 <!-- Source: Automated architecture analysis of agentdispatch codebase -->
 
 # Agent Dispatch (ADMP) Architecture

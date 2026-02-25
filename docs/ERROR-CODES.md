@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-25T00:00:00Z -->
+<!-- Generated: 2026-02-25T16:22:00Z -->
 <!-- Source: Extracted from Agent Dispatch (ADMP) source files -->
 
 # ADMP Error Codes Reference
@@ -61,9 +61,11 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 
 ## Message and Inbox Errors
 
+> **Note:** The `SEND_FAILED` code appears in both this section (inbox message send) and [Outbox (Email) Errors](#outbox-email-errors) (outbound email send). The two contexts have different retry semantics — check the endpoint that returned the error to determine the correct handling.
+
 | Code | HTTP | Retryable | Description | Hint |
 |------|------|-----------|-------------|------|
-| `SEND_FAILED` | 400 | Yes | Message send failed | Check envelope format, recipient exists |
+| `SEND_FAILED` | 400 | Yes | Inbox message send failed | Check envelope format, recipient exists |
 | `RECIPIENT_NOT_FOUND` | 404 | No | Target agent not found | Verify recipient `agent_id` |
 | `INVALID_TIMESTAMP` | 400 | No | Message timestamp invalid | Use ISO-8601 format |
 | `PULL_FAILED` | 400 | Yes | Inbox pull failed | Verify agent exists and has messages |
@@ -108,7 +110,7 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `DOMAIN_FETCH_FAILED` | 500 | Yes | Failed to fetch domain config | Transient error |
 | `DOMAIN_VERIFY_FAILED` | 400/404 | Yes | DNS verification failed | Check DNS records are set correctly |
 | `DOMAIN_DELETE_FAILED` | 400/404 | No | Domain removal failed | Check domain exists |
-| `SEND_FAILED` | 400/403/404 | Depends | Email send failed | Domain must be verified. Check recipient format |
+| `SEND_FAILED` | 400/403/404 | Depends | Outbox email send failed (see also [Message and Inbox Errors](#message-and-inbox-errors) for the inbox variant) | Domain must be verified. Check recipient format |
 | `TO_REQUIRED` | 400 | No | No recipient email | Include `to` field |
 | `INVALID_EMAIL` | 400 | No | Invalid email format | Use valid email: `user@domain.com` |
 | `SUBJECT_REQUIRED` | 400 | No | No email subject | Include `subject` field |
