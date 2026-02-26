@@ -150,6 +150,31 @@ test('envelope from/to validation rejects injection attempts', async () => {
     assert.equal(res.status, 400, `Expected 400 for from: ${JSON.stringify(badId)}`);
   }
 
+  // Malicious to fields — same validation applies
+  const badToIds = [
+    'evil\nX-Injected: header',
+    'agent://bad\ninjected',
+    '../traversal',
+    'a'.repeat(256),
+  ];
+
+  for (const badId of badToIds) {
+    const envelope = {
+      version: '1.0',
+      id: `msg-${Date.now()}`,
+      type: 'task.request',
+      from: sender.agent_id,
+      to: badId,
+      subject: 'injection-test',
+      body: { test: true },
+      timestamp: new Date().toISOString(),
+    };
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+      .send(envelope);
+    assert.equal(res.status, 400, `Expected 400 for to: ${JSON.stringify(badId)}`);
+  }
+
   // Legacy agent:// URI in from field should still pass (backward-compat)
   const legacyEnvelope = {
     version: '1.0',

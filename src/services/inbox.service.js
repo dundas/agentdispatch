@@ -13,7 +13,8 @@ import { webhookService } from './webhook.service.js';
 // not recreated on every message send.
 const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
 const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
-const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._:-]+$/;
+// did:seed: suffixes are hex fingerprints (sha256 truncated to 16 bytes); no colons expected.
+const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._-]+$/;
 
 export class InboxService {
   /**
@@ -399,10 +400,17 @@ export class InboxService {
     // Validate agent identifiers — accept agent:// URIs, did:seed: DIDs, and bare agent IDs.
     // All three forms validate the full string (not just the prefix) to block injection
     // via malicious suffixes like agent://foo\nX-Injected: header.
-    const validId = (id) =>
-      VALID_AGENT_URI.test(id) ||
-      VALID_DID_SEED.test(id) ||
-      SAFE_CHARS.test(id);
+    // Length is checked first (O(1) guard) to avoid running the regex on huge inputs.
+    //
+    // NOTE: `from` is used for display and signature verification only. When the sender
+    // is not found in storage, signature verification is skipped and `from` is UNTRUSTED.
+    // Callers must not use `from` for authorization without first verifying the signature.
+    // The agent:// scheme is still accepted in envelopes for backward compatibility with
+    // senders registered before bare-ID format was introduced.
+    const validId = (id) => {
+      if (!id || id.length > 255) return false;
+      return VALID_AGENT_URI.test(id) || VALID_DID_SEED.test(id) || SAFE_CHARS.test(id);
+    };
 
     if (!validId(envelope.from)) {
       throw new Error('Invalid from field (must be agent:// URI, did:seed: DID, or valid agent ID)');
