@@ -504,6 +504,14 @@ This means a DID:web agent with a crafted long or unusual domain path could crea
 
 **Mitigation:** Set `DID_WEB_ALLOWED_DOMAINS` to a strict allowlist of trusted domains. This prevents shadow agent creation for all domains not explicitly permitted.
 
+### DID:web Port Numbers Not Supported
+
+`did:web:` identifiers that encode a port in the domain component (for example `did:web:localhost%3A8080`) are currently rejected by domain safety checks.
+
+**Impact:** these DIDs fail resolution and cannot authenticate as shadow agents.
+
+**Mitigation:** use default HTTPS port 443 with a hostname-only DID domain, or front the service with a reverse proxy so the DID does not require an explicit port.
+
 ---
 
 ## 11. Best Practices

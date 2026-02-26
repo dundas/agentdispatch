@@ -538,6 +538,38 @@ test('trust list restricts message senders', async () => {
   assert.ok(blockedRes.body.message.includes('not trusted'));
 });
 
+test('trust list rejects unregistered sender claiming a trusted ID', async () => {
+  const recipient = await registerAgent('trusted-recipient-missing-sender');
+  const ghostTrustedId = `ghost-trusted-${Date.now()}`;
+
+  const addRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/trusted`)
+    .send({ agent_id: ghostTrustedId });
+
+  assert.equal(addRes.status, 200);
+  assert.ok(addRes.body.trusted_agents.includes(ghostTrustedId));
+
+  const forgedEnvelope = {
+    version: '1.0',
+    id: `msg-${Date.now()}`,
+    type: 'task.request',
+    from: ghostTrustedId,
+    to: recipient.agent_id,
+    subject: 'forged-trusted-sender',
+    body: { test: 'impersonation-attempt' },
+    timestamp: new Date().toISOString(),
+    ttl_sec: 3600
+  };
+
+  const forgedRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+    .send(forgedEnvelope);
+
+  assert.equal(forgedRes.status, 403);
+  assert.equal(forgedRes.body.error, 'INVALID_SIGNATURE');
+  assert.ok(forgedRes.body.message.includes('not registered'));
+});
+
 test('mech storage persists agents', { skip: !MECH_CONFIGURED }, async () => {
   const agent = await registerAgent('mech-persist-agent', { role: 'mech-test' });
 
