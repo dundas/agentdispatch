@@ -9,6 +9,40 @@ import { verifySignature, fromBase64, validateTimestamp, parseTTL } from '../uti
 import { agentService } from './agent.service.js';
 import { webhookService } from './webhook.service.js';
 
+// Safe agent identifier patterns — module-level constants so they are compiled once,
+// not recreated on every message send.
+const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
+// VALID_AGENT_URI is NOT a subset of SAFE_CHARS — agent://foo contains slashes which
+// are not in the allowlist. It is the only branch that accepts legacy agent:// URIs.
+// Do not delete it assuming it is a no-op; doing so would silently break backward
+// compatibility for pre-PR#16 senders.
+const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
+
+/**
+ * Return true if `id` is a syntactically valid agent identifier for use in
+ * message envelopes. Accepts bare agent IDs, legacy agent:// URIs (backward-compat
+ * for pre-PR#16 senders), and did:seed: DIDs. Rejects injection characters and
+ * oversized strings.
+ *
+ * NOTE: validation here is intentionally more permissive than registration.
+ * For example, `agent:bare` (single colon, no slashes) passes SAFE_CHARS and
+ * is accepted in envelopes but would be blocked at register() by the reserved-prefix
+ * guard. This is by design — the envelope layer cannot know whether a given ID was
+ * ever registered, so it only rejects clearly-unsafe inputs.
+ *
+ * DID:web agents: when sending messages, federated agents use their W3C canonical
+ * DID form in `from` (e.g. `did:web:domain.com:users:alice`, colon-separated).
+ * This passes SAFE_CHARS. Their stored agent_id uses slashes (`did-web:domain.com/users/alice`)
+ * but that stored form is not used in envelope fields.
+ *
+ * A valid `id` does NOT imply the agent exists in storage or that the sender is
+ * trusted. Signature verification is required for that.
+ */
+function isValidAgentId(id) {
+  if (!id || id.length > 255) return false;
+  return VALID_AGENT_URI.test(id) || SAFE_CHARS.test(id);
+}
+
 export class InboxService {
   /**
    * Send message to agent's inbox
@@ -69,7 +103,16 @@ export class InboxService {
         if (!valid) {
           throw new Error('Invalid message signature');
         }
+      } else if (recipient.trusted_agents?.includes(envelope.from)) {
+        // Sender is registered but omitted signature; trust-list delivery requires
+        // cryptographic proof of identity, not just a claimed from value.
+        throw new Error(`Sender ${envelope.from} is registered but missing signature — signature required for trust-list delivery`);
       }
+    } else if (recipient.trusted_agents?.includes(envelope.from)) {
+      // Sender is named in the trust list but is not registered — cannot verify identity.
+      // Reject rather than silently skip: an unregistered sender cannot prove they are
+      // the trusted agent they claim to be (deregistered agent impersonation attack).
+      throw new Error(`Sender ${envelope.from} is not registered — signature required for trust-list delivery`);
     }
 
     // Parse ephemeral options (top-level on send body, not inside envelope)
@@ -390,15 +433,18 @@ export class InboxService {
       throw new Error(`Unsupported ADMP version: ${envelope.version}`);
     }
 
-    // Validate agent URIs — accept both agent:// and did:seed: schemes
-    const validScheme = (uri) => uri.startsWith('agent://') || uri.startsWith('did:seed:');
-
-    if (!validScheme(envelope.from)) {
-      throw new Error('Invalid from URI (must start with agent:// or did:seed:)');
+    // Validate agent identifiers using module-level isValidAgentId().
+    // NOTE: `from` is used for display and signature verification only. When the sender
+    // is not found in storage, signature verification is skipped and `from` is UNTRUSTED.
+    // Callers must not use `from` for authorization without first verifying the signature.
+    // agent:// URIs are still accepted in envelopes for backward compatibility with senders
+    // registered before the bare-ID format was introduced (PR #16).
+    if (!isValidAgentId(envelope.from)) {
+      throw new Error('Invalid from field (must be agent:// URI, did:seed: DID, or valid agent ID)');
     }
 
-    if (!validScheme(envelope.to)) {
-      throw new Error('Invalid to URI (must start with agent:// or did:seed:)');
+    if (!isValidAgentId(envelope.to)) {
+      throw new Error('Invalid to field (must be agent:// URI, did:seed: DID, or valid agent ID)');
     }
 
     // Validate timestamp

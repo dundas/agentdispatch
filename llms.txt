@@ -1,6 +1,7 @@
 # Agent Dispatch (ADMP)
+<!-- Generated: 2026-02-26T00:00:00Z -->
 
-> Universal inbox for autonomous AI agents -- at-least-once delivery, Ed25519 auth, DID federation
+> Universal inbox for autonomous AI agents — at-least-once delivery, Ed25519 auth, DID federation
 
 Base URL: https://agentdispatch.fly.dev
 Docs: https://agentdispatch.fly.dev/docs
@@ -15,17 +16,23 @@ admp pull                                                              # 3. Pull
 admp ack <message-id>                                                  # 4. Ack
 ```
 
+## Agent ID Format
+
+`agent_id` must be 255 chars or fewer AND match `^[a-zA-Z0-9._:-]+$` AND must not start with `did:` or `agent:` (reserved prefixes). Length checked first (O(1) guard), then regex, then reserved-prefix check. Auto-generated IDs are `agent-<uuid>`.
+`agent://` URIs are rejected at registration but still accepted in envelope `from`/`to` for backward compatibility; unrecognised `agent://` senders skip signature verification and are treated as untrusted.
+
 ## Message Envelope
 
-Required fields: version, from, to, subject, timestamp. URIs: `agent://` or `did:seed:`.
+Required fields: version, from, to, subject, timestamp.
+`from`/`to` accept: bare agent IDs, `agent://` URIs, or `did:seed:` DIDs.
 
 ```json
 {
   "version": "1.0",
   "id": "uuid",
   "type": "task.request",
-  "from": "agent://sender-id",
-  "to": "agent://recipient-id",
+  "from": "sender-id",
+  "to": "recipient-id",
   "subject": "create_user",
   "correlation_id": "c-12345",
   "headers": {"priority": "high"},
@@ -49,14 +56,15 @@ leased --> purged (ephemeral + ack)
 
 ## Authentication
 
-### HTTP Signatures (Ed25519) -- inbox pull/ack/nack/reply
+### HTTP Signatures (Ed25519) — inbox pull/ack/nack/reply
 ```
 Signature: keyId="<agent_id>",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
 ```
 Signing string: `(request-target): post /api/agents/{id}/inbox/pull\nhost: agentdispatch.fly.dev\ndate: <UTC date>`
 Date must be within +-5 minutes. Signing agent must match `:agentId` in URL.
+Exception: `POST /api/agents/:id/messages` — any registered agent may sign (cross-agent messaging).
 
-### API Keys -- send, status, tenants
+### API Keys — send, status, tenants
 ```
 X-Api-Key: <key>
 ```
@@ -73,12 +81,13 @@ GET  /docs                                         Swagger UI
 GET  /openapi.json                                 OpenAPI spec
 POST /api/agents/register                          Register agent
 GET  /.well-known/agent-keys.json                  JWKS public key directory
+GET  /api/agents/:agentId/did.json                 W3C DID document
 ```
 
 ### Agent Management [HTTP Sig]
 ```
 GET    /api/agents/:agentId                        Get agent details
-DELETE /api/agents/:agentId                         Deregister agent
+DELETE /api/agents/:agentId                        Deregister agent
 POST   /api/agents/:agentId/heartbeat              Heartbeat (body: {metadata?})
 POST   /api/agents/:agentId/rotate-key             Rotate key (body: {seed, tenant_id})
 GET    /api/agents/:agentId/trusted                List trusted agents
@@ -90,12 +99,11 @@ DELETE /api/agents/:agentId/webhook                Remove webhook
 POST   /api/agents/:agentId/verify/github          Link GitHub (body: {github_handle})
 POST   /api/agents/:agentId/verify/cryptographic   Confirm crypto tier
 GET    /api/agents/:agentId/identity               Verification status
-GET    /api/agents/:agentId/did.json               W3C DID document (no auth)
 ```
 
 ### Inbox
 ```
-POST /api/agents/:agentId/messages                 Send message [API Key]
+POST /api/agents/:agentId/messages                 Send message [API Key — any registered agent]
   Body: {...envelope, ephemeral?, ttl?} -> {message_id, status}
 POST /api/agents/:agentId/inbox/pull               Pull with lease [HTTP Sig]
   Body: {visibility_timeout?} -> {message_id, envelope, lease_until, attempts} | 204
@@ -115,7 +123,7 @@ POST /api/agents/:agentId/inbox/reclaim            Reclaim expired leases [HTTP 
 POST   /api/groups                                 Create (body: {name, access?, settings?})
 GET    /api/groups/:groupId                        Get info
 PUT    /api/groups/:groupId                        Update (admin/owner)
-DELETE /api/groups/:groupId                         Delete (owner)
+DELETE /api/groups/:groupId                        Delete (owner)
 GET    /api/groups/:groupId/members                List members
 POST   /api/groups/:groupId/members                Add member (body: {agent_id, role?})
 DELETE /api/groups/:groupId/members/:agentId       Remove member
@@ -131,9 +139,9 @@ GET    /api/agents/:agentId/groups                 Agent's groups [HTTP Sig]
 POST   /api/agents/:agentId/outbox/domain          Set domain (body: {domain})
 GET    /api/agents/:agentId/outbox/domain          Get domain config
 POST   /api/agents/:agentId/outbox/domain/verify   Verify DNS
-DELETE /api/agents/:agentId/outbox/domain           Remove domain
+DELETE /api/agents/:agentId/outbox/domain          Remove domain
 POST   /api/agents/:agentId/outbox/send            Send email (body: {to, subject, body?, html?})
-GET    /api/agents/:agentId/outbox/messages         List sent (?status=&limit=)
+GET    /api/agents/:agentId/outbox/messages        List sent (?status=&limit=)
 GET    /api/agents/:agentId/outbox/messages/:msgId Get status
 ```
 
@@ -141,8 +149,8 @@ GET    /api/agents/:agentId/outbox/messages/:msgId Get status
 ```
 POST   /api/agents/tenants                         Create tenant
 GET    /api/agents/tenants/:tenantId               Get tenant
-GET    /api/agents/tenants/:tenantId/agents         List agents
-DELETE /api/agents/tenants/:tenantId                Delete tenant
+GET    /api/agents/tenants/:tenantId/agents        List agents
+DELETE /api/agents/tenants/:tenantId               Delete tenant
 GET    /api/agents/tenants/:tenantId/pending        List pending [Master]
 POST   /api/agents/:agentId/approve                Approve agent [Master]
 POST   /api/agents/:agentId/reject                 Reject (body: {reason?}) [Master]
@@ -156,35 +164,34 @@ All commands support `--json` for machine-readable output.
 ```
 admp init                                          Interactive config wizard
 admp config show | set <key> <value>               Show/set config
-admp register [--name] [--seed]                    Register new agent
-admp deregister                                    Delete agent
+admp register [--name] [--seed <hex>]              Register new agent
 admp agent get                                     View agent details
-admp heartbeat [--metadata]                        Send keepalive
-admp rotate-key [--seed]                           Rotate signing key
-admp send --to <id> --subject <s> --body <json>    Send message
-admp pull [--timeout]                              Pull next message
-admp ack <id> [--result]                           Acknowledge
+admp heartbeat [--metadata <json>]                 Send keepalive
+admp rotate-key [--seed <hex>]                     Rotate signing key
+admp send --to <id> --subject <s> --body <json|@file>  Send message
+admp pull [--timeout <sec>]                        Pull next message (max 300s)
+admp ack <id> [--result <json>]                    Acknowledge
 admp nack <id> [--extend] [--requeue]              Reject/defer
 admp reply <id> --subject <s> --body <json>        Correlated reply
 admp status <id>                                   Delivery status
 admp inbox stats                                   Queue counts
-admp webhook set --url --secret | get | delete     Webhook config
-admp groups create --name <n> --access <type>      Create group (open|key|invite)
-admp groups list | join <id> | leave <id>          Group membership
+admp webhook set --url <u> --secret <s> | get | delete  Webhook config
+admp groups create --name <n> --access <type>      Create group
+admp groups list | join <id> [--key] | leave <id>  Group membership
 admp groups send <id> --subject <s> --body <json>  Broadcast to group
-admp groups messages <id> [--limit]                Group message history
 admp outbox domain set --domain <d> | verify | delete  Domain config
 admp outbox send --to <email> --subject <s>        Send email
 admp outbox messages [--status] [--limit]          List sent emails
 ```
 
-## Library (@agentdispatch/cli)
+## Library (@agentdispatch/cli@0.2.1)
 
 ```ts
 import { buildAuthHeaders, signEnvelope, toBase64, fromBase64, sha256 } from "@agentdispatch/cli"; // or "/auth"
-import { AdmpClient, AdmpError, AuthMode } from "@agentdispatch/cli/client"; // AuthMode = "signature"|"api-key"|"none"
+import { AdmpClient, AdmpError, AuthMode } from "@agentdispatch/cli/client";
 import { loadConfig, saveConfig, resolveConfig, requireConfig } from "@agentdispatch/cli/config";
 
+// AuthMode = "signature" | "api-key" | "none"
 buildAuthHeaders(method, path, host, secretKey, agentId): Record<string, string>
 signEnvelope(envelope, secretKey): object   // returns envelope with .signature added
 new AdmpClient({base_url, agent_id?, secret_key?, api_key?})
@@ -207,7 +214,6 @@ File: `~/.admp/config.json` (mode 0600)
 | `ADMP_API_KEY` | api_key | _(optional)_ |
 | `ADMP_TIMEOUT` | request timeout ms | `30000` |
 | `ADMP_CONFIG_PATH` | config file path | `~/.admp/config.json` |
-| `ADMP_JSON=1` | force JSON output | |
 
 ### Server env vars
 | Variable | Default | Description |
@@ -216,8 +222,8 @@ File: `~/.admp/config.json` (mode 0600)
 | `MASTER_API_KEY` | _(none)_ | Admin endpoints (secret) |
 | `STORAGE_BACKEND` | `memory` | `memory` or `mech` |
 | `REGISTRATION_POLICY` | `open` | `open` or `approval_required` |
-| `MESSAGE_TTL_SEC` | `86400` | Default message TTL |
 | `MAILGUN_API_KEY` | _(none)_ | Outbound email (secret) |
+| `DID_WEB_ALLOWED_DOMAINS` | _(none)_ | Comma-separated DID:web allowlist |
 
 ## Error Codes
 
@@ -233,11 +239,11 @@ Format: `{"error": "CODE", "message": "description"}`
 | `INVALID_API_KEY` | 401 | No | Key not recognized |
 | `FORBIDDEN` | 403 | No | Agent mismatch (signer != target) |
 | `REGISTRATION_PENDING` | 403 | Yes* | Awaiting approval (*poll after approve) |
+| `REGISTRATION_REJECTED` | 403 | No | Registration was rejected |
 | `RECIPIENT_NOT_FOUND` | 404 | No | Target agent not found |
 | `MESSAGE_NOT_FOUND` | 404 | No | Message ID not found |
 | `MESSAGE_EXPIRED` | 410 | No | Purged (ephemeral/TTL) |
 | `SEND_FAILED` | 400 | Yes | Message or email send failed |
-| `PULL_FAILED` | 400 | Yes | Inbox pull failed |
 | `NOT_FOUND` | 404 | No | Endpoint does not exist |
 | `INTERNAL_ERROR` | 500 | Yes | Server error (backoff: 1s, 2s, 4s, 8s, 16s, 30s cap) |
 

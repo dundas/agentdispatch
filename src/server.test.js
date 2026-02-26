@@ -18,7 +18,7 @@ async function registerAgent(name, metadata = {}) {
   const res = await request(app)
     .post('/api/agents/register')
     .send({
-      agent_id: `agent://${name}-${uniqueSuffix}`,
+      agent_id: `${name}-${uniqueSuffix}`,
       agent_type: 'test',
       metadata
     });
@@ -90,6 +90,173 @@ test('GET /api/stats returns stats object', async () => {
   assert.equal(res.status, 200);
   assert.ok(res.body.agents);
   assert.ok(res.body.messages);
+});
+
+test('agent_id validation rejects dangerous characters', async () => {
+  const bad = [
+    'has space',
+    'newline\ninjection',
+    'path/traversal',
+    'null\x00byte',
+    '<script>xss</script>',
+    'agent://legacy-scheme',   // slashes + reserved prefix
+    'agent:bare',              // reserved prefix (no slashes)
+    'did:seed:spoofed',        // reserved DID prefix
+    'did:web:example.com',     // reserved DID prefix
+    'DID:spoofed',             // reserved prefix — case-insensitive check
+    'AGENT:foo',               // reserved prefix — case-insensitive check
+    'a'.repeat(256),
+    '   ',                     // whitespace-only (truthy but fails charset regex)
+  ];
+
+  for (const id of bad) {
+    const res = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: id, agent_type: 'test' });
+    assert.equal(res.status, 400, `Expected 400 for agent_id: ${JSON.stringify(id)}`);
+  }
+
+  // Valid IDs should still work — use unique suffix to avoid conflicts across test runs
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const valid = ['simple', 'with-hyphens', 'dots.allowed', 'colons:ok', 'ALL_CAPS'].map(id => `${id}-${suffix}`);
+  // Use a timestamp-based prefix for the boundary ID so it is unique across test runs.
+  // Pad to exactly 255 chars. assert.equal pins the length so any format change fails fast.
+  const tsStr = Date.now().toString(); // 13 chars in 2026 — assert catches length change
+  const boundaryId = tsStr + 'a'.repeat(255 - tsStr.length);
+  assert.equal(boundaryId.length, 255, 'boundary test ID must be exactly 255 chars');
+  valid.push(boundaryId);
+  for (const id of valid) {
+    const res = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: id, agent_type: 'test' });
+    assert.equal(res.status, 201, `Expected 201 for agent_id: ${JSON.stringify(id)}`);
+  }
+});
+
+test('storage proxy: createAgent directly rejects unsafe agent_ids', async () => {
+  // Verify the storage Proxy backstop fires independently of register() —
+  // catches callers (DID:web shadow agents, migrations) that bypass registration.
+  const dummyKey = toBase64(nacl.sign.keyPair().publicKey);
+  const base = { agent_type: 'test', public_key: dummyKey, registration_status: 'approved' };
+
+  const badIds = [
+    'evil\nX-Injected: header',   // newline injection
+    'null\x00byte',               // null byte
+    'back\\slash',                // backslash (signing-string escape)
+    '\x01control',                // control char (SOH)
+    'a'.repeat(256),              // exceeds 255-char limit
+    '',                           // empty string
+  ];
+
+  for (const agent_id of badIds) {
+    await assert.rejects(
+      () => storage.createAgent({ ...base, agent_id }),
+      (err) => {
+        assert.ok(err.message.startsWith('createAgent:'),
+          `Expected 'createAgent:' error for ${JSON.stringify(agent_id)}, got: ${err.message}`);
+        return true;
+      },
+      `storage.createAgent should reject agent_id: ${JSON.stringify(agent_id)}`
+    );
+  }
+
+  // Slashes are allowed — DID:web shadow agent IDs use them as path separators
+  const shadowId = `did-web-proxy-test-${Date.now()}.example.com/users/alice`;
+  const shadowAgent = await storage.createAgent({ ...base, agent_id: shadowId });
+  assert.equal(shadowAgent.agent_id, shadowId, 'storage proxy should allow slashes for DID:web IDs');
+});
+
+test('envelope from/to validation rejects injection attempts', async () => {
+  const sender = await registerAgent('env-sender');
+  const recipient = await registerAgent('env-recipient');
+
+  // Malicious from fields that should be rejected
+  const badFromIds = [
+    'evil\nX-Injected: header',
+    'agent://bad\ninjected',
+    'did:seed:\ninjected',
+    'has spaces',
+    '../traversal',
+  ];
+
+  for (const badId of badFromIds) {
+    const envelope = {
+      version: '1.0',
+      id: `msg-${Date.now()}`,
+      type: 'task.request',
+      from: badId,
+      to: recipient.agent_id,
+      subject: 'injection-test',
+      body: { test: true },
+      timestamp: new Date().toISOString(),
+    };
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+      .send(envelope);
+    assert.equal(res.status, 400, `Expected 400 for from: ${JSON.stringify(badId)}`);
+  }
+
+  // Malicious to fields — same validation applies
+  const badToIds = [
+    'evil\nX-Injected: header',
+    'agent://bad\ninjected',
+    '../traversal',
+    'a'.repeat(256),
+  ];
+
+  for (const badId of badToIds) {
+    const envelope = {
+      version: '1.0',
+      id: `msg-${Date.now()}`,
+      type: 'task.request',
+      from: sender.agent_id,
+      to: badId,
+      subject: 'injection-test',
+      body: { test: true },
+      timestamp: new Date().toISOString(),
+    };
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+      .send(envelope);
+    assert.equal(res.status, 400, `Expected 400 for to: ${JSON.stringify(badId)}`);
+  }
+
+  // Legacy agent:// URI in from field should still pass (backward-compat)
+  const legacyEnvelope = {
+    version: '1.0',
+    id: `msg-${Date.now()}`,
+    type: 'task.request',
+    from: 'agent://legacy-sender',
+    to: recipient.agent_id,
+    subject: 'legacy-compat',
+    body: { test: true },
+    timestamp: new Date().toISOString(),
+  };
+  const legacyRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+    .send(legacyEnvelope);
+  // 201: envelope accepted, sender not in storage so signature verification is skipped.
+  // 404 is NOT expected because the recipient exists.
+  // 400 would indicate the validation wrongly rejected a valid agent:// URI.
+  assert.equal(legacyRes.status, 201, 'Legacy agent:// envelope from should pass validation and be accepted');
+
+  // DID:web canonical form in from should pass envelope validation (colons pass SAFE_CHARS)
+  const didWebEnvelope = {
+    version: '1.0',
+    id: `msg-${Date.now()}`,
+    type: 'task.request',
+    from: 'did:web:example.com:users:alice',
+    to: recipient.agent_id,
+    subject: 'did-web-compat',
+    body: { test: true },
+    timestamp: new Date().toISOString(),
+  };
+  const didWebRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+    .send(didWebEnvelope);
+  // 201: accepted. Sender not in storage so signature check skipped (from is untrusted).
+  // 400 would mean did:web canonical form was wrongly rejected by isValidAgentId().
+  assert.equal(didWebRes.status, 201, 'DID:web canonical from (did:web:domain:path) should pass envelope validation');
 });
 
 test('agent registration, heartbeat, and get agent', async () => {
@@ -279,7 +446,7 @@ test('rejects messages with invalid signature', async () => {
 
 test('returns 404 for unknown recipient agent', async () => {
   const sender = await registerAgent('sender-unknown-recipient');
-  const nonExistentRecipient = 'agent://non-existent-recipient';
+  const nonExistentRecipient = 'non-existent-recipient';
 
   const res = await sendSignedMessage(sender, nonExistentRecipient, {
     subject: 'unknown-recipient',
@@ -369,6 +536,41 @@ test('trust list restricts message senders', async () => {
   assert.equal(blockedRes.status, 400);
   assert.equal(blockedRes.body.error, 'SEND_FAILED');
   assert.ok(blockedRes.body.message.includes('not trusted'));
+});
+
+test('trust list rejects unregistered sender claiming a trusted ID', async () => {
+  const recipient = await registerAgent('trusted-recipient-missing-sender');
+  const ghostTrustedId = `ghost-trusted-${Date.now()}`;
+
+  const addRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/trusted`)
+    .send({ agent_id: ghostTrustedId });
+
+  assert.equal(addRes.status, 200);
+  assert.ok(addRes.body.trusted_agents.includes(ghostTrustedId));
+
+  const forgedEnvelope = {
+    version: '1.0',
+    id: `msg-${Date.now()}`,
+    type: 'task.request',
+    from: ghostTrustedId,
+    to: recipient.agent_id,
+    subject: 'forged-trusted-sender',
+    body: { test: 'impersonation-attempt' },
+    timestamp: new Date().toISOString(),
+    ttl_sec: 3600
+  };
+
+  const forgedRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+    .send(forgedEnvelope);
+
+  assert.equal(forgedRes.status, 403);
+  assert.equal(forgedRes.body.error, 'INVALID_SIGNATURE');
+  assert.ok(
+    forgedRes.body.message.includes('signature required') ||
+    forgedRes.body.message.includes('not registered')
+  );
 });
 
 test('mech storage persists agents', { skip: !MECH_CONFIGURED }, async () => {
@@ -544,7 +746,7 @@ test('webhook happy path delivers and verifies signature', async () => {
   const port = typeof address === 'object' && address ? address.port : 0;
 
   const agent = {
-    agent_id: 'agent://webhook-happy',
+    agent_id: 'webhook-happy',
     webhook_url: `http://127.0.0.1:${port}/webhook-test-ok`,
     webhook_secret: 'test-webhook-secret'
   };
@@ -594,7 +796,7 @@ test('webhook failure reports will_retry and pending retries', async () => {
   const port = typeof address === 'object' && address ? address.port : 0;
 
   const agent = {
-    agent_id: 'agent://webhook-fail',
+    agent_id: 'webhook-fail',
     webhook_url: `http://127.0.0.1:${port}/webhook-test-fail`,
     webhook_secret: null
   };
@@ -1446,7 +1648,7 @@ test('outbox webhook: delivered event updates outbox message status', async () =
   const mailgunId = '<webhook-delivered-test@mailgun>';
   await storage.createOutboxMessage({
     id: 'webhook-deliver-test',
-    agent_id: 'agent://webhook-agent',
+    agent_id: 'webhook-agent',
     to: 'someone@example.com',
     from: 'agent@example.com',
     subject: 'Webhook test',
@@ -1482,7 +1684,7 @@ test('outbox webhook: failed event updates outbox message status', async () => {
   const mailgunId = '<webhook-failed-test@mailgun>';
   await storage.createOutboxMessage({
     id: 'webhook-fail-test',
-    agent_id: 'agent://webhook-fail-agent',
+    agent_id: 'webhook-fail-agent',
     to: 'bounce@example.com',
     from: 'agent@example.com',
     subject: 'Will fail',
@@ -1664,7 +1866,7 @@ test('storage: findOutboxMessageByMailgunId finds message by mailgun_id', async 
 
   await storage.createOutboxMessage({
     id: msgId,
-    agent_id: 'agent://find-test',
+    agent_id: 'find-test',
     to: 'user@example.com',
     from: 'agent@example.com',
     subject: 'Find test',
@@ -1697,7 +1899,7 @@ test('outbox webhook: handleWebhook uses findOutboxMessageByMailgunId to locate 
 
   await storage.createOutboxMessage({
     id: msgId,
-    agent_id: 'agent://webhook-find-agent',
+    agent_id: 'webhook-find-agent',
     to: 'someone@example.com',
     from: 'agent@example.com',
     subject: 'Webhook find test',
@@ -1821,7 +2023,7 @@ test('seed-based registration: same seed+tenant+agent = same keypair (determinis
   const seed = crypto.randomBytes(32);
   const seedB64 = toBase64(seed);
   const tenantId = `tenant-determ-${Date.now()}`;
-  const agentId = `agent://seed-determ-${Date.now()}`;
+  const agentId = `seed-determ-${Date.now()}`;
 
   // Create tenant first
   await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
@@ -1863,7 +2065,7 @@ test('seed-based registration: different tenant = different keypair (isolation)'
   const resA = await request(app)
     .post('/api/agents/register')
     .send({
-      agent_id: `agent://agent-a-${agentSuffix}`,
+      agent_id: `agent-a-${agentSuffix}`,
       agent_type: 'test',
       seed: seedB64,
       tenant_id: tenantA
@@ -1872,7 +2074,7 @@ test('seed-based registration: different tenant = different keypair (isolation)'
   const resB = await request(app)
     .post('/api/agents/register')
     .send({
-      agent_id: `agent://agent-b-${agentSuffix}`,
+      agent_id: `agent-b-${agentSuffix}`,
       agent_type: 'test',
       seed: seedB64,
       tenant_id: tenantB
@@ -1893,7 +2095,7 @@ test('seed-based registration requires tenant_id', async () => {
   const res = await request(app)
     .post('/api/agents/register')
     .send({
-      agent_id: `agent://no-tenant-${Date.now()}`,
+      agent_id: `no-tenant-${Date.now()}`,
       agent_type: 'test',
       seed: seedB64
     });
@@ -1909,7 +2111,7 @@ test('import mode: stores provided key, no secret_key in response, DID generated
   const res = await request(app)
     .post('/api/agents/register')
     .send({
-      agent_id: `agent://import-${Date.now()}`,
+      agent_id: `import-${Date.now()}`,
       agent_type: 'test',
       public_key: pubKeyB64
     });
@@ -1956,7 +2158,7 @@ test('tenant CRUD: create, get, list agents, delete', async () => {
     const agentRes = await request(app)
       .post('/api/agents/register')
       .send({
-        agent_id: `agent://tenant-agent-${Date.now()}`,
+        agent_id: `tenant-agent-${Date.now()}`,
         agent_type: 'test',
         seed: toBase64(seed),
         tenant_id: tenantId
@@ -2257,7 +2459,7 @@ test('key rotation increments version and generates new keypair', async () => {
   const seed = crypto.randomBytes(32);
   const seedB64 = toBase64(seed);
   const tenantId = `tenant-rotate-${Date.now()}`;
-  const agentId = `agent://rotate-${Date.now()}`;
+  const agentId = `rotate-${Date.now()}`;
 
   await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
 
@@ -2290,8 +2492,8 @@ test('messages signed with old key still verify during rotation window', async (
   const seed = crypto.randomBytes(32);
   const seedB64 = toBase64(seed);
   const tenantId = `tenant-rotwin-${Date.now()}`;
-  const senderAgentId = `agent://rotwin-sender-${Date.now()}`;
-  const recipientAgentId = `agent://rotwin-recv-${Date.now()}`;
+  const senderAgentId = `rotwin-sender-${Date.now()}`;
+  const recipientAgentId = `rotwin-recv-${Date.now()}`;
 
   await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
 
@@ -2372,7 +2574,7 @@ test('key rotation requires valid seed matching current key', async () => {
   const seed = crypto.randomBytes(32);
   const seedB64 = toBase64(seed);
   const tenantId = `tenant-seedmatch-${Date.now()}`;
-  const agentId = `agent://seedmatch-${Date.now()}`;
+  const agentId = `seedmatch-${Date.now()}`;
 
   await storage.createTenant({ tenant_id: tenantId, name: tenantId, metadata: {} });
 
@@ -2451,7 +2653,7 @@ test('cryptographic verification requires seed-based + DID', async () => {
   const seedAgent = await request(app)
     .post('/api/agents/register')
     .send({
-      agent_id: `agent://crypto-verify-${Date.now()}`,
+      agent_id: `crypto-verify-${Date.now()}`,
       agent_type: 'test',
       seed: toBase64(seed),
       tenant_id: tenantId
@@ -2492,7 +2694,7 @@ test('cryptographic verification fails for import-mode agents', async () => {
   const regRes = await request(app)
     .post('/api/agents/register')
     .send({
-      agent_id: `agent://import-nocrypto-${Date.now()}`,
+      agent_id: `import-nocrypto-${Date.now()}`,
       agent_type: 'test',
       public_key: pubKeyB64
     });
@@ -2940,7 +3142,7 @@ test('trust model: registration is exempt from API key when API_KEY_REQUIRED=tru
     const suffix = `${Date.now()}-exempt`;
     const res = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://exempt-test-${suffix}`, agent_type: 'test' });
+      .send({ agent_id: `exempt-test-${suffix}`, agent_type: 'test' });
     // No X-API-Key header — should succeed
     assert.equal(res.status, 201, 'register must succeed without API key even when API_KEY_REQUIRED=true');
     assert.ok(res.body.agent_id);
@@ -3015,12 +3217,12 @@ test('trust model: single-use token scope enforcement', async () => {
     // Register two agents without auth key (exempt)
     const regA = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://scope-a-${suffix}`, agent_type: 'test' });
+      .send({ agent_id: `scope-a-${suffix}`, agent_type: 'test' });
     assert.equal(regA.status, 201);
 
     const regB = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://scope-b-${suffix}`, agent_type: 'test' });
+      .send({ agent_id: `scope-b-${suffix}`, agent_type: 'test' });
     assert.equal(regB.status, 201);
 
     const agentA = regA.body.agent_id;
@@ -3061,7 +3263,7 @@ test('trust model: open tenant policy → agent approved immediately', async () 
   const suffix = `${Date.now()}`;
   const res = await request(app)
     .post('/api/agents/register')
-    .send({ agent_id: `agent://open-policy-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+    .send({ agent_id: `open-policy-${suffix}`, agent_type: 'test', tenant_id: tenantId });
 
   assert.equal(res.status, 201);
   assert.equal(res.body.registration_status, 'approved', 'open policy should approve immediately');
@@ -3074,7 +3276,7 @@ test('trust model: approval_required tenant policy → agent starts pending', as
   const suffix = `${Date.now()}`;
   const res = await request(app)
     .post('/api/agents/register')
-    .send({ agent_id: `agent://pending-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+    .send({ agent_id: `pending-${suffix}`, agent_type: 'test', tenant_id: tenantId });
 
   assert.equal(res.status, 201);
   assert.equal(res.body.registration_status, 'pending', 'approval_required policy should set status to pending');
@@ -3087,7 +3289,7 @@ test('trust model: pending agent is blocked from API access', async () => {
   const suffix = `${Date.now()}`;
   const regRes = await request(app)
     .post('/api/agents/register')
-    .send({ agent_id: `agent://blocked-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+    .send({ agent_id: `blocked-${suffix}`, agent_type: 'test', tenant_id: tenantId });
   assert.equal(regRes.status, 201);
   assert.equal(regRes.body.registration_status, 'pending');
 
@@ -3114,7 +3316,7 @@ test('trust model: approve pending agent → becomes accessible', async () => {
     const suffix = `${Date.now()}`;
     const regRes = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://to-approve-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+      .send({ agent_id: `to-approve-${suffix}`, agent_type: 'test', tenant_id: tenantId });
     assert.equal(regRes.status, 201);
     const agentId = regRes.body.agent_id;
 
@@ -3148,7 +3350,7 @@ test('trust model: reject agent → returns REGISTRATION_REJECTED error', async 
     const suffix = `${Date.now()}`;
     const regRes = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://to-reject-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+      .send({ agent_id: `to-reject-${suffix}`, agent_type: 'test', tenant_id: tenantId });
     assert.equal(regRes.status, 201);
     const agentId = regRes.body.agent_id;
 
@@ -3186,18 +3388,18 @@ test('trust model: pending list endpoint returns correct subset', async () => {
     // Register two pending agents in the tenant
     const reg1 = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://list-pending-1-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+      .send({ agent_id: `list-pending-1-${suffix}`, agent_type: 'test', tenant_id: tenantId });
     assert.equal(reg1.status, 201);
 
     const reg2 = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://list-pending-2-${suffix}`, agent_type: 'test', tenant_id: tenantId });
+      .send({ agent_id: `list-pending-2-${suffix}`, agent_type: 'test', tenant_id: tenantId });
     assert.equal(reg2.status, 201);
 
     // Register one approved (different tenant — no policy)
     const reg3 = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://list-approved-${suffix}`, agent_type: 'test' });
+      .send({ agent_id: `list-approved-${suffix}`, agent_type: 'test' });
     assert.equal(reg3.status, 201);
 
     // Fetch pending list
@@ -3220,7 +3422,7 @@ test('trust model: pending list endpoint returns correct subset', async () => {
 
 test('trust model: existing agents without registration_status are treated as approved', async () => {
   // Simulate a legacy agent (no registration_status field)
-  const agentId = `agent://legacy-no-status-${Date.now()}`;
+  const agentId = `legacy-no-status-${Date.now()}`;
   await storage.createAgent({
     agent_id: agentId,
     agent_type: 'test',
@@ -3455,7 +3657,7 @@ test('trust model: scoped enrollment token — rejects when target_agent_id does
   process.env.API_KEY_REQUIRED = 'true';
 
   try {
-    const nonExistentAgentId = `agent://nonexistent-${Date.now()}`;
+    const nonExistentAgentId = `nonexistent-${Date.now()}`;
 
     const res = await request(app)
       .post('/api/keys/issue')
@@ -3487,7 +3689,7 @@ test('trust model: reject is idempotent — second rejection returns success', a
 
     const regRes = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://reject-idem-${Date.now()}`, tenant_id: tenantId });
+      .send({ agent_id: `reject-idem-${Date.now()}`, tenant_id: tenantId });
     assert.equal(regRes.status, 201);
     const agentId = regRes.body.agent_id;
 
@@ -3546,7 +3748,7 @@ test('trust model: approve is idempotent — second approval returns success', a
 
     const regRes = await request(app)
       .post('/api/agents/register')
-      .send({ agent_id: `agent://idem-test-${Date.now()}`, tenant_id: tenantId });
+      .send({ agent_id: `idem-test-${Date.now()}`, tenant_id: tenantId });
 
     assert.equal(regRes.status, 201);
     const agentId = regRes.body.agent_id;
@@ -3941,6 +4143,53 @@ test('trust model: DID web with path segments — resolves URL and creates shado
     assert.equal(shadowAgent.agent_id, expectedAgentId, `agent_id should be ${expectedAgentId}`);
     assert.equal(shadowAgent.registration_mode, 'did-web');
     assert.equal(shadowAgent.registration_status, 'approved');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (savedAllowedDomains !== undefined) process.env.DID_WEB_ALLOWED_DOMAINS = savedAllowedDomains;
+    else delete process.env.DID_WEB_ALLOWED_DOMAINS;
+  }
+});
+
+test('trust model: DID web — crafted keyId with .. segment is rejected (SSRF guard)', async () => {
+  // Confirm SAFE_DID_SEGMENT's '..' guard in resolveDIDWebAgent() fires before any
+  // outbound fetch. A crafted keyId like did:web:evil.com:.. would produce the URL
+  // https://evil.com/../did.json — blocked before the fetch is attempted.
+  // Note: newline injection in keyId is blocked at the HTTP client level (headers
+  // cannot contain newlines), not at the server validation layer.
+  const domain = `did-web-ssrf-${Date.now()}.example.com`;
+  const maliciousKeyIds = [
+    `did:web:${domain}:..`,      // path traversal via '..' segment
+    `did:web:${domain}:a:..`,    // '..' deeper in path
+  ];
+
+  const keypair = nacl.sign.keyPair();
+  const savedAllowedDomains = process.env.DID_WEB_ALLOWED_DOMAINS;
+  process.env.DID_WEB_ALLOWED_DOMAINS = domain;
+  let fetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called for crafted DID:web keyIds');
+  };
+
+  try {
+    for (const keyId of maliciousKeyIds) {
+      fetchCalled = false;
+      const dateStr = new Date().toUTCString();
+      const targetPath = `/api/agents/any-agent/heartbeat`;
+      const headers = { host: '127.0.0.1', date: dateStr };
+      const signatureHeader = signRequest('POST', targetPath, headers, keypair.secretKey, keyId);
+
+      const res = await request(app)
+        .post(targetPath)
+        .set('Host', headers.host)
+        .set('Signature', signatureHeader)
+        .set('Date', dateStr)
+        .send({});
+
+      assert.equal(res.status, 401, `Crafted DID:web keyId ${JSON.stringify(keyId)} should return 401`);
+      assert.equal(fetchCalled, false, `fetch should not be called for crafted keyId ${JSON.stringify(keyId)}`);
+    }
   } finally {
     globalThis.fetch = originalFetch;
     if (savedAllowedDomains !== undefined) process.env.DID_WEB_ALLOWED_DOMAINS = savedAllowedDomains;

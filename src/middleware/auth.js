@@ -485,6 +485,12 @@ const _didKeyCache = new Map();
 const _DID_KEY_CACHE_TTL_MS = 5 * 60 * 1000;
 const _DID_KEY_CACHE_MAX = 1000;
 
+// Allowlist for DID:web domain names (excludes colons — colons are not valid in hostnames).
+// Module-level so it is compiled once, not on every DID auth attempt.
+const SAFE_DID_DOMAIN = /^[a-zA-Z0-9._-]+$/;
+// Allowlist for DID:web path segments (colons are valid per W3C DID Core spec).
+const SAFE_DID_SEGMENT = /^[a-zA-Z0-9._:-]+$/;
+
 /**
  * Returns true if the hostname should be blocked from DID web resolution
  * to prevent SSRF attacks targeting internal/private infrastructure.
@@ -562,6 +568,16 @@ async function resolveDIDWebAgent(did, req) {
       return null;
     }
 
+    // Defense-in-depth: validate domain and path segments contain only safe
+    // characters before using them in agent_id construction or HTTP requests.
+    // A crafted keyId like "did:web:evil.com\nX-Injected: header" could
+    // otherwise inject into signing strings or storage keys.
+    if (!SAFE_DID_DOMAIN.test(domain) || domain === '..') return null;
+    // Also block '..' explicitly: SAFE_DID_SEGMENT allows dots, so '..' passes the
+    // character check — but it would produce a path-traversal URL like
+    // https://domain.com/../did.json which may escape the intended path prefix.
+    if (pathSegments.some(seg => !SAFE_DID_SEGMENT.test(seg) || seg === '..')) return null;
+
     // Compute DID document URL once (per W3C DID:web spec):
     //   did:web:domain.com           → https://domain.com/.well-known/did.json
     //   did:web:domain.com:path:seg  → https://domain.com/path/seg/did.json
@@ -595,6 +611,9 @@ async function resolveDIDWebAgent(did, req) {
           if (!location) return null;
           try {
             const redirectUrl = new URL(location, didUrl);
+            // Enforce HTTPS: an http:// redirect would expose DID document fetches
+            // to MitM attacks even if the original request was over TLS.
+            if (redirectUrl.protocol !== 'https:') return null;
             if (isBlockedDIDWebHost(redirectUrl.hostname)) return null;
             // Follow one validated redirect
             const redirectResp = await fetch(redirectUrl.href, { signal: controller.signal, redirect: 'error' });
