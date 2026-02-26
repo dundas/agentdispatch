@@ -164,8 +164,10 @@ test('envelope from/to validation rejects injection attempts', async () => {
   const legacyRes = await request(app)
     .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
     .send(legacyEnvelope);
-  // 201 (sender not in storage so signature skipped) or 404 — either is fine; just not 400
-  assert.notEqual(legacyRes.status, 400, 'Legacy agent:// envelope from should not be rejected by validation');
+  // 201: envelope accepted, sender not in storage so signature verification is skipped.
+  // 404 is NOT expected because the recipient exists.
+  // 400 would indicate the validation wrongly rejected a valid agent:// URI.
+  assert.equal(legacyRes.status, 201, 'Legacy agent:// envelope from should pass validation and be accepted');
 });
 
 test('agent registration, heartbeat, and get agent', async () => {

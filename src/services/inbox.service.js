@@ -9,6 +9,12 @@ import { verifySignature, fromBase64, validateTimestamp, parseTTL } from '../uti
 import { agentService } from './agent.service.js';
 import { webhookService } from './webhook.service.js';
 
+// Safe agent identifier patterns — module-level constants so they are compiled once,
+// not recreated on every message send.
+const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
+const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
+const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._:-]+$/;
+
 export class InboxService {
   /**
    * Send message to agent's inbox
@@ -393,10 +399,9 @@ export class InboxService {
     // Validate agent identifiers — accept agent:// URIs, did:seed: DIDs, and bare agent IDs.
     // All three forms validate the full string (not just the prefix) to block injection
     // via malicious suffixes like agent://foo\nX-Injected: header.
-    const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
     const validId = (id) =>
-      /^agent:\/\/[a-zA-Z0-9._:-]+$/.test(id) ||
-      /^did:seed:[a-zA-Z0-9._:-]+$/.test(id) ||
+      VALID_AGENT_URI.test(id) ||
+      VALID_DID_SEED.test(id) ||
       SAFE_CHARS.test(id);
 
     if (!validId(envelope.from)) {
