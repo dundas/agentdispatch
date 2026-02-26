@@ -3442,7 +3442,8 @@ test('trust model: DID web — approval_required policy → shadow agent starts 
     assert.equal(shadowAgent.registration_mode, 'did-web');
   } finally {
     globalThis.fetch = originalFetch;
-    process.env.REGISTRATION_POLICY = savedPolicy;
+    if (savedPolicy !== undefined) process.env.REGISTRATION_POLICY = savedPolicy;
+    else delete process.env.REGISTRATION_POLICY;
   }
 });
 
