@@ -375,7 +375,7 @@ Manages the full agent lifecycle.
 | Capability | Description |
 |---|---|
 | **Registration** | Three modes: *Legacy* (random keypair), *Seed-based* (HKDF deterministic from `LABEL_ADMP:<tenant>:<agent>:ed25519:vN`), *Import* (client-provided public key) |
-| **agent_id validation** | Enforces `^[a-zA-Z0-9._\-:]+$`; auto-generates `agent-<uuid>` if omitted |
+| **agent_id validation** | Length check (> 255 chars) runs first (O(1) guard), then enforces `^[a-zA-Z0-9._\-:]+$`; auto-generates `agent-<uuid>` if omitted |
 | **Heartbeat** | Periodic liveness signal; background job marks agents offline after `timeout_ms` |
 | **Approval Workflow** | `approve()` / `reject(reason)` for pending agents; master key required |
 | **Trust Management** | Per-agent trusted/blocked agent lists; enforced at message send time |
@@ -562,7 +562,7 @@ When a `Signature` header contains `keyId="did:web:..."`:
 | **Algorithm confusion** | Only `ed25519` accepted; any other `algorithm` value is rejected |
 | **Multicodec confusion** | DID document keys must be exactly 34 bytes with `0xed01` prefix; other key types rejected |
 | **Namespace collision** | Shadow agent creation checks for existing non-federated agent with same ID |
-| **agent_id injection** | Regex `^[a-zA-Z0-9._\-:]+$` blocks newlines (signing string injection), slashes (path traversal), spaces, null bytes |
+| **agent_id injection** | Length check (> 255 chars, O(1)) runs before regex `^[a-zA-Z0-9._\-:]+$`, blocking newlines (signing string injection), slashes (path traversal), spaces, null bytes. Note: DID:web shadow agent IDs currently bypass this validation — see issue #17. |
 | **HTTP headers** | `helmet` middleware sets security headers (X-Content-Type-Options, X-Frame-Options, etc.) |
 | **Input validation** | 10MB JSON body limit; group name length/charset validation; rejection reason 500 char limit |
 | **Error response uniformity** | 401 for all bad-credential scenarios (expired, revoked, unknown) to prevent existence leaking |

@@ -130,7 +130,7 @@ Register a new agent. No authentication required.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `agent_id` | string | No | Custom agent ID. Must match `^[a-zA-Z0-9._\-:]+$`. If omitted, server generates `agent-<uuid>`. |
+| `agent_id` | string | No | Custom agent ID. Must be 255 characters or fewer AND match `^[a-zA-Z0-9._\-:]+$`. Length is checked first (O(1) guard before regex). If omitted, server generates `agent-<uuid>`. |
 | `agent_type` | string | No | Agent type label (e.g., `claude_session`). Default: `generic`. |
 | `metadata` | object | No | Arbitrary metadata. |
 | `webhook_url` | string | No | URL for push delivery of incoming messages. |

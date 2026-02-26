@@ -24,7 +24,8 @@ All request and response bodies are JSON (`Content-Type: application/json`).
 7. [Error Handling](#7-error-handling)
 8. [Registration Modes](#8-registration-modes)
 9. [Approval Workflow](#9-approval-workflow)
-10. [Best Practices](#10-best-practices)
+10. [Known Limitations and Security Notes](#10-known-limitations-and-security-notes)
+11. [Best Practices](#11-best-practices)
 
 ---
 
@@ -187,11 +188,12 @@ Date: ...
 
 ## 3. Agent ID Format
 
-`agent_id` must match the regular expression:
+`agent_id` must satisfy two constraints, checked in this order:
 
-```
-^[a-zA-Z0-9._\-:]+$
-```
+1. **Length:** 255 characters or fewer (checked first, O(1) guard).
+2. **Character set:** Must match `^[a-zA-Z0-9._\-:]+$`.
+
+The length check runs before the regex so that pathologically long inputs are rejected immediately without executing the pattern match.
 
 **Allowed characters:** Letters (a-z, A-Z), digits (0-9), dots (`.`), underscores (`_`), hyphens (`-`), colons (`:`).
 
@@ -479,7 +481,21 @@ X-Api-Key: <master-key>
 
 ---
 
-## 10. Best Practices
+## 10. Known Limitations and Security Notes
+
+### Issue #17 — DID:web Shadow Agent Character Validation Bypass
+
+When a `did:web:` agent authenticates for the first time, the server auto-creates a shadow agent record. The `agent_id` for that shadow agent is derived from the DID's domain and path segments (e.g., `did-web:example.com/alice`) and is **not** run through the same 255-character length check and regex validation that applies to manually registered agents.
+
+This means a DID:web agent with a crafted long or unusual domain path could create a shadow agent with an `agent_id` that would normally be rejected at `POST /api/agents/register`.
+
+**Status:** Tracked in issue #17. A fix to apply the same character validation to shadow agent IDs at creation time is planned.
+
+**Mitigation:** Set `DID_WEB_ALLOWED_DOMAINS` to a strict allowlist of trusted domains. This prevents shadow agent creation for all domains not explicitly permitted.
+
+---
+
+## 11. Best Practices
 
 ### Security
 
