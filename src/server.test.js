@@ -131,6 +131,39 @@ test('agent_id validation rejects dangerous characters', async () => {
   }
 });
 
+test('storage proxy: createAgent directly rejects unsafe agent_ids', async () => {
+  // Verify the storage Proxy backstop fires independently of register() —
+  // catches callers (DID:web shadow agents, migrations) that bypass registration.
+  const dummyKey = toBase64(nacl.sign.keyPair().publicKey);
+  const base = { agent_type: 'test', public_key: dummyKey, registration_status: 'approved' };
+
+  const badIds = [
+    'evil\nX-Injected: header',   // newline injection
+    'null\x00byte',               // null byte
+    'back\\slash',                // backslash (signing-string escape)
+    '\x01control',                // control char (SOH)
+    'a'.repeat(256),              // exceeds 255-char limit
+    '',                           // empty string
+  ];
+
+  for (const agent_id of badIds) {
+    await assert.rejects(
+      () => storage.createAgent({ ...base, agent_id }),
+      (err) => {
+        assert.ok(err.message.startsWith('createAgent:'),
+          `Expected 'createAgent:' error for ${JSON.stringify(agent_id)}, got: ${err.message}`);
+        return true;
+      },
+      `storage.createAgent should reject agent_id: ${JSON.stringify(agent_id)}`
+    );
+  }
+
+  // Slashes are allowed — DID:web shadow agent IDs use them as path separators
+  const shadowId = `did-web-proxy-test-${Date.now()}.example.com/users/alice`;
+  const shadowAgent = await storage.createAgent({ ...base, agent_id: shadowId });
+  assert.equal(shadowAgent.agent_id, shadowId, 'storage proxy should allow slashes for DID:web IDs');
+});
+
 test('envelope from/to validation rejects injection attempts', async () => {
   const sender = await registerAgent('env-sender');
   const recipient = await registerAgent('env-recipient');
@@ -204,6 +237,24 @@ test('envelope from/to validation rejects injection attempts', async () => {
   // 404 is NOT expected because the recipient exists.
   // 400 would indicate the validation wrongly rejected a valid agent:// URI.
   assert.equal(legacyRes.status, 201, 'Legacy agent:// envelope from should pass validation and be accepted');
+
+  // DID:web canonical form in from should pass envelope validation (colons pass SAFE_CHARS)
+  const didWebEnvelope = {
+    version: '1.0',
+    id: `msg-${Date.now()}`,
+    type: 'task.request',
+    from: 'did:web:example.com:users:alice',
+    to: recipient.agent_id,
+    subject: 'did-web-compat',
+    body: { test: true },
+    timestamp: new Date().toISOString(),
+  };
+  const didWebRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+    .send(didWebEnvelope);
+  // 201: accepted. Sender not in storage so signature check skipped (from is untrusted).
+  // 400 would mean did:web canonical form was wrongly rejected by isValidAgentId().
+  assert.equal(didWebRes.status, 201, 'DID:web canonical from (did:web:domain:path) should pass envelope validation');
 });
 
 test('agent registration, heartbeat, and get agent', async () => {
@@ -4055,6 +4106,53 @@ test('trust model: DID web with path segments — resolves URL and creates shado
     assert.equal(shadowAgent.agent_id, expectedAgentId, `agent_id should be ${expectedAgentId}`);
     assert.equal(shadowAgent.registration_mode, 'did-web');
     assert.equal(shadowAgent.registration_status, 'approved');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (savedAllowedDomains !== undefined) process.env.DID_WEB_ALLOWED_DOMAINS = savedAllowedDomains;
+    else delete process.env.DID_WEB_ALLOWED_DOMAINS;
+  }
+});
+
+test('trust model: DID web — crafted keyId with .. segment is rejected (SSRF guard)', async () => {
+  // Confirm SAFE_DID_SEGMENT's '..' guard in resolveDIDWebAgent() fires before any
+  // outbound fetch. A crafted keyId like did:web:evil.com:.. would produce the URL
+  // https://evil.com/../did.json — blocked before the fetch is attempted.
+  // Note: newline injection in keyId is blocked at the HTTP client level (headers
+  // cannot contain newlines), not at the server validation layer.
+  const domain = `did-web-ssrf-${Date.now()}.example.com`;
+  const maliciousKeyIds = [
+    `did:web:${domain}:..`,      // path traversal via '..' segment
+    `did:web:${domain}:a:..`,    // '..' deeper in path
+  ];
+
+  const keypair = nacl.sign.keyPair();
+  const savedAllowedDomains = process.env.DID_WEB_ALLOWED_DOMAINS;
+  process.env.DID_WEB_ALLOWED_DOMAINS = domain;
+  let fetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called for crafted DID:web keyIds');
+  };
+
+  try {
+    for (const keyId of maliciousKeyIds) {
+      fetchCalled = false;
+      const dateStr = new Date().toUTCString();
+      const targetPath = `/api/agents/any-agent/heartbeat`;
+      const headers = { host: '127.0.0.1', date: dateStr };
+      const signatureHeader = signRequest('POST', targetPath, headers, keypair.secretKey, keyId);
+
+      const res = await request(app)
+        .post(targetPath)
+        .set('Host', headers.host)
+        .set('Signature', signatureHeader)
+        .set('Date', dateStr)
+        .send({});
+
+      assert.equal(res.status, 401, `Crafted DID:web keyId ${JSON.stringify(keyId)} should return 401`);
+      assert.equal(fetchCalled, false, `fetch should not be called for crafted keyId ${JSON.stringify(keyId)}`);
+    }
   } finally {
     globalThis.fetch = originalFetch;
     if (savedAllowedDomains !== undefined) process.env.DID_WEB_ALLOWED_DOMAINS = savedAllowedDomains;
