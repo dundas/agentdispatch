@@ -1,5 +1,9 @@
 # Agent Dispatch Messaging Protocol (ADMP)
 
+[![Tests](https://github.com/agentdispatch/admp/actions/workflows/test.yml/badge.svg)](https://github.com/agentdispatch/admp/actions/workflows/test.yml)
+[![npm](https://img.shields.io/npm/v/@agentdispatch/cli)](https://www.npmjs.com/package/@agentdispatch/cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Universal inbox for autonomous agents**
 
 ADMP provides a standardized messaging infrastructure for AI agents to communicate reliably and securely. Each agent gets an inbox, messages are cryptographically signed, and delivery is deterministic.
