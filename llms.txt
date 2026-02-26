@@ -18,8 +18,8 @@ admp ack <message-id>                                                  # 4. Ack
 
 ## Agent ID Format
 
-`agent_id` must be 255 characters or fewer AND match `^[a-zA-Z0-9._\-:]+$` — letters, digits, dots, underscores, hyphens, colons.
-The length check runs before the regex (O(1) guard). No slashes, spaces, or `agent://` prefix. Auto-generated IDs are `agent-<uuid>`.
+`agent_id` must be 255 chars or fewer AND match `^[a-zA-Z0-9._\-:]+$` AND must not start with `did:` or `agent:` (reserved prefixes). Length checked first (O(1) guard), then regex, then reserved-prefix check. Auto-generated IDs are `agent-<uuid>`.
+`agent://` URIs are rejected at registration but still accepted in envelope `from`/`to` for backward compatibility; unrecognised `agent://` senders skip signature verification and are treated as untrusted.
 
 ## Message Envelope
 

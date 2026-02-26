@@ -188,16 +188,19 @@ Date: ...
 
 ## 3. Agent ID Format
 
-`agent_id` must satisfy two constraints, checked in this order:
+`agent_id` must satisfy three constraints, checked in this order:
 
 1. **Length:** 255 characters or fewer (checked first, O(1) guard).
 2. **Character set:** Must match `^[a-zA-Z0-9._\-:]+$`.
+3. **Reserved prefixes:** Must not start with `did:` or `agent:` (case-insensitive). These prefixes are reserved for system-generated DID identifiers.
 
-The length check runs before the regex so that pathologically long inputs are rejected immediately without executing the pattern match.
+The length check runs before the regex so that pathologically long inputs are rejected immediately without executing the pattern match. The reserved-prefix check runs last and catches IDs that pass character validation but would spoof system identifiers.
 
 **Allowed characters:** Letters (a-z, A-Z), digits (0-9), dots (`.`), underscores (`_`), hyphens (`-`), colons (`:`).
 
-**Not allowed:** Slashes, spaces, `agent://` prefix, null bytes, or any other special characters.
+**Not allowed:** Slashes, spaces, null bytes, or any other special characters. The prefixes `did:` and `agent:` are also not allowed at the start of a registered ID.
+
+**agent:// asymmetry — registration vs. envelopes:** The `agent://` URI prefix is rejected at registration (no newly registered agent can have an ID starting with `agent:`), but `agent://` is still accepted in envelope `from`/`to` fields for backward compatibility with pre-existing systems. When a sender using an `agent://` URI is not found in storage, signature verification is skipped and `from` is treated as untrusted.
 
 **Auto-generated IDs:** If you do not provide an `agent_id` at registration, the server generates one in the format `agent-<uuid>` (e.g., `agent-550e8400-e29b-41d4-a716-446655440000`).
 
