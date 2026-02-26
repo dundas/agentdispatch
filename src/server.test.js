@@ -106,6 +106,7 @@ test('agent_id validation rejects dangerous characters', async () => {
     'DID:spoofed',             // reserved prefix — case-insensitive check
     'AGENT:foo',               // reserved prefix — case-insensitive check
     'a'.repeat(256),
+    '   ',                     // whitespace-only (truthy but fails charset regex)
   ];
 
   for (const id of bad) {

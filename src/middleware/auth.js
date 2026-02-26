@@ -485,7 +485,7 @@ const _didKeyCache = new Map();
 const _DID_KEY_CACHE_TTL_MS = 5 * 60 * 1000;
 const _DID_KEY_CACHE_MAX = 1000;
 
-// Allowlist for DID:web domain names (no colons — colons are not valid in hostnames).
+// Allowlist for DID:web domain names (excludes colons — colons are not valid in hostnames).
 // Module-level so it is compiled once, not on every DID auth attempt.
 const SAFE_DID_DOMAIN = /^[a-zA-Z0-9._-]+$/;
 // Allowlist for DID:web path segments (colons are valid per W3C DID Core spec).

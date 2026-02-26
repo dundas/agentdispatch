@@ -486,6 +486,14 @@ X-Api-Key: <master-key>
 
 ## 10. Known Limitations and Security Notes
 
+### Migration Note — Auto-Generated ID Format Change (PR #16)
+
+Prior to PR #16, the server auto-generated agent IDs in the format `agent://agent-<uuid>`. The new format is `agent-<uuid>` (no `agent://` prefix). This is a **breaking change** for deployments that did not use custom IDs:
+
+- **Existing agents** with `agent://agent-<uuid>` IDs stored in the database continue to work for message routing and envelope delivery. The backward-compat layer in envelope validation still accepts `agent://` in `from`/`to` fields.
+- **Re-registration is blocked**: if a client attempts to call `POST /api/agents/register` with a stored `agent://…` ID, registration will be rejected (reserved prefix). The agent is still reachable but cannot update its registration.
+- **Action required**: if your deployment relies on re-registration with the auto-generated ID, export the existing ID before upgrading, then register a new bare ID and update your configuration.
+
 ### Issue #17 — DID:web Shadow Agent Character Validation Bypass
 
 When a `did:web:` agent authenticates for the first time, the server auto-creates a shadow agent record. The `agent_id` for that shadow agent is derived from the DID's domain and path segments (e.g., `did-web:example.com/alice`) and is **not** run through the same 255-character length check and regex validation that applies to manually registered agents.

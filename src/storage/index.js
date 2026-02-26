@@ -35,13 +35,21 @@ switch (backend) {
 // resolveDIDWebAgent() which have their own character-set and prefix guards,
 // and they never change an existing agent_id.
 //
-// The regex blocks only control characters (newlines, null bytes, DEL) and
-// backslashes — the characters that cause signing-string injection or escaping
-// issues in storage backends. Slashes are intentionally allowed because
-// DID:web shadow agent IDs use them as path separators (did-web:host/path/seg).
+// Allowlist: letters, digits, and the characters allowed by register() plus forward
+// slash (for DID:web shadow agent IDs like did-web:host/path/seg). Characters outside
+// this set indicate a caller bug — surfacing them here is preferable to silent storage.
 // The stricter character-set and reserved-prefix checks live in register() and
 // resolveDIDWebAgent() for agents that go through those code paths.
-const STORAGE_AGENT_ID_RE = /^[^\x00-\x1f\x7f\\]+$/;
+// Legacy agent://agent-<uuid> IDs already at rest in storage are intentionally NOT
+// re-validated here — this guard only fires on new writes via createAgent().
+const STORAGE_AGENT_ID_RE = /^[a-zA-Z0-9._:/-]+$/;
+
+// Startup assertion: if the storage interface renames createAgent, the Proxy guard
+// silently becomes a no-op. Crashing at startup is better than a silent bypass.
+if (typeof _storage.createAgent !== 'function') {
+  throw new Error('storage: createAgent is missing — update the Proxy guard in storage/index.js');
+}
+
 const storage = new Proxy(_storage, {
   get(target, prop) {
     // NOTE: if the storage interface renames createAgent, update this string —
@@ -55,7 +63,7 @@ const storage = new Proxy(_storage, {
           throw new Error('createAgent: agent_id must be 255 characters or fewer');
         }
         if (!STORAGE_AGENT_ID_RE.test(agent.agent_id)) {
-          throw new Error('createAgent: agent_id contains unsafe characters (control chars, backslashes)');
+          throw new Error('createAgent: agent_id contains characters outside the allowed set [a-zA-Z0-9._:/-]');
         }
         return target.createAgent(agent);
       };
