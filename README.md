@@ -172,6 +172,11 @@ npm install && npm test
 
 ## API Documentation
 
+Reference docs:
+- `docs/API-REFERENCE.md` — complete HTTP API reference
+- `docs/AGENT-GUIDE.md` — integration guide and auth patterns
+- `docs/CLI-REFERENCE.md` — `admp` CLI commands and `@agentdispatch/cli` library API
+
 ### Base URL
 
 ```

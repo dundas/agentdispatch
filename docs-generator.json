@@ -3,6 +3,7 @@
   "description": "Universal inbox for autonomous AI agents — standardized messaging infrastructure with at-least-once delivery, Ed25519 authentication, and DID federation",
   "baseUrl": "https://agentdispatch.fly.dev",
   "_baseUrl_note": "Update baseUrl here and regenerate docs if the production URL changes",
+  "_cli_extractors_note": "cli-commands, typescript-api, config, and cli-reference are implemented in the docs-generator skill used for this repository.",
   "sources": [
     { "path": "src/server.js", "extractor": "rest-api", "provides": "Express app setup, global auth middleware, route mounting" },
     { "path": "src/routes/agents.js", "extractor": "rest-api", "provides": "Agent registration, heartbeat, trust, webhook, key rotation, identity, tenant, approval endpoints" },
@@ -18,7 +19,7 @@
     { "path": "docker-compose.yml", "extractor": "architecture", "provides": "Local multi-service dev topology" },
     { "path": "package.json", "extractor": "architecture", "provides": "Dependencies, scripts, and metadata" },
     { "path": "whitepaper/v1.md", "extractor": "generic", "provides": "ADMP v1.0 specification (protocol semantics, message format, security model)" },
-    { "path": "cli/src/index.ts", "extractor": "cli-commands", "provides": "CLI command registration — 16 commands via commander.js" },
+    { "path": "cli/src/index.ts", "extractor": "cli-commands", "provides": "CLI command tree registration via commander.js (top-level commands and subcommands)" },
     { "path": "cli/src/auth.ts", "extractor": "typescript-api", "provides": "Auth library exports: buildAuthHeaders, signEnvelope, Ed25519 signing primitives" },
     { "path": "cli/src/client.ts", "extractor": "typescript-api", "provides": "HTTP client library: AdmpClient class with signature/api-key/none auth modes" },
     { "path": "cli/src/config.ts", "extractor": "typescript-api", "provides": "Config management: ~/.admp/config.json, env var overrides, requireConfig" },

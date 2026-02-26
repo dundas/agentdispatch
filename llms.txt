@@ -45,15 +45,6 @@ Required fields: version, from, to, subject, timestamp.
 
 Envelope signing base: `timestamp\nsha256(body)\nfrom\nto\ncorrelation_id`
 
-## Message Lifecycle
-
-```
-queued --> leased --> acked
-              \--> nack --> requeued
-queued --> expired (TTL)
-leased --> purged (ephemeral + ack)
-```
-
 ## Authentication
 
 ### HTTP Signatures (Ed25519) — inbox pull/ack/nack/reply
