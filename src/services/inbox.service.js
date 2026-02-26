@@ -12,6 +12,10 @@ import { webhookService } from './webhook.service.js';
 // Safe agent identifier patterns — module-level constants so they are compiled once,
 // not recreated on every message send.
 const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
+// VALID_AGENT_URI and VALID_DID_SEED are subsets of SAFE_CHARS (both would pass the
+// SAFE_CHARS fallback). They are kept as named constants for documentation: they
+// make the accepted formats explicit and provide a place to tighten each scheme
+// independently if requirements change. They do not alter the validation outcome.
 const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
 // did:seed: suffixes are hex fingerprints (sha256 truncated to 16 bytes); no colons expected.
 const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._-]+$/;
