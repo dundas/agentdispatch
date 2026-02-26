@@ -9,9 +9,13 @@ import { storage as memoryStorage } from './memory.js';
 // Built-in backends:
 //   memory  — in-process Map-based storage (default, good for development)
 //
-// Custom backends:
-//   Set STORAGE_BACKEND=custom and provide your own implementation by
-//   adding a case below. See src/storage/memory.js for the required interface.
+// Custom backends (overlay pattern):
+//   Place a compatible adapter at src/storage/<name>.js and set STORAGE_BACKEND=<name>.
+//   The adapter must export a `createMechStorage`-style factory or a singleton that
+//   implements the same interface as memory.js. See memory.js for the required methods.
+//
+//   Example: STORAGE_BACKEND=mech loads ./mech.js (not shipped in the public repo;
+//   injected at deploy time via the agentdispatch-deploy overlay).
 
 config();
 
@@ -20,6 +24,21 @@ const backend = (process.env.STORAGE_BACKEND || 'memory').toLowerCase();
 let _storage;
 
 switch (backend) {
+  case 'mech': {
+    // mech.js is a private adapter injected via the agentdispatch-deploy overlay.
+    // It is not included in the public repository.
+    let mechMod;
+    try {
+      mechMod = await import('./mech.js');
+    } catch {
+      throw new Error(
+        'STORAGE_BACKEND=mech but src/storage/mech.js is not present. ' +
+        'Provide the Mech Storage adapter via the agentdispatch-deploy overlay.'
+      );
+    }
+    _storage = mechMod.createMechStorage();
+    break;
+  }
   case 'memory':
   default:
     _storage = memoryStorage;
