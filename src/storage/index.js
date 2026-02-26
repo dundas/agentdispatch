@@ -49,7 +49,7 @@ const storage = new Proxy(_storage, {
           throw new Error('createAgent: agent_id must be 255 characters or fewer');
         }
         if (!STORAGE_AGENT_ID_RE.test(agent.agent_id)) {
-          throw new Error('createAgent: agent_id contains unsafe characters (control chars, slashes)');
+          throw new Error('createAgent: agent_id contains unsafe characters (control chars, backslashes)');
         }
         return target.createAgent(agent);
       };

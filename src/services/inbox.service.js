@@ -28,6 +28,11 @@ const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._-]+$/;
  * guard. This is by design — the envelope layer cannot know whether a given ID was
  * ever registered, so it only rejects clearly-unsafe inputs.
  *
+ * DID:web agents: when sending messages, federated agents use their W3C canonical
+ * DID form in `from` (e.g. `did:web:domain.com:users:alice`, colon-separated).
+ * This passes SAFE_CHARS. Their stored agent_id uses slashes (`did-web:domain.com/users/alice`)
+ * but that stored form is not used in envelope fields.
+ *
  * A valid `id` does NOT imply the agent exists in storage or that the sender is
  * trusted. Signature verification is required for that.
  */
