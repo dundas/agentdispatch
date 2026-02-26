@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
+import { decodeSecretKey } from '../auth.js';
 import { loadConfig, requireConfig, saveConfig } from '../config.js';
-import { success, warn } from '../output.js';
+import { success, warn, error } from '../output.js';
 import { validateSeedHex } from '../validate.js';
 
 interface RotateKeyResponse {
@@ -35,6 +36,12 @@ export function register(program: Command): void {
       );
 
       if (res?.secret_key) {
+        try {
+          decodeSecretKey(res.secret_key);
+        } catch {
+          error('Server returned an invalid secret_key — not saving. Old key is still active.', 'INVALID_KEY');
+          process.exit(1);
+        }
         const existing = loadConfig();
         saveConfig({ ...existing, secret_key: res.secret_key });
         warn('New secret_key saved to ~/.admp/config.json. Back it up; it will not be shown again.');

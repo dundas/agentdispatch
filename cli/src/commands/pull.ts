@@ -13,7 +13,7 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
-      const body: Record<string, unknown> = {};
+      let body: { timeout: number } | undefined;
       let clientTimeoutMs: number | undefined;
       if (opts.timeout) {
         const n = parseInt(opts.timeout, 10);
@@ -25,7 +25,7 @@ export function register(program: Command): void {
           error('--timeout max is 300 seconds (5 min)', 'INVALID_ARGUMENT');
           process.exit(1);
         }
-        body.timeout = n;
+        body = { timeout: n };
         // Add a 5s buffer so the client abort controller doesn't race the server's
         // long-poll window. Without this, ADMP_TIMEOUT (default 30s) fires before
         // the server responds for any --timeout value above ~25 s.

@@ -69,8 +69,7 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
-      const body: Record<string, unknown> = {};
-      if (opts.key) body.key = opts.key;
+      const body = opts.key ? { key: opts.key } : undefined;
 
       await client.request('POST', `/api/groups/${groupId}/join`, body, 'signature');
       success(`Joined group ${groupId}`);
