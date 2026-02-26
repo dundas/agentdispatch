@@ -28,7 +28,9 @@ export function register(program: Command): void {
       // Resolve the reply recipient: explicit --to or fetch from original message status
       let toAgentId = opts.to;
       if (!toAgentId) {
-        // Throw early if api_key is absent — the status fetch will need it for auth
+        // Pre-flight check: verify api_key is configured before making the status lookup.
+        // The result is discarded — the client already holds the config; this just fails
+        // fast with a helpful error instead of a generic 401 from the server.
         requireConfig(['api_key']);
         const status = await client.request<{ from?: string }>(
           'GET',
@@ -44,6 +46,9 @@ export function register(program: Command): void {
         }
         // from is stored as raw agent ID (not agent:// URI) in the status response
         toAgentId = from.replace('agent://', '');
+        if (!toAgentId) {
+          throw new Error(`Could not determine recipient — from field is empty. Use --to <agentId>.`);
+        }
       }
 
       let body: unknown;

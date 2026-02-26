@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient, AdmpError } from '../client.js';
+import { decodeSecretKey } from '../auth.js';
 import { loadConfig, requireConfig, saveConfig } from '../config.js';
 import { success, warn, error, aborted } from '../output.js';
 import { validateSeedHex } from '../validate.js';
@@ -45,6 +46,17 @@ export function register(program: Command): void {
           error(err instanceof Error ? err.message : String(err));
         }
         process.exit(1);
+      }
+
+      // Validate the returned secret_key before persisting — catches corrupted
+      // responses or MITM on non-TLS connections immediately.
+      if (res.secret_key) {
+        try {
+          decodeSecretKey(res.secret_key);
+        } catch {
+          error('Server returned an invalid secret_key — not saving. Re-register or contact the hub operator.', 'INVALID_KEY');
+          process.exit(1);
+        }
       }
 
       saveConfig({

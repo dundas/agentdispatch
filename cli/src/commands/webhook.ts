@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success, maskSecret, error, aborted } from '../output.js';
+import { success, maskSecret, warn, error, aborted } from '../output.js';
 
 export function register(program: Command): void {
   const cmd = program
@@ -17,6 +17,9 @@ export function register(program: Command): void {
     .addHelpText('after', '\nSecurity note: --secret appears in shell history. Set ADMP_WEBHOOK_SECRET instead to avoid exposure.\n\nExample:\n  ADMP_WEBHOOK_SECRET=s3cr3t admp webhook set --url https://myapp.com/hook\n  admp webhook set --url https://myapp.com/hook --secret s3cr3t')
     .action(async (opts: { url: string; secret?: string }) => {
       const secret = process.env.ADMP_WEBHOOK_SECRET ?? opts.secret;
+      if (!process.env.ADMP_WEBHOOK_SECRET && opts.secret) {
+        warn('--secret appears in shell history. Prefer ADMP_WEBHOOK_SECRET env var.');
+      }
       if (!secret) {
         error('Webhook secret required — pass --secret or set ADMP_WEBHOOK_SECRET', 'INVALID_ARGUMENT');
         process.exit(1);

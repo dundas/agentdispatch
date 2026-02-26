@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { readFileSync, statSync } from 'fs';
+import { readFileSync } from 'fs';
 import { isAbsolute } from 'path';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
@@ -16,19 +16,20 @@ function parseBodyOrExit(raw: string): unknown {
       error('File path must be relative and must not contain ..', 'INVALID_ARGUMENT');
       process.exit(1);
     }
-    // Guard against accidentally loading large binary files into memory.
+    // Read the file in one shot — avoids TOCTOU between stat and read.
+    let buf: Buffer;
     try {
-      const { size } = statSync(filePath);
-      if (size > MAX_BODY_FILE_BYTES) {
-        error(`Body file exceeds 1 MB limit (${size} bytes): ${filePath}`, 'INVALID_ARGUMENT');
-        process.exit(1);
-      }
+      buf = readFileSync(filePath);
     } catch {
       error(`Could not read body file: ${filePath}`, 'FILE_NOT_FOUND');
       process.exit(1);
     }
+    if (buf.length > MAX_BODY_FILE_BYTES) {
+      error(`Body file exceeds 1 MB limit (${buf.length} bytes): ${filePath}`, 'INVALID_ARGUMENT');
+      process.exit(1);
+    }
     try {
-      return JSON.parse(readFileSync(filePath, 'utf8'));
+      return JSON.parse(buf.toString('utf8'));
     } catch {
       error(`Could not parse body file as JSON: ${filePath}`, 'INVALID_ARGUMENT');
       process.exit(1);
