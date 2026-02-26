@@ -30,7 +30,7 @@ export class AgentService {
   async register({ agent_id, agent_type = 'generic', metadata = {}, webhook_url, webhook_secret, seed, public_key, tenant_id }) {
     // Generate agent_id if not provided
     if (!agent_id) {
-      agent_id = `agent://agent-${uuid()}`;
+      agent_id = `agent-${uuid()}`;
     }
 
     // Validate agent_id character set.
