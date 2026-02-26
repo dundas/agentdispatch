@@ -611,6 +611,9 @@ async function resolveDIDWebAgent(did, req) {
           if (!location) return null;
           try {
             const redirectUrl = new URL(location, didUrl);
+            // Enforce HTTPS: an http:// redirect would expose DID document fetches
+            // to MitM attacks even if the original request was over TLS.
+            if (redirectUrl.protocol !== 'https:') return null;
             if (isBlockedDIDWebHost(redirectUrl.hostname)) return null;
             // Follow one validated redirect
             const redirectResp = await fetch(redirectUrl.href, { signal: controller.signal, redirect: 'error' });

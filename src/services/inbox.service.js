@@ -19,7 +19,7 @@ const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
 const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
 // VALID_DID_SEED is a subset of SAFE_CHARS (did:seed:abc passes both). It is kept
 // for documentation and as a named anchor if suffix rules need to diverge from SAFE_CHARS
-// in the future. Important: SAFE_CHARS supersedes it at the envelope layer —
+// in the future. Important: SAFE_CHARS acts as a fallback when VALID_DID_SEED rejects —
 // did:seed:ab:cd fails VALID_DID_SEED (colons in suffix) but passes SAFE_CHARS, so
 // it is still accepted here. The no-colons restriction is enforced at registration,
 // not at the envelope layer.
@@ -111,6 +111,11 @@ export class InboxService {
           throw new Error('Invalid message signature');
         }
       }
+    } else if (recipient.trusted_agents && recipient.trusted_agents.length > 0) {
+      // Sender is named in the trust list but is not registered — cannot verify identity.
+      // Reject rather than silently skip: an unregistered sender cannot prove they are
+      // the trusted agent they claim to be (deregistered agent impersonation attack).
+      throw new Error(`Sender ${envelope.from} is not registered — signature required for trust-list delivery`);
     }
 
     // Parse ephemeral options (top-level on send body, not inside envelope)
