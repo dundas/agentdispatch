@@ -1,5 +1,6 @@
 import { config } from 'dotenv';
 import { storage as memoryStorage } from './memory.js';
+import { createMechStorage } from './mech.js';
 
 // Storage abstraction
 // -------------------
@@ -8,10 +9,7 @@ import { storage as memoryStorage } from './memory.js';
 //
 // Built-in backends:
 //   memory  — in-process Map-based storage (default, good for development)
-//
-// Custom backends:
-//   Set STORAGE_BACKEND=custom and provide your own implementation by
-//   adding a case below. See src/storage/memory.js for the required interface.
+//   mech    — persistent Mech Storage backend (requires MECH_APP_ID, MECH_API_KEY)
 
 config();
 
@@ -20,6 +18,9 @@ const backend = (process.env.STORAGE_BACKEND || 'memory').toLowerCase();
 let storage;
 
 switch (backend) {
+  case 'mech':
+    storage = createMechStorage();
+    break;
   case 'memory':
   default:
     storage = memoryStorage;
