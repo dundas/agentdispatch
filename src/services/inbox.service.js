@@ -390,15 +390,18 @@ export class InboxService {
       throw new Error(`Unsupported ADMP version: ${envelope.version}`);
     }
 
-    // Validate agent URIs — accept both agent:// and did:seed: schemes
-    const validScheme = (uri) => uri.startsWith('agent://') || uri.startsWith('did:seed:');
+    // Validate agent identifiers — accept agent:// URIs, did:seed: DIDs, and bare agent IDs
+    const validId = (id) =>
+      id.startsWith('agent://') ||
+      id.startsWith('did:seed:') ||
+      /^[a-zA-Z0-9._\-:]+$/.test(id);
 
-    if (!validScheme(envelope.from)) {
-      throw new Error('Invalid from URI (must start with agent:// or did:seed:)');
+    if (!validId(envelope.from)) {
+      throw new Error('Invalid from field (must be agent:// URI, did:seed: DID, or valid agent ID)');
     }
 
-    if (!validScheme(envelope.to)) {
-      throw new Error('Invalid to URI (must start with agent:// or did:seed:)');
+    if (!validId(envelope.to)) {
+      throw new Error('Invalid to field (must be agent:// URI, did:seed: DID, or valid agent ID)');
     }
 
     // Validate timestamp
