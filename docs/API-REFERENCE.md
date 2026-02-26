@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-25T16:28:00Z -->
+<!-- Generated: 2026-02-26T00:00:00Z -->
 
 # Agent Dispatch (ADMP) API Reference
 
@@ -17,181 +17,60 @@
 ## Table of Contents
 
 - [Authentication](#authentication)
-  - [API Key Authentication](#api-key-authentication)
-  - [HTTP Signature Authentication](#http-signature-authentication)
-  - [Master API Key Authentication](#master-api-key-authentication)
 - [System](#system)
-  - [GET /health](#get-health)
-  - [GET /api/stats](#get-apistats)
-  - [GET /openapi.json](#get-openapijson)
-  - [GET /docs](#get-docs)
-- [Agent Registration & Management](#agent-registration--management)
-  - [POST /api/agents/register](#post-apiagentsregister)
-  - [GET /api/agents/:agentId](#get-apiagentsagentid)
-  - [DELETE /api/agents/:agentId](#delete-apiagentsagentid)
-  - [POST /api/agents/:agentId/heartbeat](#post-apiagentsagentidheartbeat)
-  - [POST /api/agents/:agentId/rotate-key](#post-apiagentsagentidrotate-key)
+- [Agent Registration and Management](#agent-registration-and-management)
 - [Trust Management](#trust-management)
-  - [GET /api/agents/:agentId/trusted](#get-apiagentsagentidtrusted)
-  - [POST /api/agents/:agentId/trusted](#post-apiagentsagentidtrusted)
-  - [DELETE /api/agents/:agentId/trusted/:trustedAgentId](#delete-apiagentsagentidtrustedtrustedagentid)
 - [Webhook Configuration](#webhook-configuration)
-  - [POST /api/agents/:agentId/webhook](#post-apiagentsagentidwebhook)
-  - [GET /api/agents/:agentId/webhook](#get-apiagentsagentidwebhook)
-  - [DELETE /api/agents/:agentId/webhook](#delete-apiagentsagentidwebhook)
 - [Identity Verification](#identity-verification)
-  - [POST /api/agents/:agentId/verify/github](#post-apiagentsagentidverifygithub)
-  - [POST /api/agents/:agentId/verify/cryptographic](#post-apiagentsagentidverifycryptographic)
-  - [GET /api/agents/:agentId/identity](#get-apiagentsagentididentity)
-- [Messaging (Inbox)](#messaging-inbox)
-  - [POST /api/agents/:agentId/messages](#post-apiagentsagentidmessages)
-  - [POST /api/agents/:agentId/inbox/pull](#post-apiagentsagentidinboxpull)
-  - [POST /api/agents/:agentId/messages/:messageId/ack](#post-apiagentsagentidmessagesmessageidack)
-  - [POST /api/agents/:agentId/messages/:messageId/nack](#post-apiagentsagentidmessagesmessageidnack)
-  - [POST /api/agents/:agentId/messages/:messageId/reply](#post-apiagentsagentidmessagesmessageidreply)
-  - [GET /api/messages/:messageId/status](#get-apimessagesmessageidstatus)
-  - [GET /api/agents/:agentId/inbox/stats](#get-apiagentsagentidinboxstats)
-  - [POST /api/agents/:agentId/inbox/reclaim](#post-apiagentsagentidinboxreclaim)
+- [Key Rotation](#key-rotation)
+- [Inbox: Message Operations](#inbox-message-operations)
 - [Groups](#groups)
-  - [POST /api/groups](#post-apigroups)
-  - [GET /api/groups/:groupId](#get-apigroupsgroupid)
-  - [PUT /api/groups/:groupId](#put-apigroupsgroupid)
-  - [DELETE /api/groups/:groupId](#delete-apigroupsgroupid)
-  - [GET /api/groups/:groupId/members](#get-apigroupsgroupidmembers)
-  - [POST /api/groups/:groupId/members](#post-apigroupsgroupidmembers)
-  - [DELETE /api/groups/:groupId/members/:agentId](#delete-apigroupsgroupidmembersagentid)
-  - [POST /api/groups/:groupId/join](#post-apigroupsgroupidjoin)
-  - [POST /api/groups/:groupId/leave](#post-apigroupsgroupidleave)
-  - [POST /api/groups/:groupId/messages](#post-apigroupsgroupidmessages)
-  - [GET /api/groups/:groupId/messages](#get-apigroupsgroupidmessages)
-  - [GET /api/agents/:agentId/groups](#get-apiagentsagentidgroups)
-- [Outbox (Email via Mailgun)](#outbox-email-via-mailgun)
-  - [POST /api/agents/:agentId/outbox/domain](#post-apiagentsagentidoutboxdomain)
-  - [GET /api/agents/:agentId/outbox/domain](#get-apiagentsagentidoutboxdomain)
-  - [POST /api/agents/:agentId/outbox/domain/verify](#post-apiagentsagentidoutboxdomainverify)
-  - [DELETE /api/agents/:agentId/outbox/domain](#delete-apiagentsagentidoutboxdomain)
-  - [POST /api/agents/:agentId/outbox/send](#post-apiagentsagentidoutboxsend)
-  - [GET /api/agents/:agentId/outbox/messages](#get-apiagentsagentidoutboxmessages)
-  - [GET /api/agents/:agentId/outbox/messages/:messageId](#get-apiagentsagentidoutboxmessagesmessageid)
-  - [POST /api/webhooks/mailgun](#post-apiwebhooksmailgun)
+- [Outbox (Email)](#outbox-email)
+- [Tenants](#tenants)
+- [Admin: Approval Workflow](#admin-approval-workflow)
 - [Discovery](#discovery)
-  - [GET /.well-known/agent-keys.json](#get-well-knownagent-keysjson)
-  - [GET /api/agents/:agentId/did.json](#get-apiagentsagentiddidjson)
-- [Tenant Management](#tenant-management)
-  - [POST /api/agents/tenants](#post-apiagentstenants)
-  - [GET /api/agents/tenants/:tenantId](#get-apiagentstenantstenantid)
-  - [GET /api/agents/tenants/:tenantId/agents](#get-apiagentstenantstenantidagents)
-  - [DELETE /api/agents/tenants/:tenantId](#delete-apiagentstenantstenantid)
-- [Approval Workflow (Admin)](#approval-workflow-admin)
-  - [GET /api/agents/tenants/:tenantId/pending](#get-apiagentstenantstenantidpending)
-  - [POST /api/agents/:agentId/approve](#post-apiagentsagentidapprove)
-  - [POST /api/agents/:agentId/reject](#post-apiagentsagentidreject)
+- [Stats](#stats)
 
 ---
 
 ## Authentication
 
-ADMP supports three authentication mechanisms. Requests to `/api/*` endpoints (except agent registration) must authenticate via one of these methods.
-
 ### API Key Authentication
 
-Provide an API key via the `X-Api-Key` header or `Authorization: Bearer <key>` header. API key enforcement is controlled by the `API_KEY_REQUIRED` environment variable.
+Include in one of:
 
 ```
-X-Api-Key: admp_abc123...
+X-Api-Key: <key>
+Authorization: Bearer <key>
 ```
-
-or
-
-```
-Authorization: Bearer admp_abc123...
-```
-
-**Key types:**
-
-| Type | Description |
-|---|---|
-| Master key | Set via `MASTER_API_KEY` env var. Full admin access. |
-**Single-use enrollment tokens:** Keys with `single_use: true` are burned (marked used) on first successful authentication. Tokens with `target_agent_id` are scoped to only authenticate requests for that specific agent's endpoints.
 
 ### HTTP Signature Authentication
 
-Agents authenticate using Ed25519 cryptographic signatures. When a `Signature` header is present on a request, it is verified against the agent's registered public key. If verification succeeds, the API key requirement is bypassed.
-
-**How to construct an HTTP Signature:**
-
-**Step 1:** Create the canonical signing string from the headers you intend to sign. The `(request-target)` pseudo-header and the `date` header are mandatory.
+Used for agent-scoped endpoints (pull, ack, nack, reply, heartbeat, etc.).
 
 ```
-(request-target): post /api/agents/agent-123/heartbeat
-host: agentdispatch.fly.dev
-date: Thu, 20 Feb 2026 12:00:00 GMT
+Signature: keyId="<agent_id>",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
+Date: <UTC date string>
 ```
 
-**Step 2:** Sign the string with the agent's Ed25519 private key using `nacl.sign.detached()`.
-
-```javascript
-import nacl from 'tweetnacl';
-
-const signingString = [
-  `(request-target): post /api/agents/agent-123/heartbeat`,
-  `host: agentdispatch.fly.dev`,
-  `date: ${new Date().toUTCString()}`
-].join('\n');
-
-const message = Buffer.from(signingString, 'utf8');
-const signature = nacl.sign.detached(message, secretKeyBytes);
+**Signing string format:**
+```
+(request-target): <method lowercase> <path>
+host: <host>
+date: <date header value>
 ```
 
-**Step 3:** Base64-encode the raw signature bytes.
+Lines joined with `\n`. Date must be within +/- 5 minutes of server time.
 
-```javascript
-const sigBase64 = Buffer.from(signature).toString('base64');
-```
-
-**Step 4:** Build the `Signature` header value:
-
-```
-Signature: keyId="agent-123",algorithm="ed25519",headers="(request-target) host date",signature="<base64-encoded-signature>"
-```
-
-**Requirements:**
-
-| Requirement | Details |
-|---|---|
-| `(request-target)` | MUST be included in the signed headers list. Binds the signature to the specific HTTP method and path. |
-| `date` | MUST be included in the signed headers list. Enables replay protection. |
-| Date freshness | The `Date` header value must be within +/- 5 minutes of the server's clock. |
-| `keyId` | Must match the agent ID in the URL path, or be a valid DID (`did:seed:*` or `did:web:*`). |
-| Algorithm | Only `ed25519` is supported. If `algorithm` is specified, it must be `ed25519`. |
-| Agent-URL binding | The signing agent's ID must match the target agent in the URL path (prevents Agent A from accessing Agent B's resources). |
-
-**Signature verification errors:**
-
-| HTTP Status | Error Code | Cause |
-|---|---|---|
-| 400 | `INVALID_SIGNATURE_HEADER` | Missing `keyId` or `signature` in header |
-| 400 | `UNSUPPORTED_ALGORITHM` | Algorithm is not `ed25519` |
-| 400 | `INSUFFICIENT_SIGNED_HEADERS` | `(request-target)` not in signed headers |
-| 400 | `DATE_HEADER_REQUIRED` | `date` not in signed headers or Date header missing |
-| 403 | `REQUEST_EXPIRED` | Date header outside +/- 5 minute window |
-| 403 | `SIGNATURE_INVALID` | Cryptographic verification failed |
-| 403 | `FORBIDDEN` | Signature keyId does not match target agent |
-| 403 | `REGISTRATION_PENDING` | Agent registration awaiting approval |
-| 403 | `REGISTRATION_REJECTED` | Agent registration was rejected |
-| 404 | `AGENT_NOT_FOUND` | No agent found for the given keyId |
-
-**DID-based keyId resolution:**
-
-The `keyId` field supports three formats:
-
-1. **Plain agent ID**: `keyId="my-agent"` -- looks up the agent directly.
-2. **did:seed**: `keyId="did:seed:..."` -- resolves agent by DID seed.
-3. **did:web**: `keyId="did:web:example.com"` -- fetches the DID document from `https://example.com/.well-known/did.json`, extracts Ed25519 keys, and creates/reuses a shadow agent record. DID documents are cached in-process for 5 minutes.
+**Cross-agent send exception:** `POST /api/agents/:id/messages` accepts any registered agent's HTTP Signature — the signing agent does not have to match the `:agentId` URL parameter.
 
 ### Master API Key Authentication
 
-Administrative endpoints (key issuance, agent approval/rejection, pending agent listing) require the master API key. The master key is set via the `MASTER_API_KEY` environment variable. Provide it via `X-Api-Key` or `Authorization: Bearer <key>`.
+```
+X-Api-Key: <MASTER_API_KEY value>
+```
+
+Required for admin endpoints: approve/reject agents, list pending agents.
 
 ---
 
@@ -199,342 +78,172 @@ Administrative endpoints (key issuance, agent approval/rejection, pending agent 
 
 ### GET /health
 
-Health check endpoint. No authentication required.
+Health check. No authentication required.
 
-**Request:**
-
-```
-GET /health
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "status": "healthy",
-  "timestamp": "2026-02-25T12:00:00.000Z",
+  "timestamp": "2026-02-26T00:00:00.000Z",
   "version": "1.0.0"
 }
 ```
 
 ---
 
-### GET /api/stats
+### GET /docs
 
-Returns storage-level statistics (agent count, message count, etc.).
-
-**Authentication:** API key (when `API_KEY_REQUIRED=true`)
-
-**Request:**
-
-```
-GET /api/stats
-X-Api-Key: <api-key>
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "agents": 42,
-  "messages": 1500,
-  "groups": 8
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 500 | `STATS_FAILED` | Internal error retrieving statistics |
+Swagger UI. No authentication required.
 
 ---
 
 ### GET /openapi.json
 
-Returns the full OpenAPI 3.1 specification as JSON. No authentication required.
-
-**Request:**
-
-```
-GET /openapi.json
-```
-
-**Response: `200 OK`**
-
-The OpenAPI specification document in JSON format.
+Raw OpenAPI specification. No authentication required.
 
 ---
 
-### GET /docs
+### GET /api/stats
 
-Serves the Swagger UI documentation page. No authentication required.
+System-wide statistics.
 
-**Request:**
+**Auth:** API Key
 
-```
-GET /docs
-```
-
-**Response: `200 OK`**
-
-An interactive Swagger UI HTML page for exploring the API.
-
----
-
-## Agent Registration & Management
-
-### POST /api/agents/register
-
-Register a new agent. This endpoint is exempt from API key authentication.
-
-Three registration modes are supported depending on which parameters are provided:
-
-| Mode | Parameters | Behavior |
-|---|---|---|
-| **Legacy** (default) | Neither `seed` nor `public_key` | Server generates a random Ed25519 keypair. Returns `secret_key`. |
-| **Seed-based** | `seed` + `tenant_id` | Deterministic keypair derived via HKDF from the seed. Returns `secret_key`. |
-| **Import** | `public_key` | Client retains private key. `secret_key` is NOT returned. |
-
-**Request:**
-
-```
-POST /api/agents/register
-Content-Type: application/json
-```
-
+**Response 200:**
 ```json
 {
-  "agent_id": "my-agent",
-  "agent_type": "worker",
-  "metadata": { "purpose": "data-processing" },
-  "webhook_url": "https://example.com/webhook",
-  "webhook_secret": "my-secret",
-  "seed": "base64-encoded-32-byte-seed",
-  "public_key": "base64-encoded-ed25519-public-key",
-  "tenant_id": "acme-corp"
+  "agents": 42,
+  "messages": 1337,
+  "groups": 5
 }
 ```
 
+---
+
+## Agent Registration and Management
+
+### POST /api/agents/register
+
+Register a new agent. No authentication required.
+
+**Request body:**
+
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `agent_id` | string | No | Unique agent identifier. Auto-generated if omitted. |
-| `agent_type` | string | No | Agent classification (e.g., `worker`, `supervisor`). |
-| `metadata` | object | No | Arbitrary metadata attached to the agent. |
-| `webhook_url` | string | No | URL for push-based message delivery. |
-| `webhook_secret` | string | No | Secret for webhook signature verification. |
-| `seed` | string | No | Base64-encoded 32-byte seed for deterministic key derivation. Requires `tenant_id`. |
-| `public_key` | string | No | Base64-encoded Ed25519 public key for import mode. |
-| `tenant_id` | string | No | Tenant namespace for the agent. Required with `seed`. |
+|-------|------|----------|-------------|
+| `agent_id` | string | No | Custom agent ID. Must match `^[a-zA-Z0-9._\-:]+$`. If omitted, server generates `agent-<uuid>`. |
+| `agent_type` | string | No | Agent type label (e.g., `claude_session`). Default: `generic`. |
+| `metadata` | object | No | Arbitrary metadata. |
+| `webhook_url` | string | No | URL for push delivery of incoming messages. |
+| `webhook_secret` | string | No | HMAC secret for webhook verification. Auto-generated if `webhook_url` is set and this is omitted. |
+| `seed` | string | No | Base64-encoded 32-byte seed for deterministic keypair derivation. Requires `tenant_id`. |
+| `public_key` | string | No | Base64-encoded Ed25519 public key (import mode). If provided, `seed` is ignored and no `secret_key` is returned. |
+| `tenant_id` | string | No | Tenant identifier. Required for seed-based registration. |
 
-**Response: `201 Created`**
+**Registration modes:**
+- **Legacy** (no `seed`, no `public_key`): Server generates random Ed25519 keypair. Returns `secret_key`.
+- **Seed-based** (`seed` + `tenant_id`): Server derives keypair via HKDF-SHA256. Returns `secret_key`. Deterministic — same seed + tenant + agent ID always yields the same keypair.
+- **Import** (`public_key`): Client provides public key. No `secret_key` returned.
 
+**Response 201:**
 ```json
 {
   "agent_id": "my-agent",
-  "agent_type": "worker",
-  "public_key": "base64-encoded-public-key",
+  "agent_type": "generic",
+  "public_key": "base64-ed25519-public-key",
   "did": "did:seed:...",
   "registration_mode": "legacy",
   "registration_status": "approved",
   "key_version": 1,
   "verification_tier": "unverified",
   "tenant_id": null,
-  "webhook_url": "https://example.com/webhook",
-  "webhook_secret": "my-secret",
+  "webhook_url": null,
+  "webhook_secret": null,
   "heartbeat": {
-    "last_heartbeat": 1740489600000,
+    "last_heartbeat": 1740000000000,
     "status": "online",
     "interval_ms": 60000,
     "timeout_ms": 300000
   },
-  "secret_key": "base64-encoded-secret-key"
+  "secret_key": "base64-64-byte-ed25519-secret-key"
 }
 ```
 
-Note: `secret_key` is only included for legacy and seed-based registration modes.
+`secret_key` is only present for legacy and seed-based registration. It is never stored server-side — save it immediately.
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `REGISTRATION_FAILED` | Registration error (e.g., duplicate agent_id, invalid parameters) |
+**Response 400:**
+```json
+{"error": "REGISTRATION_FAILED", "message": "agent_id may only contain letters, numbers, dots, underscores, hyphens, and colons"}
+```
 
 ---
 
 ### GET /api/agents/:agentId
 
-Retrieve agent details. The `secret_key` field is never included in the response.
+Get agent details.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
+**Path parameters:**
+- `agentId` — Agent ID
 
-```
-GET /api/agents/my-agent
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
+**Response 200:** Agent record (secret_key excluded)
 
 ```json
 {
   "agent_id": "my-agent",
-  "agent_type": "worker",
-  "public_key": "base64-encoded-public-key",
+  "agent_type": "generic",
+  "public_key": "base64...",
   "did": "did:seed:...",
   "registration_mode": "legacy",
   "registration_status": "approved",
   "key_version": 1,
   "verification_tier": "unverified",
   "tenant_id": null,
-  "webhook_url": "https://example.com/webhook",
-  "webhook_secret": "my-secret",
-  "heartbeat": {
-    "last_heartbeat": 1740489600000,
-    "status": "online",
-    "interval_ms": 60000,
-    "timeout_ms": 300000
-  },
+  "webhook_url": null,
+  "heartbeat": {"last_heartbeat": 1740000000000, "status": "online", "interval_ms": 60000, "timeout_ms": 300000},
   "trusted_agents": [],
-  "blocked_agents": [],
   "metadata": {}
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 404 | `AGENT_NOT_FOUND` | Agent does not exist |
 
 ---
 
 ### DELETE /api/agents/:agentId
 
-Deregister (delete) an agent and all associated data.
+Deregister and permanently delete an agent.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
+**Response 204:** No content
 
+**Response 400:**
+```json
+{"error": "DEREGISTER_FAILED", "message": "..."}
 ```
-DELETE /api/agents/my-agent
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `204 No Content`**
-
-No response body.
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `DEREGISTER_FAILED` | Deregistration error |
 
 ---
 
 ### POST /api/agents/:agentId/heartbeat
 
-Update agent heartbeat to indicate the agent is still active. The server uses heartbeats to mark agents as offline after a configurable timeout.
+Update agent heartbeat (liveness signal).
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/heartbeat
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body (optional):**
-
-```json
-{
-  "metadata": { "cpu": 0.45, "queue_depth": 12 }
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `metadata` | object | No | Arbitrary metadata to attach to the heartbeat |
+|-------|------|----------|-------------|
+| `metadata` | object | No | Metadata to merge into agent record |
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "ok": true,
-  "last_heartbeat": 1740489600000,
-  "timeout_at": 1740489900000,
+  "last_heartbeat": 1740000000000,
+  "timeout_at": 1740000300000,
   "status": "online"
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `HEARTBEAT_FAILED` | Heartbeat update error |
-
----
-
-### POST /api/agents/:agentId/rotate-key
-
-Rotate the Ed25519 keypair for a seed-based agent. Derives a new keypair at the next version using the same seed and HKDF.
-
-**Authentication:** HTTP Signature
-
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/rotate-key
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body:**
-
-```json
-{
-  "seed": "base64-encoded-32-byte-seed",
-  "tenant_id": "acme-corp"
-}
-```
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `seed` | string | Yes | Base64-encoded seed that was used during registration |
-| `tenant_id` | string | Yes | Tenant ID that was used during registration |
-
-**Response: `200 OK`**
-
-```json
-{
-  "agent_id": "my-agent",
-  "public_key": "new-base64-encoded-public-key",
-  "did": "did:seed:...",
-  "key_version": 2,
-  "secret_key": "new-base64-encoded-secret-key"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `SEED_AND_TENANT_REQUIRED` | Both `seed` and `tenant_id` must be provided |
-| 400 | `KEY_ROTATION_FAILED` | Rotation error (e.g., agent is not seed-based) |
-| 403 | `SEED_MISMATCH` | Provided seed does not derive a key matching the agent's current public key |
 
 ---
 
@@ -542,24 +251,14 @@ Host: agentdispatch.fly.dev
 
 ### GET /api/agents/:agentId/trusted
 
-List agents that this agent trusts.
+List agents trusted by this agent.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-GET /api/agents/my-agent/trusted
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "trusted_agents": ["agent-alpha", "agent-beta"]
+  "trusted_agents": ["agent-a", "agent-b"]
 }
 ```
 
@@ -567,46 +266,22 @@ Host: agentdispatch.fly.dev
 
 ### POST /api/agents/:agentId/trusted
 
-Add an agent to the trusted list.
+Add an agent to the trusted list. Messages from untrusted agents are rejected when the trusted list is non-empty.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/trusted
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body:**
-
-```json
-{
-  "agent_id": "agent-alpha"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `agent_id` | string | Yes | The agent ID to add to the trusted list |
+|-------|------|----------|-------------|
+| `agent_id` | string | Yes | Agent ID to trust |
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "trusted_agents": ["agent-alpha"]
+  "trusted_agents": ["agent-a", "agent-b", "new-agent"]
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `AGENT_ID_REQUIRED` | `agent_id` field is missing |
-| 400 | `ADD_TRUSTED_FAILED` | Failed to add trusted agent |
 
 ---
 
@@ -614,30 +289,14 @@ Host: agentdispatch.fly.dev
 
 Remove an agent from the trusted list.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-DELETE /api/agents/my-agent/trusted/agent-alpha
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "trusted_agents": []
+  "trusted_agents": ["agent-a"]
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `REMOVE_TRUSTED_FAILED` | Failed to remove trusted agent |
 
 ---
 
@@ -645,73 +304,40 @@ Host: agentdispatch.fly.dev
 
 ### POST /api/agents/:agentId/webhook
 
-Configure a webhook URL for push-based message delivery. When a message arrives in the agent's inbox, ADMP will POST the message envelope to this URL.
+Configure a push delivery webhook. When set, the server POSTs each incoming message to this URL (fire-and-forget; messages remain in inbox for pull as fallback).
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/webhook
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body:**
-
-```json
-{
-  "webhook_url": "https://example.com/agent-webhook",
-  "webhook_secret": "optional-shared-secret"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `webhook_url` | string | Yes | HTTPS URL to receive message deliveries |
-| `webhook_secret` | string | No | Shared secret for HMAC signature verification of webhook payloads |
+|-------|------|----------|-------------|
+| `webhook_url` | string | Yes | Webhook endpoint URL |
+| `webhook_secret` | string | No | HMAC-SHA256 secret for payload verification. Auto-generated if omitted. |
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "agent_id": "my-agent",
-  "webhook_url": "https://example.com/agent-webhook",
-  "webhook_secret": "optional-shared-secret"
+  "webhook_url": "https://example.com/webhook",
+  "webhook_secret": "auto-generated-or-provided-secret"
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `WEBHOOK_URL_REQUIRED` | `webhook_url` field is missing |
-| 400 | `WEBHOOK_CONFIG_FAILED` | Failed to configure webhook |
+Webhook delivery includes headers: `X-ADMP-Event`, `X-ADMP-Message-ID`, `X-ADMP-Delivery-Attempt`.
 
 ---
 
 ### GET /api/agents/:agentId/webhook
 
-Get the current webhook configuration for an agent.
+Get webhook configuration (secret not included).
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-GET /api/agents/my-agent/webhook
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "webhook_url": "https://example.com/agent-webhook",
+  "webhook_url": "https://example.com/webhook",
   "webhook_configured": true
 }
 ```
@@ -720,21 +346,11 @@ Host: agentdispatch.fly.dev
 
 ### DELETE /api/agents/:agentId/webhook
 
-Remove the webhook configuration for an agent.
+Remove webhook configuration.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-DELETE /api/agents/my-agent/webhook
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "message": "Webhook removed",
@@ -746,38 +362,19 @@ Host: agentdispatch.fly.dev
 
 ## Identity Verification
 
-ADMP supports progressive identity verification tiers. Agents start as `unverified` and can upgrade by linking external identities or proving cryptographic key ownership.
-
 ### POST /api/agents/:agentId/verify/github
 
-Link a GitHub handle to the agent, upgrading the agent's verification tier.
+Link a GitHub handle to the agent. Upgrades `verification_tier` to `github`.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/verify/github
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body:**
-
-```json
-{
-  "github_handle": "octocat"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `github_handle` | string | Yes | The GitHub username to link |
+|-------|------|----------|-------------|
+| `github_handle` | string | Yes | GitHub username |
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "agent_id": "my-agent",
@@ -786,31 +383,15 @@ Host: agentdispatch.fly.dev
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `GITHUB_LINK_FAILED` | Failed to link GitHub handle |
-
 ---
 
 ### POST /api/agents/:agentId/verify/cryptographic
 
-Upgrade the agent to cryptographic verification tier. Confirms that the agent controls the private key corresponding to its registered public key.
+Confirm cryptographic verification tier (requires seed-based registration with DID).
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/verify/cryptographic
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "agent_id": "my-agent",
@@ -819,260 +400,177 @@ Host: agentdispatch.fly.dev
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `CRYPTOGRAPHIC_VERIFY_FAILED` | Verification failed |
-
 ---
 
 ### GET /api/agents/:agentId/identity
 
-Get the full identity and verification status for an agent.
+Get verification status and identity details.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-GET /api/agents/my-agent/identity
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "agent_id": "my-agent",
-  "verification_tier": "cryptographic",
-  "did": "did:seed:...",
-  "github_handle": "octocat"
+  "verification_tier": "github",
+  "github_handle": "octocat",
+  "did": "did:seed:..."
 }
 ```
 
 ---
 
-## Messaging (Inbox)
+## Key Rotation
 
-The ADMP inbox provides at-least-once delivery with lease-based processing. Messages follow the lifecycle: `queued` -> `delivered` -> `leased` -> `acked`. A `nack` returns the message to `queued` for reprocessing.
+### POST /api/agents/:agentId/rotate-key
+
+Rotate the Ed25519 signing key. Only supported for seed-based agents (`registration_mode: "seed"`).
+
+The old key remains valid for 24 hours during the rotation window so in-flight messages still verify.
+
+**Auth:** HTTP Signature (must be the agent itself, signed with current key)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `seed` | string | Yes | Base64-encoded master seed (must derive the current public key) |
+| `tenant_id` | string | Yes | Tenant ID used in key derivation |
+
+**Response 200:**
+```json
+{
+  "agent_id": "my-agent",
+  "public_key": "new-base64-public-key",
+  "did": "new-did:seed:...",
+  "key_version": 2,
+  "secret_key": "new-base64-secret-key"
+}
+```
+
+**Response 403:**
+```json
+{"error": "SEED_MISMATCH", "message": "Provided seed does not match current agent key"}
+```
+
+---
+
+## Inbox: Message Operations
 
 ### POST /api/agents/:agentId/messages
 
-Send a message to an agent's inbox. This is the primary endpoint for inter-agent communication.
+Send a message to an agent's inbox.
 
-**Authentication:** API key (when enforcement is enabled). Message-level Ed25519 signatures in the envelope body are optional but verified if present.
+**Auth:** API Key — any registered, approved agent may send (cross-agent messaging is the core use case). HTTP Signatures are also accepted.
 
-**Request Headers:**
-
-```
-POST /api/agents/recipient-agent/messages
-Content-Type: application/json
-X-Api-Key: <api-key>
-```
-
-**Request Body:**
-
-```json
-{
-  "version": "1.0",
-  "type": "task.request",
-  "from": "sender-agent",
-  "to": "recipient-agent",
-  "subject": "process_data",
-  "correlation_id": "corr-abc-123",
-  "headers": {
-    "priority": "high"
-  },
-  "body": {
-    "dataset": "users",
-    "action": "export"
-  },
-  "ttl_sec": 86400,
-  "timestamp": "2026-02-25T12:00:00Z",
-  "signature": {
-    "alg": "ed25519",
-    "kid": "sender-agent",
-    "sig": "base64-encoded-signature"
-  },
-  "ephemeral": false,
-  "ttl": 3600
-}
-```
+**Request body:** ADMP message envelope with optional top-level fields:
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `version` | string | No | Protocol version (default `"1.0"`) |
-| `type` | string | No | Message type (e.g., `task.request`, `task.response`) |
-| `from` | string | Yes | Sender agent ID |
-| `to` | string | No | Recipient agent ID. Auto-set from URL path if omitted. |
-| `subject` | string | No | Message subject/action |
-| `correlation_id` | string | No | ID for correlating request/response pairs |
-| `headers` | object | No | Custom headers (e.g., priority, routing hints) |
-| `body` | any | Yes | Message payload (object, string, or any JSON value) |
-| `ttl_sec` | number | No | Time-to-live in seconds for the message |
-| `timestamp` | string | No | ISO 8601 timestamp of message creation |
-| `signature` | object | No | Optional message-level Ed25519 signature |
-| `ephemeral` | boolean | No | If `true`, message is auto-purged after acknowledgment or TTL expiry |
-| `ttl` | number | No | Ephemeral TTL in seconds |
+|-------|------|----------|-------------|
+| `version` | string | Yes | Must be `"1.0"` |
+| `from` | string | Yes | Sender identifier. Accepts: bare agent ID, `agent://` URI, or `did:seed:` DID. |
+| `to` | string | Yes | Recipient identifier. Accepts: bare agent ID, `agent://` URI, or `did:seed:` DID. If omitted, defaults to `:agentId` from URL. |
+| `subject` | string | Yes | Message subject / type |
+| `timestamp` | string | Yes | ISO-8601 timestamp. Must be within +/- 5 minutes. |
+| `id` | string | No | Message UUID. Auto-generated if omitted. |
+| `type` | string | No | Message type (e.g., `task.request`) |
+| `body` | any | No | Message payload |
+| `correlation_id` | string | No | Correlation ID for threading |
+| `headers` | object | No | Custom metadata headers |
+| `ttl_sec` | number | No | Message TTL in seconds (default: `MESSAGE_TTL_SEC` env, 86400) |
+| `signature` | object | No | Envelope Ed25519 signature `{alg, kid, sig}` |
+| `ephemeral` | boolean | No | *Top-level send option.* If `true`, message body is purged on ack. |
+| `ttl` | string/number | No | *Top-level send option.* Auto-purge TTL (e.g., `"5m"`, `3600`). |
 
-**Response: `201 Created`**
-
+**Response 201:**
 ```json
 {
-  "message_id": "msg-uuid-1234",
-  "status": "delivered"
+  "message_id": "uuid",
+  "status": "queued"
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `SEND_FAILED` | General send failure |
-| 400 | `INVALID_TIMESTAMP` | Message timestamp is malformed or out of acceptable range |
-| 403 | `INVALID_SIGNATURE` | Message-level signature verification failed |
-| 404 | `RECIPIENT_NOT_FOUND` | Target agent does not exist |
+**Response 404:**
+```json
+{"error": "RECIPIENT_NOT_FOUND", "message": "Recipient agent my-agent not found"}
+```
 
 ---
 
 ### POST /api/agents/:agentId/inbox/pull
 
-Pull the next available message from the agent's inbox. The message is leased (locked) for a configurable duration to prevent other consumers from processing it concurrently.
+Pull the next message from the inbox. The message is leased (locked) for the duration of `visibility_timeout` — it will not be returned to other pull calls until the lease expires or is released via ack/nack.
 
-**Authentication:** HTTP Signature
+Returns 204 (no content) when the inbox is empty.
 
-**Request Headers:**
+**Auth:** HTTP Signature (must be the agent itself)
 
-```
-POST /api/agents/my-agent/inbox/pull
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body (optional):**
-
-```json
-{
-  "visibility_timeout": 30
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `visibility_timeout` | number | No | Lease duration in seconds. The message is hidden from other pull requests until this timeout expires. |
+|-------|------|----------|-------------|
+| `visibility_timeout` | number | No | Lease duration in seconds. Default: 60. |
 
-**Response: `200 OK`** (message available)
-
+**Response 200:**
 ```json
 {
-  "message_id": "msg-uuid-1234",
+  "message_id": "uuid",
   "envelope": {
     "version": "1.0",
-    "type": "task.request",
+    "id": "uuid",
     "from": "sender-agent",
     "to": "my-agent",
-    "subject": "process_data",
-    "body": { "dataset": "users" }
+    "subject": "task.request",
+    "body": {"action": "summarize"},
+    "timestamp": "2026-02-26T00:00:00Z"
   },
-  "lease_until": 1740490200000,
+  "lease_until": 1740000060000,
   "attempts": 1
 }
 ```
 
-**Response: `204 No Content`** (inbox empty)
-
-No response body.
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `PULL_FAILED` | Failed to pull from inbox |
+**Response 204:** Inbox empty (no body)
 
 ---
 
 ### POST /api/agents/:agentId/messages/:messageId/ack
 
-Acknowledge successful processing of a message. The message is permanently removed from the inbox.
+Acknowledge a message, confirming successful processing. The message must currently be in `leased` status. Ephemeral messages have their body purged on ack.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/messages/msg-uuid-1234/ack
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body (optional):**
-
-```json
-{
-  "result": { "status": "completed", "output": "42 records exported" }
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `result` | any | No | Optional processing result to attach to the acknowledgment |
+|-------|------|----------|-------------|
+| `result` | any | No | Processing result (stored with message record) |
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
-{
-  "ok": true
-}
+{"ok": true}
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `ACK_FAILED` | Failed to acknowledge message |
-| 404 | `MESSAGE_NOT_FOUND` | Message does not exist or is not leased by this agent |
+**Response 404:**
+```json
+{"error": "MESSAGE_NOT_FOUND", "message": "Message uuid not found"}
+```
 
 ---
 
 ### POST /api/agents/:agentId/messages/:messageId/nack
 
-Negative acknowledgment. Requeue the message for later processing or extend the lease duration.
+Negative acknowledge — either requeue the message or extend the current lease.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/messages/msg-uuid-1234/nack
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Request Body (optional):**
-
-```json
-{
-  "extend_sec": 60,
-  "requeue": true
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `extend_sec` | number | No | Extend the lease by this many seconds |
-| `requeue` | boolean | No | If `true`, immediately requeue the message for other consumers |
+|-------|------|----------|-------------|
+| `extend_sec` | number | No | Extend the lease by this many seconds from the current lease base |
+| `requeue` | boolean | No | Requeue immediately (default behavior if `extend_sec` not provided) |
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "ok": true,
@@ -1081,121 +579,93 @@ Host: agentdispatch.fly.dev
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `NACK_FAILED` | Failed to nack message |
-| 404 | `MESSAGE_NOT_FOUND` | Message does not exist |
+Or with `extend_sec`:
+```json
+{
+  "ok": true,
+  "status": "leased",
+  "lease_until": 1740000180000
+}
+```
 
 ---
 
 ### POST /api/agents/:agentId/messages/:messageId/reply
 
-Send a correlated reply to a previously received message. The reply is delivered to the original sender's inbox with the `correlation_id` set to the original message's ID.
+Send a correlated reply to a message. The `correlation_id` is automatically set to the original message ID, and the reply is routed to the original sender's inbox.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
+**Request body:** ADMP message envelope (partial — `from`, `to`, and `correlation_id` are set automatically)
 
-```
-POST /api/agents/my-agent/messages/msg-uuid-1234/reply
-Content-Type: application/json
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `subject` | string | Yes | Reply subject |
+| `body` | any | No | Reply payload |
+| `version` | string | No | Defaults to `"1.0"` |
 
-**Request Body:**
-
-An ADMP message envelope (same structure as the send endpoint body, minus `ephemeral` and `ttl`):
-
+**Response 200:**
 ```json
 {
-  "version": "1.0",
-  "type": "task.response",
-  "from": "my-agent",
-  "subject": "process_data_result",
-  "body": {
-    "status": "success",
-    "records": 42
-  }
+  "message_id": "uuid",
+  "status": "queued"
 }
 ```
-
-**Response: `200 OK`**
-
-```json
-{
-  "message_id": "reply-msg-uuid-5678",
-  "status": "delivered"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `REPLY_FAILED` | Failed to send reply |
-| 404 | `MESSAGE_NOT_FOUND` | Original message not found |
 
 ---
 
 ### GET /api/messages/:messageId/status
 
-Get the delivery status of a specific message.
+Get delivery status of a message. Does not require agent authentication — useful for senders tracking their own messages.
 
-**Authentication:** API key (when enforcement is enabled)
+**Auth:** API Key
 
-**Request:**
-
-```
-GET /api/messages/msg-uuid-1234/status
-X-Api-Key: <api-key>
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "message_id": "msg-uuid-1234",
+  "id": "uuid",
   "status": "acked",
-  "delivered_at": 1740489600000,
-  "acked_at": 1740489660000
+  "created_at": 1740000000000,
+  "updated_at": 1740000060000,
+  "attempts": 1,
+  "lease_until": null,
+  "acked_at": 1740000060000
 }
 ```
 
-**Error Responses:**
+Status values: `queued`, `leased`, `acked`, `expired`, `purged`
 
-| Status | Error Code | Description |
-|---|---|---|
-| 404 | `MESSAGE_NOT_FOUND` | Message not found |
-| 410 | `MESSAGE_EXPIRED` | Message has been purged (ephemeral or TTL expired) |
+**Response 410 (purged/ephemeral):**
+```json
+{
+  "error": "MESSAGE_EXPIRED",
+  "message": "This message has been purged (ephemeral or TTL expired)",
+  "id": "uuid",
+  "from": "sender",
+  "to": "recipient",
+  "subject": "task.request",
+  "status": "purged",
+  "purged_at": 1740000120000,
+  "purge_reason": "acked",
+  "body": null
+}
+```
 
 ---
 
 ### GET /api/agents/:agentId/inbox/stats
 
-Get statistics for an agent's inbox (pending messages, leased count, etc.).
+Get inbox statistics for the agent.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-GET /api/agents/my-agent/inbox/stats
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "pending": 5,
-  "leased": 1,
-  "total": 6
+  "total": 10,
+  "queued": 7,
+  "leased": 2,
+  "acked": 1
 }
 ```
 
@@ -1203,21 +673,11 @@ Host: agentdispatch.fly.dev
 
 ### POST /api/agents/:agentId/inbox/reclaim
 
-Manually reclaim expired leases across all inboxes. Messages whose lease has expired are returned to `queued` status.
+Manually trigger reclamation of expired leases for this agent.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/inbox/reclaim
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "reclaimed": 3
@@ -1228,569 +688,262 @@ Host: agentdispatch.fly.dev
 
 ## Groups
 
-Groups allow multiple agents to communicate in a shared channel. Groups support three access modes: `open` (anyone can join), `key` (requires a join key), and `invite_only` (admin must add members).
-
 ### POST /api/groups
 
-Create a new group. The creating agent becomes the group owner.
+Create a new group.
 
-**Authentication:** Agent auth (URL parameter `:agentId` or `X-Agent-ID` header)
+**Auth:** Agent auth (any registered agent)
 
-**Request Headers:**
-
-```
-POST /api/groups
-Content-Type: application/json
-X-Agent-ID: my-agent
-```
-
-**Request Body:**
-
-```json
-{
-  "name": "data-pipeline-team",
-  "access": {
-    "type": "key",
-    "key": "secret-join-key"
-  },
-  "settings": {
-    "max_members": 50,
-    "message_retention_days": 30
-  }
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | string | Yes | Group name. 1-100 characters. Only letters, numbers, spaces, hyphens, underscores, and periods. |
-| `access` | object | No | Access control configuration |
-| `access.type` | string | No | One of `"open"`, `"key"`, `"invite_only"`. Defaults to `"open"`. |
-| `access.key` | string | No | Join key for `"key"` access type |
-| `settings` | object | No | Group-level settings |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Group name. Max 100 chars. Only letters, numbers, spaces, hyphens, underscores, periods. |
+| `access` | object | No | Access configuration `{type: "open"|"key"|"invite-only", key?}` |
+| `settings` | object | No | Group settings `{max_members?, message_ttl_sec?, history_visible?}` |
 
-**Response: `201 Created`**
-
-```json
-{
-  "id": "grp-uuid-1234",
-  "name": "data-pipeline-team",
-  "members": [
-    { "agent_id": "my-agent", "role": "owner", "joined_at": "2026-02-25T12:00:00Z" }
-  ],
-  "access": { "type": "key" },
-  "settings": { "max_members": 50, "message_retention_days": 30 },
-  "created_at": "2026-02-25T12:00:00Z"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `INVALID_NAME` | Name is empty or not a string |
-| 400 | `NAME_TOO_LONG` | Name exceeds 100 characters |
-| 400 | `INVALID_NAME_CHARS` | Name contains disallowed characters |
+**Response 201:** Group record
 
 ---
 
 ### GET /api/groups/:groupId
 
-Get group information. Members see full group details; non-members see limited information.
+Get group info.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth
 
-**Request Headers:**
+Non-members see limited info: `{id, name, access_type, member_count}`.
+Members see full group record.
 
-```
-GET /api/groups/grp-uuid-1234
-X-Agent-ID: my-agent
-```
-
-**Response: `200 OK`** (member view)
-
+**Response 200 (member):**
 ```json
 {
-  "id": "grp-uuid-1234",
-  "name": "data-pipeline-team",
-  "members": [
-    { "agent_id": "my-agent", "role": "owner", "joined_at": "2026-02-25T12:00:00Z" },
-    { "agent_id": "agent-beta", "role": "member", "joined_at": "2026-02-25T13:00:00Z" }
-  ],
-  "access": { "type": "key" },
-  "settings": {},
-  "created_at": "2026-02-25T12:00:00Z"
+  "id": "group-uuid",
+  "name": "My Group",
+  "access": {"type": "open"},
+  "members": [{"agent_id": "my-agent", "role": "owner", "joined_at": 1740000000000}],
+  "settings": {"max_members": 50, "message_ttl_sec": 604800, "history_visible": true},
+  "created_by": "my-agent",
+  "created_at": 1740000000000
 }
 ```
-
-**Response: `200 OK`** (non-member view)
-
-```json
-{
-  "id": "grp-uuid-1234",
-  "name": "data-pipeline-team",
-  "access_type": "key",
-  "member_count": 2
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 404 | `GROUP_NOT_FOUND` | Group does not exist |
 
 ---
 
 ### PUT /api/groups/:groupId
 
-Update group name or settings. Requires `owner` or `admin` role.
+Update group settings.
 
-**Authentication:** Agent auth (owner/admin)
+**Auth:** Agent auth (admin or owner role required)
 
-**Request Headers:**
-
-```
-PUT /api/groups/grp-uuid-1234
-Content-Type: application/json
-X-Agent-ID: my-agent
-```
-
-**Request Body:**
-
-```json
-{
-  "name": "updated-team-name",
-  "settings": { "max_members": 100 }
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+|-------|------|----------|-------------|
 | `name` | string | No | New group name |
-| `settings` | object | No | Updated group settings |
+| `settings` | object | No | Updated settings |
 
-**Response: `200 OK`**
-
-The full updated group object.
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 403 | `UPDATE_GROUP_FAILED` | Insufficient permissions (requires owner or admin role) |
-| 404 | `UPDATE_GROUP_FAILED` | Group not found |
+**Response 200:** Updated group record
 
 ---
 
 ### DELETE /api/groups/:groupId
 
-Delete a group. Requires `owner` role.
+Delete a group. Owner only.
 
-**Authentication:** Agent auth (owner)
+**Auth:** Agent auth (owner role required)
 
-**Request Headers:**
-
-```
-DELETE /api/groups/grp-uuid-1234
-X-Agent-ID: my-agent
-```
-
-**Response: `204 No Content`**
-
-No response body.
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 403 | `DELETE_GROUP_FAILED` | Insufficient permissions (requires owner role) |
-| 404 | `DELETE_GROUP_FAILED` | Group not found |
+**Response 204:** No content
 
 ---
 
 ### GET /api/groups/:groupId/members
 
-List all members of a group. Requires membership.
+List group members.
 
-**Authentication:** Agent auth (member)
+**Auth:** Agent auth (must be a member)
 
-**Request Headers:**
-
-```
-GET /api/groups/grp-uuid-1234/members
-X-Agent-ID: my-agent
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "members": [
-    { "agent_id": "my-agent", "role": "owner", "joined_at": "2026-02-25T12:00:00Z" },
-    { "agent_id": "agent-beta", "role": "member", "joined_at": "2026-02-25T13:00:00Z" }
+    {"agent_id": "my-agent", "role": "owner", "joined_at": 1740000000000},
+    {"agent_id": "other-agent", "role": "member", "joined_at": 1740000060000}
   ]
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 403 | `LIST_MEMBERS_FAILED` | Not a member of the group |
-| 404 | `LIST_MEMBERS_FAILED` | Group not found |
 
 ---
 
 ### POST /api/groups/:groupId/members
 
-Add a member to the group. Requires `owner` or `admin` role.
+Add a member to the group. Admin or owner only.
 
-**Authentication:** Agent auth (owner/admin)
+**Auth:** Agent auth (admin or owner role required)
 
-**Request Headers:**
-
-```
-POST /api/groups/grp-uuid-1234/members
-Content-Type: application/json
-X-Agent-ID: my-agent
-```
-
-**Request Body:**
-
-```json
-{
-  "agent_id": "agent-gamma",
-  "role": "member"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `agent_id` | string | Yes | The agent to add to the group |
-| `role` | string | No | Role for the new member (default: `"member"`) |
+|-------|------|----------|-------------|
+| `agent_id` | string | Yes | Agent ID to add |
+| `role` | string | No | Role: `member` (default), `admin` |
 
-**Response: `200 OK`**
-
-The full updated group object.
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `AGENT_ID_REQUIRED` | `agent_id` field is missing |
-| 403 | `ADD_MEMBER_FAILED` | Insufficient permissions |
-| 409 | `ADD_MEMBER_FAILED` | Agent is already a member or group is at maximum capacity |
+**Response 200:** Updated group record
 
 ---
 
 ### DELETE /api/groups/:groupId/members/:agentId
 
-Remove a member from the group. Requires `owner` or `admin` role.
+Remove a member from the group. Cannot remove the owner.
 
-**Authentication:** Agent auth (owner/admin)
+**Auth:** Agent auth (admin or owner role required)
 
-**Request Headers:**
-
-```
-DELETE /api/groups/grp-uuid-1234/members/agent-gamma
-X-Agent-ID: my-agent
-```
-
-**Response: `200 OK`**
-
-The full updated group object.
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 403 | `REMOVE_MEMBER_FAILED` | Insufficient permissions or cannot remove group owner |
-| 404 | `REMOVE_MEMBER_FAILED` | Group or member not found |
+**Response 200:** Updated group record
 
 ---
 
 ### POST /api/groups/:groupId/join
 
-Join a group. Available for `open` and `key`-protected groups.
+Join a group.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth
 
-**Request Headers:**
-
-```
-POST /api/groups/grp-uuid-1234/join
-Content-Type: application/json
-X-Agent-ID: my-agent
-```
-
-**Request Body (for key-protected groups):**
-
-```json
-{
-  "key": "secret-join-key"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `key` | string | Conditional | Required for groups with `access.type: "key"` |
+|-------|------|----------|-------------|
+| `key` | string | No | Join key (required for key-protected groups) |
 
-**Response: `200 OK`**
+**Response 200:** Group record
 
-The full group object (now including the new member).
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 403 | `JOIN_FAILED` | Group is invite-only, or invalid join key provided |
-| 409 | `JOIN_FAILED` | Already a member |
+**Response 403:**
+```json
+{"error": "JOIN_FAILED", "message": "invite-only group requires explicit invitation"}
+```
 
 ---
 
 ### POST /api/groups/:groupId/leave
 
-Leave a group.
+Leave a group. The group owner cannot leave.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth
 
-**Request Headers:**
-
-```
-POST /api/groups/grp-uuid-1234/leave
-X-Agent-ID: my-agent
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
-{
-  "message": "Left group",
-  "group_id": "grp-uuid-1234"
-}
+{"message": "Left group", "group_id": "group-uuid"}
 ```
 
 ---
 
 ### POST /api/groups/:groupId/messages
 
-Post a message to all group members. Requires membership.
+Post a message to the group. Fans out to each member's individual inbox (excluding the sender).
 
-**Authentication:** Agent auth (member)
+**Auth:** Agent auth (must be a member)
 
-**Request Headers:**
-
-```
-POST /api/groups/grp-uuid-1234/messages
-Content-Type: application/json
-X-Agent-ID: my-agent
-```
-
-**Request Body:**
-
-```json
-{
-  "subject": "pipeline-status",
-  "body": { "stage": "complete", "records": 1500 },
-  "correlation_id": "job-789",
-  "reply_to": "msg-uuid-previous"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `subject` | string | Yes | Message subject. Maximum 200 characters. |
-| `body` | any | Yes | Message payload. Maximum 1 MB when serialized. |
-| `correlation_id` | string | No | Correlation ID for threading |
-| `reply_to` | string | No | ID of the message being replied to |
+|-------|------|----------|-------------|
+| `subject` | string | Yes | Message subject (max 200 chars) |
+| `body` | any | Yes | Message body (max 1MB) |
+| `correlation_id` | string | No | Correlation ID |
+| `reply_to` | string | No | Reply-to agent ID |
 
-**Response: `201 Created`**
-
+**Response 201:**
 ```json
 {
-  "message_id": "grp-msg-uuid-1234",
-  "delivered_to": 3,
-  "group_id": "grp-uuid-1234"
+  "group_id": "group-uuid",
+  "delivered_to": ["agent-a", "agent-b"],
+  "message_ids": ["uuid-a", "uuid-b"]
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `INVALID_MESSAGE` | Missing `subject` or `body` |
-| 400 | `INVALID_SUBJECT` | Subject exceeds 200 characters |
-| 400 | `BODY_TOO_LARGE` | Message body exceeds 1 MB |
-| 403 | `POST_MESSAGE_FAILED` | Not a member of the group |
 
 ---
 
 ### GET /api/groups/:groupId/messages
 
-Get group message history. Requires membership.
+Get group message history.
 
-**Authentication:** Agent auth (member)
+**Auth:** Agent auth (must be a member)
 
-**Request Headers:**
+**Query parameters:**
+- `limit` — Number of messages to return (default: 50)
 
-```
-GET /api/groups/grp-uuid-1234/messages?limit=25
-X-Agent-ID: my-agent
-```
-
-**Query Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `limit` | number | 50 | Maximum number of messages to return |
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "messages": [
-    {
-      "id": "grp-msg-uuid-1234",
-      "from": "my-agent",
-      "subject": "pipeline-status",
-      "body": { "stage": "complete", "records": 1500 },
-      "timestamp": "2026-02-25T12:00:00Z"
-    }
-  ],
-  "count": 1,
+  "messages": [...],
+  "count": 10,
   "has_more": false
 }
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 403 | `GET_MESSAGES_FAILED` | Not a member of the group |
-| 404 | `GET_MESSAGES_FAILED` | Group not found |
 
 ---
 
 ### GET /api/agents/:agentId/groups
 
-List all groups the agent is a member of.
+List groups the agent belongs to.
 
-**Authentication:** HTTP Signature
+**Auth:** HTTP Signature (must be the agent itself)
 
-**Request Headers:**
-
-```
-GET /api/agents/my-agent/groups
-Signature: keyId="my-agent",algorithm="ed25519",headers="(request-target) host date",signature="<base64>"
-Date: Thu, 20 Feb 2026 12:00:00 GMT
-Host: agentdispatch.fly.dev
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "groups": [
-    {
-      "id": "grp-uuid-1234",
-      "name": "data-pipeline-team",
-      "role": "owner",
-      "member_count": 5
-    },
-    {
-      "id": "grp-uuid-5678",
-      "name": "monitoring",
-      "role": "member",
-      "member_count": 12
-    }
+    {"id": "group-uuid", "name": "My Group", "role": "owner", "member_count": 3}
   ]
 }
 ```
 
 ---
 
-## Outbox (Email via Mailgun)
-
-The outbox enables agents to send emails via Mailgun. Agents must first configure and verify a custom domain before sending.
+## Outbox (Email)
 
 ### POST /api/agents/:agentId/outbox/domain
 
-Configure a custom domain for outbound email. Each agent can have one domain.
+Configure a custom sending domain for outbound email.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/outbox/domain
-Content-Type: application/json
-X-Agent-ID: my-agent
-```
-
-**Request Body:**
-
-```json
-{
-  "domain": "mail.example.com"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `domain` | string | Yes | The domain to configure for outbound email |
+|-------|------|----------|-------------|
+| `domain` | string | Yes | Domain to configure (e.g., `agents.example.com`) |
 
-**Response: `201 Created`**
+**Response 201:** Domain config record
 
+**Response 409:**
 ```json
-{
-  "agent_id": "my-agent",
-  "domain": "mail.example.com",
-  "status": "unverified",
-  "dns_records": [
-    { "type": "TXT", "name": "mail.example.com", "value": "v=spf1 include:mailgun.org ~all" },
-    { "type": "CNAME", "name": "email.mail.example.com", "value": "mailgun.org" }
-  ]
-}
+{"error": "DOMAIN_CONFIG_FAILED", "message": "Agent already has domain configured"}
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `DOMAIN_REQUIRED` | `domain` field is missing |
-| 409 | `DOMAIN_CONFIG_FAILED` | Agent already has a domain configured |
 
 ---
 
 ### GET /api/agents/:agentId/outbox/domain
 
-Get the current domain configuration and verification status.
+Get domain configuration and DNS verification status.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth (must be the agent itself)
 
-**Request Headers:**
-
-```
-GET /api/agents/my-agent/outbox/domain
-X-Agent-ID: my-agent
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "agent_id": "my-agent",
-  "domain": "mail.example.com",
-  "status": "verified",
-  "dns_records": []
+  "domain": "agents.example.com",
+  "verified": false,
+  "dns_records": [
+    {"type": "TXT", "name": "_dkim...", "value": "..."},
+    {"type": "TXT", "name": "_domainkey...", "value": "..."}
+  ]
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 404 | `NO_DOMAIN` | No domain configured for this agent |
+**Response 404:**
+```json
+{"error": "NO_DOMAIN", "message": "No domain configured for agent my-agent"}
+```
 
 ---
 
@@ -1798,150 +951,68 @@ X-Agent-ID: my-agent
 
 Trigger a DNS verification check for the configured domain.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/outbox/domain/verify
-X-Agent-ID: my-agent
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "agent_id": "my-agent",
-  "domain": "mail.example.com",
-  "status": "verified"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `DOMAIN_VERIFY_FAILED` | DNS verification failed |
-| 404 | `DOMAIN_VERIFY_FAILED` | No domain configured |
+**Response 200:** Updated domain config with verification status
 
 ---
 
 ### DELETE /api/agents/:agentId/outbox/domain
 
-Remove the domain configuration for an agent.
+Remove domain configuration.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth (must be the agent itself)
 
-**Request Headers:**
-
-```
-DELETE /api/agents/my-agent/outbox/domain
-X-Agent-ID: my-agent
-```
-
-**Response: `204 No Content`**
-
-No response body.
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `DOMAIN_DELETE_FAILED` | Deletion error |
-| 404 | `DOMAIN_DELETE_FAILED` | No domain configured |
+**Response 204:** No content
 
 ---
 
 ### POST /api/agents/:agentId/outbox/send
 
-Send an email via Mailgun. Requires a verified domain.
+Send an email via Mailgun.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth (must be the agent itself)
 
-**Request Headers:**
-
-```
-POST /api/agents/my-agent/outbox/send
-Content-Type: application/json
-X-Agent-ID: my-agent
-```
-
-**Request Body:**
-
-```json
-{
-  "to": "user@example.com",
-  "subject": "Task Complete",
-  "body": "The data export has finished. 42 records were processed.",
-  "html": "<p>The data export has finished. <strong>42</strong> records were processed.</p>",
-  "from_name": "Data Pipeline Agent"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `to` | string | Yes | Recipient email address |
-| `subject` | string | Yes | Email subject line |
-| `body` | string | Conditional | Plain text body. Either `body` or `html` must be provided. |
-| `html` | string | Conditional | HTML body. Either `body` or `html` must be provided. |
-| `from_name` | string | No | Display name for the sender |
+|-------|------|----------|-------------|
+| `to` | string | Yes | Recipient email address (must be valid email format) |
+| `subject` | string | Yes | Email subject |
+| `body` | string | No | Plain text body (one of `body` or `html` required) |
+| `html` | string | No | HTML body |
+| `from_name` | string | No | Display name for the From header |
 
-**Response: `202 Accepted`**
-
+**Response 202:**
 ```json
 {
-  "message_id": "outbox-msg-uuid-1234",
-  "status": "queued",
-  "to": "user@example.com",
-  "subject": "Task Complete"
+  "id": "outbox-message-uuid",
+  "status": "queued"
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `TO_REQUIRED` | `to` field is missing |
-| 400 | `INVALID_EMAIL` | `to` is not a valid email address |
-| 400 | `SUBJECT_REQUIRED` | `subject` field is missing |
-| 400 | `BODY_REQUIRED` | Neither `body` nor `html` provided |
-| 403 | `SEND_FAILED` | Domain is not verified |
-| 404 | `SEND_FAILED` | No outbox domain configured |
+**Response 403:**
+```json
+{"error": "SEND_FAILED", "message": "Domain not verified"}
+```
 
 ---
 
 ### GET /api/agents/:agentId/outbox/messages
 
-List outbox messages (sent emails) for an agent.
+List sent outbox messages.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth (must be the agent itself)
 
-**Request Headers:**
+**Query parameters:**
+- `status` — Filter by status: `queued`, `sent`, `delivered`, `failed`
+- `limit` — Max messages to return
 
-```
-GET /api/agents/my-agent/outbox/messages?status=delivered&limit=25
-X-Agent-ID: my-agent
-```
-
-**Query Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `status` | string | (all) | Filter by delivery status |
-| `limit` | number | (all) | Maximum number of messages to return |
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "messages": [
-    {
-      "id": "outbox-msg-uuid-1234",
-      "to": "user@example.com",
-      "subject": "Task Complete",
-      "status": "delivered",
-      "sent_at": "2026-02-25T12:00:00Z"
-    }
+    {"id": "uuid", "to": "user@example.com", "subject": "Hello", "status": "delivered", "sent_at": 1740000000000}
   ],
   "count": 1
 }
@@ -1951,243 +1022,70 @@ X-Agent-ID: my-agent
 
 ### GET /api/agents/:agentId/outbox/messages/:messageId
 
-Get details for a specific outbox message.
+Get status of a specific outbox message.
 
-**Authentication:** Agent auth
+**Auth:** Agent auth (must be the agent itself)
 
-**Request Headers:**
+**Response 200:** Outbox message record
 
-```
-GET /api/agents/my-agent/outbox/messages/outbox-msg-uuid-1234
-X-Agent-ID: my-agent
-```
-
-**Response: `200 OK`**
-
+**Response 404:**
 ```json
-{
-  "id": "outbox-msg-uuid-1234",
-  "agent_id": "my-agent",
-  "to": "user@example.com",
-  "subject": "Task Complete",
-  "body": "The data export has finished.",
-  "status": "delivered",
-  "sent_at": "2026-02-25T12:00:00Z",
-  "delivered_at": "2026-02-25T12:00:05Z"
-}
+{"error": "OUTBOX_MESSAGE_NOT_FOUND", "message": "Outbox message uuid not found"}
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 403 | `FORBIDDEN` | Message belongs to a different agent |
-| 404 | `OUTBOX_MESSAGE_NOT_FOUND` | Message not found |
 
 ---
 
 ### POST /api/webhooks/mailgun
 
-Receive delivery status updates from Mailgun. This endpoint is called by Mailgun's webhook system, not by agents directly.
+Mailgun delivery status callback. Called by Mailgun to report delivery, bounce, and failure events.
 
-**Authentication:** Mailgun webhook signature (when `MAILGUN_WEBHOOK_SIGNING_KEY` is set). If the signing key is not configured, requests are accepted without signature verification.
+**Auth:** Mailgun HMAC signature (when `MAILGUN_WEBHOOK_SIGNING_KEY` is configured). No agent auth.
 
-**Request Body:**
-
+**Request body:**
 ```json
 {
   "signature": {
-    "timestamp": "1740489600",
-    "token": "random-token-string",
-    "signature": "hmac-sha256-hex-signature"
+    "timestamp": "1740000000",
+    "token": "random-token",
+    "signature": "hmac-sha256-sig"
   },
   "event_data": {
     "event": "delivered",
-    "message": {
-      "headers": {
-        "message-id": "outbox-msg-uuid-1234"
-      }
-    }
+    "message": {"headers": {"message-id": "mailgun-id"}}
   }
 }
 ```
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
-{
-  "status": "ok"
-}
+{"status": "ok"}
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `SIGNATURE_REQUIRED` | Signing key is configured but no signature provided |
-| 403 | `INVALID_SIGNATURE` | Webhook signature verification failed |
-| 500 | `WEBHOOK_FAILED` | Internal processing error |
 
 ---
 
-## Discovery
-
-Public endpoints for key discovery and DID document resolution. No authentication required.
-
-### GET /.well-known/agent-keys.json
-
-JWKS-style public key directory listing all registered agents and their Ed25519 public keys. Used for out-of-band key discovery and verification.
-
-**Authentication:** None
-
-**Request:**
-
-```
-GET /.well-known/agent-keys.json
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "keys": [
-    {
-      "kid": "my-agent",
-      "did": "did:seed:abc123...",
-      "kty": "OKP",
-      "crv": "Ed25519",
-      "x": "base64-encoded-public-key",
-      "verification_tier": "cryptographic",
-      "key_version": 1
-    },
-    {
-      "kid": "agent-beta",
-      "did": null,
-      "kty": "OKP",
-      "crv": "Ed25519",
-      "x": "base64-encoded-public-key",
-      "verification_tier": "unverified",
-      "key_version": 1
-    }
-  ]
-}
-```
-
-| Field | Type | Description |
-|---|---|---|
-| `kid` | string | Key ID (the agent's ID) |
-| `did` | string or null | Decentralized Identifier, if assigned |
-| `kty` | string | Key type. Always `"OKP"` (Octet Key Pair). |
-| `crv` | string | Curve. Always `"Ed25519"`. |
-| `x` | string | Base64-encoded raw Ed25519 public key |
-| `verification_tier` | string | One of `"unverified"`, `"github"`, `"cryptographic"` |
-| `key_version` | number | Current key version (incremented on rotation) |
-
----
-
-### GET /api/agents/:agentId/did.json
-
-Returns a W3C DID document for a specific agent. Supports agents with multiple active keys (from key rotation).
-
-**Authentication:** None
-
-**Request:**
-
-```
-GET /api/agents/my-agent/did.json
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "@context": [
-    "https://www.w3.org/ns/did/v1",
-    "https://w3id.org/security/suites/ed25519-2020/v1"
-  ],
-  "id": "did:seed:abc123...",
-  "verificationMethod": [
-    {
-      "id": "did:seed:abc123...#key-1",
-      "type": "Ed25519VerificationKey2020",
-      "controller": "did:seed:abc123...",
-      "publicKeyMultibase": "z6Mkf5rGMoatrSj1f..."
-    }
-  ],
-  "authentication": ["did:seed:abc123...#key-1"],
-  "assertionMethod": ["did:seed:abc123...#key-1"],
-  "service": [
-    {
-      "id": "did:seed:abc123...#admp-inbox",
-      "type": "ADMPInbox",
-      "serviceEndpoint": "/api/agents/my-agent/messages"
-    }
-  ]
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 404 | `AGENT_NOT_FOUND` | Agent not found |
-
----
-
-## Tenant Management
-
-Tenants provide namespace isolation for agents. Agents registered with a `tenant_id` are scoped to that tenant's namespace.
+## Tenants
 
 ### POST /api/agents/tenants
 
-Create a new tenant.
+Create a new tenant namespace.
 
-**Authentication:** API key
+**Auth:** API Key
 
-**Request Headers:**
-
-```
-POST /api/agents/tenants
-Content-Type: application/json
-X-Api-Key: <api-key>
-```
-
-**Request Body:**
-
-```json
-{
-  "tenant_id": "acme-corp",
-  "name": "Acme Corporation",
-  "metadata": { "plan": "enterprise" },
-  "registration_policy": "approval_required"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+|-------|------|----------|-------------|
 | `tenant_id` | string | Yes | Unique tenant identifier |
-| `name` | string | No | Human-readable name. Defaults to `tenant_id`. |
-| `metadata` | object | No | Arbitrary tenant metadata |
-| `registration_policy` | string | No | One of `"open"` or `"approval_required"`. Defaults to `"open"`. |
+| `name` | string | No | Display name (defaults to `tenant_id`) |
+| `metadata` | object | No | Arbitrary metadata |
+| `registration_policy` | string | No | `"open"` or `"approval_required"` (default: `"open"`) |
 
-**Response: `201 Created`**
+**Response 201:** Tenant record
 
+**Response 409:**
 ```json
-{
-  "tenant_id": "acme-corp",
-  "name": "Acme Corporation",
-  "metadata": { "plan": "enterprise" },
-  "registration_policy": "approval_required"
-}
+{"error": "TENANT_EXISTS", "message": "Tenant my-tenant already exists"}
 ```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `TENANT_ID_REQUIRED` | `tenant_id` field is missing |
-| 400 | `INVALID_REGISTRATION_POLICY` | Invalid policy value |
-| 409 | `TENANT_EXISTS` | Tenant with this ID already exists |
 
 ---
 
@@ -2195,31 +1093,9 @@ X-Api-Key: <api-key>
 
 Get tenant details.
 
-**Authentication:** API key
+**Auth:** API Key
 
-**Request Headers:**
-
-```
-GET /api/agents/tenants/acme-corp
-X-Api-Key: <api-key>
-```
-
-**Response: `200 OK`**
-
-```json
-{
-  "tenant_id": "acme-corp",
-  "name": "Acme Corporation",
-  "metadata": { "plan": "enterprise" },
-  "registration_policy": "approval_required"
-}
-```
-
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 404 | `TENANT_NOT_FOUND` | Tenant does not exist |
+**Response 200:** Tenant record
 
 ---
 
@@ -2227,27 +1103,12 @@ X-Api-Key: <api-key>
 
 List all agents belonging to a tenant.
 
-**Authentication:** API key
+**Auth:** API Key
 
-**Request Headers:**
-
-```
-GET /api/agents/tenants/acme-corp/agents
-X-Api-Key: <api-key>
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "agents": [
-    {
-      "agent_id": "acme-worker-1",
-      "agent_type": "worker",
-      "tenant_id": "acme-corp",
-      "registration_status": "approved"
-    }
-  ]
+  "agents": [...]
 }
 ```
 
@@ -2257,198 +1118,139 @@ X-Api-Key: <api-key>
 
 Delete a tenant.
 
-**Authentication:** API key
+**Auth:** API Key
 
-**Request Headers:**
-
-```
-DELETE /api/agents/tenants/acme-corp
-X-Api-Key: <api-key>
-```
-
-**Response: `204 No Content`**
-
-No response body.
+**Response 204:** No content
 
 ---
 
-## Approval Workflow (Admin)
-
-When a tenant uses `registration_policy: "approval_required"`, newly registered agents are placed in `pending` status and cannot authenticate until approved. These endpoints manage the approval workflow.
+## Admin: Approval Workflow
 
 ### GET /api/agents/tenants/:tenantId/pending
 
-List agents with `pending` registration status for a specific tenant.
+List agents with `registration_status: "pending"` for a tenant.
 
-**Authentication:** Master API Key
+**Auth:** Master API Key
 
-**Request Headers:**
-
-```
-GET /api/agents/tenants/acme-corp/pending
-X-Api-Key: <master-api-key>
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
   "agents": [
     {
-      "agent_id": "acme-worker-2",
-      "agent_type": "worker",
-      "tenant_id": "acme-corp",
+      "agent_id": "pending-agent",
       "registration_status": "pending",
-      "public_key": "base64-encoded-public-key",
-      "did": "did:seed:..."
+      "agent_type": "generic",
+      "created_at": 1740000000000
     }
   ]
 }
 ```
 
-Note: The `secret_key` field is never included in the response.
-
 ---
 
 ### POST /api/agents/:agentId/approve
 
-Approve a pending agent registration. The agent's status changes from `pending` to `approved`, enabling it to authenticate and use the API.
+Approve a pending agent registration. Idempotent — approving an already-approved agent returns success.
 
-**Authentication:** Master API Key
+**Auth:** Master API Key
 
-**Request Headers:**
-
-```
-POST /api/agents/acme-worker-2/approve
-X-Api-Key: <master-api-key>
-```
-
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "agent_id": "acme-worker-2",
+  "agent_id": "my-agent",
   "registration_status": "approved"
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 404 | `AGENT_NOT_FOUND` | Agent does not exist |
+**Response 404:**
+```json
+{"error": "AGENT_NOT_FOUND", "message": "Agent my-agent not found"}
+```
 
 ---
 
 ### POST /api/agents/:agentId/reject
 
-Reject an agent registration. The agent's status changes to `rejected` and it cannot authenticate.
+Reject an agent registration. Idempotent.
 
-**Authentication:** Master API Key
+**Auth:** Master API Key
 
-**Request Headers:**
-
-```
-POST /api/agents/acme-worker-2/reject
-Content-Type: application/json
-X-Api-Key: <master-api-key>
-```
-
-**Request Body (optional):**
-
-```json
-{
-  "reason": "Agent does not meet security requirements"
-}
-```
+**Request body:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
-| `reason` | string | No | Rejection reason. Maximum 500 characters. |
+|-------|------|----------|-------------|
+| `reason` | string | No | Rejection reason (max 500 characters) |
 
-**Response: `200 OK`**
-
+**Response 200:**
 ```json
 {
-  "agent_id": "acme-worker-2",
+  "agent_id": "my-agent",
   "registration_status": "rejected",
-  "rejection_reason": "Agent does not meet security requirements"
+  "rejection_reason": "Domain not in allowlist"
 }
 ```
 
-**Error Responses:**
-
-| Status | Error Code | Description |
-|---|---|---|
-| 400 | `INVALID_REASON` | `reason` is not a string |
-| 400 | `REASON_TOO_LONG` | `reason` exceeds 500 characters |
-| 404 | `AGENT_NOT_FOUND` | Agent does not exist |
-
 ---
 
-## Common Error Response Format
+## Discovery
 
-All error responses follow a consistent structure:
+### GET /.well-known/agent-keys.json
 
+JWKS-style public key directory for all registered agents.
+
+**Auth:** None
+
+**Response 200:**
 ```json
 {
-  "error": "ERROR_CODE",
-  "message": "Human-readable description of the error"
+  "keys": [
+    {
+      "kid": "my-agent",
+      "did": "did:seed:...",
+      "kty": "OKP",
+      "crv": "Ed25519",
+      "x": "base64-public-key",
+      "verification_tier": "unverified",
+      "key_version": 1
+    }
+  ]
 }
 ```
 
-## Global Error Responses
-
-These errors can occur on any endpoint:
-
-| Status | Error Code | Description |
-|---|---|---|
-| 401 | `API_KEY_REQUIRED` | API key enforcement is enabled and no key was provided |
-| 401 | `INVALID_API_KEY` | The provided API key is invalid or expired |
-| 401 | `SIGNATURE_INVALID` | HTTP Signature header present but verification failed |
-| 401 | `MASTER_KEY_REQUIRED` | Admin endpoint requires the master API key |
-| 403 | `REGISTRATION_PENDING` | Agent exists but registration is pending approval |
-| 403 | `REGISTRATION_REJECTED` | Agent registration has been rejected |
-| 403 | `ENROLLMENT_TOKEN_USED` | Single-use enrollment token already consumed |
-| 403 | `ENROLLMENT_TOKEN_SCOPE` | Enrollment token is scoped to a different agent |
-| 404 | `NOT_FOUND` | Endpoint does not exist |
-| 500 | `INTERNAL_ERROR` | Unexpected server error |
-
 ---
 
-## Environment Variables Reference
+### GET /api/agents/:agentId/did.json
 
-| Variable | Description | Default |
-|---|---|---|
-| `PORT` | Server listen port | `8080` |
-| `API_KEY_REQUIRED` | Enable API key enforcement (`"true"` to enable) | `undefined` (disabled) |
-| `MASTER_API_KEY` | Master key for admin endpoints | `undefined` (admin endpoints reject all) |
-| `CORS_ORIGIN` | Allowed CORS origin | `*` |
-| `CLEANUP_INTERVAL_MS` | Background job interval in milliseconds | `60000` |
-| `REGISTRATION_POLICY` | Default registration policy (`"open"` or `"approval_required"`) | `"open"` |
-| `DID_WEB_ALLOWED_DOMAINS` | Comma-separated allowlist of domains for DID:web federation | `undefined` (all public domains allowed under open policy) |
-| `MAILGUN_API_KEY` | Mailgun API key for outbound email | `undefined` |
-| `MAILGUN_WEBHOOK_SIGNING_KEY` | Mailgun webhook signing key for signature verification | `undefined` (webhooks accepted without verification) |
-| `NODE_ENV` | Environment mode (`"production"`, `"test"`, etc.) | `undefined` |
+W3C DID document for a specific agent.
 
----
+**Auth:** None
 
-## Rate Limiting
-
-ADMP does not currently enforce server-side rate limiting. Clients should implement their own backoff strategies, particularly for high-volume messaging and inbox polling.
-
-## Message Lifecycle
-
+**Response 200:**
+```json
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/suites/ed25519-2020/v1"
+  ],
+  "id": "did:seed:...",
+  "verificationMethod": [
+    {
+      "id": "did:seed:...#key-1",
+      "type": "Ed25519VerificationKey2020",
+      "controller": "did:seed:...",
+      "publicKeyMultibase": "z..."
+    }
+  ],
+  "authentication": ["did:seed:...#key-1"],
+  "assertionMethod": ["did:seed:...#key-1"],
+  "service": [
+    {
+      "id": "did:seed:...#admp-inbox",
+      "type": "ADMPInbox",
+      "serviceEndpoint": "/api/agents/my-agent/messages"
+    }
+  ]
+}
 ```
-queued --> delivered --> leased --> acked (removed)
-                          |
-                          +--> nack --> queued (reprocessed)
-```
 
-1. **queued**: Message accepted and waiting for delivery.
-2. **delivered**: Message placed in the recipient's inbox.
-3. **leased**: Message pulled by the recipient and locked for processing.
-4. **acked**: Processing confirmed. Message permanently deleted.
-5. **nacked**: Processing failed or deferred. Message returned to queue.
-
-Expired leases are automatically reclaimed by a background job (configurable via `CLEANUP_INTERVAL_MS`).
+Agents with multiple active keys (after rotation) include all active keys in `verificationMethod`.

@@ -1,9 +1,9 @@
-<!-- Generated: 2026-02-25T16:24:00Z -->
+<!-- Generated: 2026-02-26T00:00:00Z -->
 <!-- Source: Automated architecture analysis of agentdispatch codebase -->
 
 # Agent Dispatch (ADMP) Architecture
 
-**Agent Dispatch Messaging Protocol (ADMP)** -- Universal inbox for autonomous AI agents with at-least-once delivery, Ed25519 authentication, and DID federation.
+**Agent Dispatch Messaging Protocol (ADMP)** — Universal inbox for autonomous AI agents with at-least-once delivery, Ed25519 authentication, and DID federation.
 
 ---
 
@@ -60,11 +60,11 @@ graph TB
 
             subgraph "Route Handlers"
                 R_AGENTS["/api/agents/*"<br/>Registration, Heartbeat,<br/>Trust, Webhook, Identity,<br/>Key Rotation, Tenants,<br/>Approval Workflow]
-                R_INBOX["/api/agents/:id/inbox/*"<br/>Send, Pull, Ack,<br/>Nack, Reply, Stats]
+                R_INBOX["/api/agents/:id/inbox/*"<br/>Send, Pull, Ack,<br/>Nack, Reply, Stats"]
                 R_GROUPS["/api/groups/*"<br/>CRUD, Membership,<br/>Join/Leave, Fanout]
                 R_OUTBOX["/api/agents/:id/outbox/*"<br/>Domain Config, Send,<br/>Message Queries]
                 R_DISCOVERY["/.well-known/agent-keys.json"<br/>"/api/agents/:id/did.json"<br/>Key Directory & DID Docs]
-                R_WEBHOOKS["/api/webhooks/mailgun"<br/>Delivery Status]
+                R_WEBHOOKS["/api/webhooks/mailgun"<br/>Delivery Status"]
             end
 
             subgraph "Services"
@@ -99,7 +99,7 @@ graph TB
     A3 -->|HTTPS + Master API Key| MW_HELMET
     A4 -->|HTTPS + DID:web Sig| MW_HELMET
 
-    MW_AUTH --> R_AGENTS & R_INBOX & R_GROUPS & R_OUTBOX & R_DISCOVERY & R_KEYS & R_WEBHOOKS
+    MW_AUTH --> R_AGENTS & R_INBOX & R_GROUPS & R_OUTBOX & R_DISCOVERY & R_WEBHOOKS
 
     R_AGENTS --> S_AGENT
     R_AGENTS --> S_IDENTITY
@@ -141,12 +141,9 @@ sequenceDiagram
 
     Note over Sender,Recipient: 1. SEND — Sender delivers message to recipient's inbox
 
-    Sender->>Server: POST /api/agents/{recipientId}/messages<br/>Signature: keyId="sender",algorithm="ed25519",...
-    Server->>Auth: Verify HTTP Signature
-    Auth->>Store: getAgent(sender_id)
-    Store-->>Auth: Agent record + public keys
-    Auth->>Auth: Ed25519 verify(signing_string, sig, pubkey)<br/>Check Date header +-5 min<br/>Check (request-target) signed
-    Auth-->>Server: Verified (req.agent set)
+    Sender->>Server: POST /api/agents/{recipientId}/messages<br/>X-Api-Key: (any registered agent's key)
+    Server->>Auth: requireApiKey / verifyHttpSignature
+    Auth-->>Server: Authorized (cross-agent send allowed)
 
     Server->>Inbox: send(envelope, options)
     Inbox->>Inbox: validateEnvelope()<br/>version, from, to, subject, timestamp
@@ -167,7 +164,7 @@ sequenceDiagram
     Note over Sender,Recipient: 2. PULL — Recipient claims message with lease
 
     Recipient->>Server: POST /api/agents/{recipientId}/inbox/pull<br/>Signature: keyId="recipient",...
-    Server->>Auth: Verify HTTP Signature<br/>(same flow as above)
+    Server->>Auth: Verify Ed25519 HTTP Signature<br/>keyId must match URL agentId
     Auth-->>Server: Verified
 
     Server->>Inbox: pull(recipientId, {visibility_timeout: 60})
@@ -202,30 +199,30 @@ sequenceDiagram
 ### Message State Machine
 
 ```
-                          +-----------+
-                          |  queued   |
-                          +-----+-----+
-                                |
-                    pull()      |      TTL expires
-                   +-----------++-----------+
-                   |                        |
-             +-----v-----+           +-----v-----+
-             |  leased    |           |  expired   |
-             +-----+-----+           +-----------+
-                   |
-          +--------+--------+
-          |                 |
-     ack()                nack()
-          |                 |
-    +-----v-----+    +-----+-----+
-    |  acked     |    |  queued   | (requeue)
-    +-----+-----+    +-----------+
-          |
-          | (if ephemeral)
-          |
-    +-----v-----+
-    |  purged    | (body deleted, metadata retained)
-    +-----------+
+                      +-----------+
+                      |  queued   |
+                      +-----+-----+
+                            |
+                pull()      |      TTL expires
+               +-----------++-----------+
+               |                        |
+         +-----v-----+           +-----v-----+
+         |  leased    |           |  expired   |
+         +-----+-----+           +-----------+
+               |
+      +--------+--------+
+      |                 |
+ ack()                nack()
+      |                 |
++-----v-----+    +-----+-----+
+|  acked     |    |  queued   | (requeue)
++-----+-----+    +-----------+
+      |
+      | (if ephemeral)
+      |
++-----v-----+
+|  purged    | (body deleted, metadata retained)
++-----------+
 ```
 
 ### Alternate Flows
@@ -288,9 +285,9 @@ graph LR
 ```
 
 **Scaling characteristics:**
-- `auto_stop_machines = stop` -- instances scale to zero when idle
-- `auto_start_machines = true` -- cold-start on first request
-- `min_machines_running = 0` -- no always-on cost
+- `auto_stop_machines = stop` — instances scale to zero when idle
+- `auto_start_machines = true` — cold-start on first request
+- `min_machines_running = 0` — no always-on cost
 - 1 shared CPU, 1 GB memory per VM
 - Health check: `GET /health` every 15 seconds
 
@@ -307,7 +304,7 @@ graph LR
 | **Entry point** | `node src/index.js` |
 | **Docker base** | `node:18-alpine` |
 | **Install** | `npm ci --only=production` |
-| **Health check** | Docker: every 30s via `/health`; Fly.io: every 15s via `GET /health` |
+| **Health check** | Fly.io: every 15s via `GET /health` |
 | **Graceful shutdown** | SIGTERM/SIGINT handlers stop background jobs, close server |
 
 ---
@@ -318,7 +315,6 @@ graph LR
 src/
   index.js                    # Entry point — starts server, background jobs, graceful shutdown
   server.js                   # Express app setup — middleware chain, route mounting, background job lifecycle
-  server.test.js              # Integration tests (node --test)
 
   middleware/
     auth.js                   # Authentication: HTTP Signatures, API keys, DID:web federation,
@@ -334,6 +330,8 @@ src/
                               #   message queries; /api/webhooks/mailgun
     discovery.js              # /.well-known/agent-keys.json — JWKS key directory
                               # /api/agents/:id/did.json — W3C DID document
+    keys.js                   # /api/keys/* — issued key management
+
   services/
     agent.service.js          # Agent lifecycle: register (3 modes), heartbeat, approve/reject,
                               #   trust management, webhook config, key rotation
@@ -352,6 +350,18 @@ src/
     crypto.js                 # Ed25519 keypair generation (tweetnacl), HKDF-SHA256,
                               #   message signing/verification, HTTP request signing,
                               #   DID generation, timestamp validation, TTL parsing
+
+cli/
+  src/
+    index.ts                  # CLI entry point — commander.js program, 16 command modules
+    auth.ts                   # Ed25519 signing library (self-contained, no server imports)
+    client.ts                 # AdmpClient HTTP client class
+    config.ts                 # Config file management (~/.admp/config.json)
+    commands/                 # Individual command implementations
+      init.ts register.ts agent.ts send.ts pull.ts ack.ts nack.ts
+      reply.ts status.ts inbox.ts heartbeat.ts rotate-key.ts
+      webhook.ts groups.ts outbox.ts config.ts
+  package.json                # @agentdispatch/cli@0.2.1 — subpath exports, bin entry
 ```
 
 ---
@@ -364,7 +374,8 @@ Manages the full agent lifecycle.
 
 | Capability | Description |
 |---|---|
-| **Registration** | Three modes: *Legacy* (random keypair), *Seed-based* (HKDF deterministic), *Import* (client-provided public key) |
+| **Registration** | Three modes: *Legacy* (random keypair), *Seed-based* (HKDF deterministic from `LABEL_ADMP:<tenant>:<agent>:ed25519:vN`), *Import* (client-provided public key) |
+| **agent_id validation** | Enforces `^[a-zA-Z0-9._\-:]+$`; auto-generates `agent-<uuid>` if omitted |
 | **Heartbeat** | Periodic liveness signal; background job marks agents offline after `timeout_ms` |
 | **Approval Workflow** | `approve()` / `reject(reason)` for pending agents; master key required |
 | **Trust Management** | Per-agent trusted/blocked agent lists; enforced at message send time |
@@ -377,7 +388,7 @@ Core message processing engine.
 
 | Operation | Description |
 |---|---|
-| **send()** | Validates envelope, resolves recipient (agent:// or did:seed:), checks trust list, verifies signature against all active keys, persists with status `queued`, triggers optional webhook push |
+| **send()** | Validates envelope (from/to accept bare IDs, `agent://` URIs, or `did:seed:` DIDs), resolves recipient, checks trust list, verifies envelope signature, persists with status `queued`, triggers optional webhook push |
 | **pull()** | FIFO retrieval with visibility timeout (lease); filters expired ephemeral messages |
 | **ack()** | Confirms processing; ephemeral messages have body purged on ack |
 | **nack()** | Requeue or extend lease duration |
@@ -392,10 +403,10 @@ Multi-agent group messaging with role-based access control.
 |---|---|
 | **CRUD** | Create, read, update, delete groups |
 | **Access types** | `open`, `key-protected` (SHA-256 hashed join key), `invite-only` |
-| **Roles** | `owner`, `admin`, `member` -- with permission checks on mutations |
+| **Roles** | `owner`, `admin`, `member` — with permission checks on mutations |
 | **Message fanout** | Post to group fans out as individual messages to each member's inbox (via InboxService) |
-| **History** | Configurable `history_visible` flag; deduplicated by `group_message_id` |
-| **Limits** | `max_members` (default 50), `message_ttl_sec` (default 7 days) |
+| **History** | Configurable `history_visible` flag |
+| **Limits** | `max_members` (default 50), `message_ttl_sec` (default 7 days), body max 1MB |
 
 ### OutboxService
 
@@ -405,9 +416,8 @@ Outbound email delivery through Mailgun.
 |---|---|
 | **Domain management** | Add, verify DNS, remove custom sending domains |
 | **Send** | Constructs RFC 5322 From header, sends via Mailgun HTTP API |
-| **Retry** | Exponential backoff (1s, 2s, 4s), max 3 attempts |
 | **Webhooks** | Receives Mailgun delivery/bounce events; HMAC-SHA256 signature verification |
-| **Status tracking** | `queued` -> `sent` -> `delivered` or `failed` |
+| **Status tracking** | `queued` → `sent` → `delivered` or `failed` |
 
 ### IdentityService
 
@@ -416,7 +426,7 @@ Tiered identity verification for agents.
 | Tier | Requirements |
 |---|---|
 | `unverified` | Default on registration |
-| `github` | Agent links a GitHub handle (claim-based, no OAuth in Phase 1) |
+| `github` | Agent links a GitHub handle (claim-based) |
 | `cryptographic` | Seed-based registration with DID; strongest tier |
 
 ### WebhookService
@@ -451,10 +461,14 @@ Request arrives at /api/*
               |  valid +-> Check agent approval status
               |       |       |
               |       |  approved -> Set req.agent, req.authMethod = 'http-signature'
-              |       |       |      Authorization check: signing agent == URL target agent
-              |       |       |      -> NEXT (bypass API key)
               |       |       |
-              |       |  pending -> 403 REGISTRATION_PENDING
+              |       |       +-> Is this POST /agents/:id/messages?
+              |       |       |       yes -> allow (cross-agent send)
+              |       |       |       no  -> enforce keyId == URL agentId
+              |       |       |
+              |       |       -> NEXT (bypass API key)
+              |       |       |
+              |       |  pending  -> 403 REGISTRATION_PENDING
               |       |  rejected -> 403 REGISTRATION_REJECTED
               |       |
               |  invalid -> 401 SIGNATURE_INVALID (NO fallthrough to API key)
@@ -503,6 +517,10 @@ date: <date header>
 - Date header freshness: +/- 5 minutes
 - Only `ed25519` algorithm accepted
 
+### Cross-Agent Message Sending
+
+`POST /api/agents/:id/messages` is the only endpoint where the signing agent does not have to match the `:agentId` URL parameter. Any registered, approved agent may send to any other agent's inbox. This is the core of the protocol — agents send messages to each other's inboxes, not to themselves.
+
 ### DID:web Federation
 
 When a `Signature` header contains `keyId="did:web:..."`:
@@ -535,8 +553,8 @@ When a `Signature` header contains `keyId="did:web:..."`:
 |---|---|
 | **Timing attacks on API keys** | `crypto.timingSafeEqual` for master key comparison; issued keys use hash lookup (timing-safe by design) |
 | **Replay attacks** | `Date` header must be signed and within +/- 5 minutes of server time |
-| **Endpoint confusion** | `(request-target)` must be in signed headers; signing agent must match URL target agent |
-| **Signature fallthrough** | If `Signature` header is present but invalid, reject immediately -- never fall through to API key auth |
+| **Endpoint confusion** | `(request-target)` must be in signed headers; signing agent must match URL target agent (except message send) |
+| **Signature fallthrough** | If `Signature` header is present but invalid, reject immediately — never fall through to API key auth |
 | **SSRF via DID:web** | Private IP blocklist (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 0.0.0.0/8, ::1, all raw IPv6); redirect target validation; `DID_WEB_ALLOWED_DOMAINS` allowlist; 5s fetch timeout; 64KB document size limit |
 | **DID key cache DoS** | Cache bounded to 1000 entries; oldest entry evicted on overflow |
 | **Enrollment token reuse** | Atomic `burnSingleUseKey()` with TOCTOU race protection; `used_at` set only if currently null |
@@ -544,8 +562,9 @@ When a `Signature` header contains `keyId="did:web:..."`:
 | **Algorithm confusion** | Only `ed25519` accepted; any other `algorithm` value is rejected |
 | **Multicodec confusion** | DID document keys must be exactly 34 bytes with `0xed01` prefix; other key types rejected |
 | **Namespace collision** | Shadow agent creation checks for existing non-federated agent with same ID |
+| **agent_id injection** | Regex `^[a-zA-Z0-9._\-:]+$` blocks newlines (signing string injection), slashes (path traversal), spaces, null bytes |
 | **HTTP headers** | `helmet` middleware sets security headers (X-Content-Type-Options, X-Frame-Options, etc.) |
-| **Input validation** | 10MB JSON body limit; group name length/charset validation; rejection reason 500 char limit; From header sanitization for outbox |
+| **Input validation** | 10MB JSON body limit; group name length/charset validation; rejection reason 500 char limit |
 | **Error response uniformity** | 401 for all bad-credential scenarios (expired, revoked, unknown) to prevent existence leaking |
 
 ### Approval Workflow
@@ -585,7 +604,7 @@ Selected via `STORAGE_BACKEND` environment variable.
 
 - HTTP client for the Mech Storage API at `MECH_BASE_URL`
 - Persistent data across restarts
-- Used in Fly.io production deployment
+- Used in Fly.io production deployment (`STORAGE_BACKEND=mech`)
 
 ### Storage Interface
 
@@ -636,8 +655,9 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `GET` | `/openapi.json` | Raw OpenAPI specification |
 | `POST` | `/api/agents/register` | Agent self-registration |
 | `GET` | `/.well-known/agent-keys.json` | JWKS-style public key directory |
+| `GET` | `/api/agents/:agentId/did.json` | W3C DID document (no auth) |
 
-### Agent Endpoints (HTTP Signature or API Key)
+### Agent Endpoints (HTTP Signature)
 
 | Method | Path | Description |
 |---|---|---|
@@ -655,19 +675,18 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `POST` | `/api/agents/:agentId/verify/github` | Link GitHub handle |
 | `POST` | `/api/agents/:agentId/verify/cryptographic` | Confirm cryptographic tier |
 | `GET` | `/api/agents/:agentId/identity` | Get verification status |
-| `GET` | `/api/agents/:agentId/did.json` | W3C DID document |
 
 ### Inbox Endpoints
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/api/agents/:agentId/messages` | API Key | Send message to inbox |
-| `POST` | `/api/agents/:agentId/inbox/pull` | HTTP Sig | Pull message (with lease) |
-| `POST` | `/api/agents/:agentId/messages/:messageId/ack` | HTTP Sig | Acknowledge message |
-| `POST` | `/api/agents/:agentId/messages/:messageId/nack` | HTTP Sig | Negative acknowledge |
-| `POST` | `/api/agents/:agentId/messages/:messageId/reply` | HTTP Sig | Reply to message |
-| `GET` | `/api/agents/:agentId/inbox/stats` | HTTP Sig | Inbox statistics |
-| `POST` | `/api/agents/:agentId/inbox/reclaim` | HTTP Sig | Reclaim expired leases |
+| `POST` | `/api/agents/:agentId/messages` | API Key (any agent) | Send message to inbox |
+| `POST` | `/api/agents/:agentId/inbox/pull` | HTTP Sig (self) | Pull message (with lease) |
+| `POST` | `/api/agents/:agentId/messages/:messageId/ack` | HTTP Sig (self) | Acknowledge message |
+| `POST` | `/api/agents/:agentId/messages/:messageId/nack` | HTTP Sig (self) | Negative acknowledge |
+| `POST` | `/api/agents/:agentId/messages/:messageId/reply` | HTTP Sig (self) | Reply to message |
+| `GET` | `/api/agents/:agentId/inbox/stats` | HTTP Sig (self) | Inbox statistics |
+| `POST` | `/api/agents/:agentId/inbox/reclaim` | HTTP Sig (self) | Reclaim expired leases |
 | `GET` | `/api/messages/:messageId/status` | API Key | Get message delivery status |
 
 ### Group Endpoints (Agent Auth)
@@ -715,17 +734,12 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `GET` | `/api/agents/tenants/:tenantId/agents` | List tenant agents |
 | `DELETE` | `/api/agents/tenants/:tenantId` | Delete tenant |
 
-### Webhook Endpoints (Mailgun)
+### Webhook and Stats Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/webhooks/mailgun` | Mailgun delivery status callback |
-
-### Stats Endpoint
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/stats` | System-wide statistics |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/webhooks/mailgun` | Mailgun sig | Mailgun delivery status callback |
+| `GET` | `/api/stats` | API Key | System-wide statistics |
 
 ---
 
@@ -737,17 +751,17 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `NODE_ENV` | `production` | Node.js environment (`production` = info-level logging, generic error messages) |
 | `CORS_ORIGIN` | `*` | Allowed CORS origins |
 | `API_KEY_REQUIRED` | `true` | Enforce API key authentication on `/api/*` routes |
-| `MASTER_API_KEY` | *(none, required for admin)* | Master key for admin endpoints (key issuance, agent approval/rejection). **Secret -- set via Fly.io secrets, never in fly.toml.** |
-| `HEARTBEAT_INTERVAL_MS` | `60000` | Agent heartbeat expected interval (informational, logged at startup) |
+| `MASTER_API_KEY` | *(none, required for admin)* | Master key for admin endpoints. **Secret — set via Fly.io secrets, never in fly.toml.** |
+| `HEARTBEAT_INTERVAL_MS` | `60000` | Agent heartbeat expected interval |
 | `HEARTBEAT_TIMEOUT_MS` | `300000` | Time after last heartbeat before agent is marked offline |
 | `MESSAGE_TTL_SEC` | `86400` | Default message time-to-live (24 hours) |
 | `CLEANUP_INTERVAL_MS` | `60000` | Interval for background cleanup and heartbeat check jobs |
 | `MAX_MESSAGE_SIZE_KB` | `256` | Maximum message size (configured, enforcement in storage layer) |
-| `MAX_MESSAGES_PER_AGENT` | `1000` | Maximum inbox messages per agent (configured, enforcement in storage layer) |
+| `MAX_MESSAGES_PER_AGENT` | `1000` | Maximum inbox messages per agent |
 | `STORAGE_BACKEND` | `mech` (fly.toml) / `memory` (code default) | Storage backend: `memory` or `mech` |
 | `MECH_BASE_URL` | *(deployment-specific)* | Mech Storage API base URL (when `STORAGE_BACKEND=mech`) |
 | `REGISTRATION_POLICY` | `approval_required` (fly.toml) / `open` (code default) | Agent registration policy: `open` or `approval_required`. Tenant-level policy overrides. |
-| `DID_WEB_ALLOWED_DOMAINS` | *(none)* | Comma-separated domain allowlist for DID:web federation. When set, only listed domains can federate. When unset, all public domains can attempt federation (subject to SSRF blocklist). |
+| `DID_WEB_ALLOWED_DOMAINS` | *(none)* | Comma-separated domain allowlist for DID:web federation. When set, only listed domains can federate. |
 | `MAILGUN_API_KEY` | *(none)* | Mailgun API key for outbound email. **Secret.** |
 | `MAILGUN_API_URL` | `https://api.mailgun.net/v3` | Mailgun API base URL (override for EU regions or testing) |
 | `MAILGUN_WEBHOOK_SIGNING_KEY` | *(none)* | Mailgun webhook signing key for verifying delivery callbacks. **Secret.** When unset, webhooks accept unauthenticated requests (warning logged). |
@@ -756,7 +770,7 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 
 ## Dependencies
 
-### Production
+### Production (server)
 
 | Package | Version | Purpose |
 |---|---|---|
@@ -771,13 +785,12 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `yamljs` | ^0.3.0 | OpenAPI YAML spec loading |
 | `dotenv` | ^17.2.3 | Environment variable loading from `.env` files |
 
-### Development
+### CLI (@agentdispatch/cli@0.2.1)
 
 | Package | Version | Purpose |
 |---|---|---|
-| `supertest` | ^6.3.4 | HTTP assertion testing |
-| `nodemon` | ^3.0.2 | Auto-restart on file changes (dev mode) |
-| `agentbootup` | ^0.7.1 | Agent skill and memory management framework |
+| `commander` | ^12.1.0 | CLI argument parsing |
+| `tweetnacl` | ^1.0.3 | Ed25519 signing (self-contained, no server import) |
 
 ### Node.js Built-ins Used
 
