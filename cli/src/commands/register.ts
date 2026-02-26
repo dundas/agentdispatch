@@ -59,10 +59,16 @@ export function register(program: Command): void {
         }
       }
 
+      const effectiveKey = res.secret_key ?? config.secret_key;
+      if (!effectiveKey) {
+        error('Server did not return a secret_key and none exists in config — cannot save agent. Re-register or contact the hub operator.', 'MISSING_KEY');
+        process.exit(1);
+      }
+
       saveConfig({
         base_url: baseUrl,
         agent_id: res.agent_id,
-        secret_key: res.secret_key ?? config.secret_key ?? '',
+        secret_key: effectiveKey,
         api_key: config.api_key,
       });
 

@@ -25,7 +25,17 @@ function promptSecret(question: string): Promise<string> {
   process.stdout.write(question);
   return new Promise<string>((resolve) => {
     const chars: Buffer[] = [];
-    process.stdin.setRawMode(true);
+    // setRawMode can throw in pseudo-TTY environments (CI runners, Docker)
+    // even when isTTY is true. Fall back to cleartext readline on failure.
+    try {
+      process.stdin.setRawMode(true);
+    } catch {
+      process.stderr.write('Warning: input not masked (raw mode unavailable)\n');
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      rl.once('error', () => { rl.close(); resolve(''); });
+      rl.question('', answer => { rl.close(); resolve(answer); });
+      return;
+    }
     process.stdin.resume();
 
     const cleanup = () => {

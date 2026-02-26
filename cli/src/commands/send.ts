@@ -16,11 +16,12 @@ function parseBodyOrExit(raw: string): unknown {
       error('File path must be relative and must not contain ..', 'INVALID_ARGUMENT');
       process.exit(1);
     }
-    // Resolve symlinks and verify the real path is within CWD.
-    // Uses path.relative which handles platform path separators correctly.
+    // Resolve symlinks and verify the real path is within CWD, then read the
+    // resolved path directly to eliminate the TOCTOU window between check and read.
+    let resolvedPath: string;
     try {
-      const resolved = realpathSync(filePath);
-      const rel = relative(process.cwd(), resolved);
+      resolvedPath = realpathSync(filePath);
+      const rel = relative(process.cwd(), resolvedPath);
       if (rel.startsWith('..') || isAbsolute(rel)) {
         error('File path must resolve within the current directory', 'INVALID_ARGUMENT');
         process.exit(1);
@@ -29,10 +30,10 @@ function parseBodyOrExit(raw: string): unknown {
       error(`Could not read body file: ${filePath}`, 'FILE_NOT_FOUND');
       process.exit(1);
     }
-    // Read the file in one shot — avoids TOCTOU between stat and read.
+    // Read the resolved path (same inode we just checked) in one shot.
     let buf: Buffer;
     try {
-      buf = readFileSync(filePath);
+      buf = readFileSync(resolvedPath);
     } catch {
       error(`Could not read body file: ${filePath}`, 'FILE_NOT_FOUND');
       process.exit(1);
