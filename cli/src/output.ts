@@ -1,3 +1,5 @@
+// Evaluated at module-load time per the no-color.org spec (process-start only).
+// Tests that toggle NO_COLOR after import won't affect this cached value.
 const NO_COLOR = 'NO_COLOR' in process.env;
 
 function green(s: string): string  { return NO_COLOR ? s : `\x1b[32m${s}\x1b[0m`; }

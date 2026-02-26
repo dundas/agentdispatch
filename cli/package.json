@@ -14,6 +14,7 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun build src/index.ts --target node --outfile dist/index.js --minify",
+    "prepack": "bun run build",
     "test": "bun test"
   },
   "keywords": [

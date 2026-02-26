@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { readFileSync, realpathSync } from 'fs';
-import { isAbsolute } from 'path';
+import { isAbsolute, relative } from 'path';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { signEnvelope } from '../auth.js';
@@ -17,9 +17,11 @@ function parseBodyOrExit(raw: string): unknown {
       process.exit(1);
     }
     // Resolve symlinks and verify the real path is within CWD.
+    // Uses path.relative which handles platform path separators correctly.
     try {
       const resolved = realpathSync(filePath);
-      if (!resolved.startsWith(process.cwd() + '/')) {
+      const rel = relative(process.cwd(), resolved);
+      if (rel.startsWith('..') || isAbsolute(rel)) {
         error('File path must resolve within the current directory', 'INVALID_ARGUMENT');
         process.exit(1);
       }
