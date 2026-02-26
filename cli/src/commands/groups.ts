@@ -17,6 +17,11 @@ export function register(program: Command): void {
     .option('--access <type>', 'Access type: open | key-protected | invite', 'open')
     .addHelpText('after', '\nExample:\n  admp groups create --name "ml-agents" --access key-protected')
     .action(async (opts: { name: string; access: string }) => {
+      const VALID_ACCESS = ['open', 'key-protected', 'invite'];
+      if (!VALID_ACCESS.includes(opts.access)) {
+        error(`--access must be one of: ${VALID_ACCESS.join(', ')}`, 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 

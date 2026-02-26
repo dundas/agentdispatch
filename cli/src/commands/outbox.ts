@@ -123,6 +123,11 @@ export function register(program: Command): void {
         error('--limit must be a positive integer', 'INVALID_ARGUMENT');
         process.exit(1);
       }
+      const VALID_STATUSES = ['queued', 'sent', 'failed'];
+      if (opts.status && !VALID_STATUSES.includes(opts.status)) {
+        error(`--status must be one of: ${VALID_STATUSES.join(', ')}`, 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
       const params = new URLSearchParams({ limit: String(limitN) });
       if (opts.status) params.set('status', opts.status);
 
