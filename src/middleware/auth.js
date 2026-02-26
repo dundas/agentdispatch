@@ -573,7 +573,10 @@ async function resolveDIDWebAgent(did, req) {
     // A crafted keyId like "did:web:evil.com\nX-Injected: header" could
     // otherwise inject into signing strings or storage keys.
     if (!SAFE_DID_DOMAIN.test(domain)) return null;
-    if (pathSegments.some(seg => !SAFE_DID_SEGMENT.test(seg))) return null;
+    // Also block '..' explicitly: SAFE_DID_SEGMENT allows dots, so '..' passes the
+    // character check — but it would produce a path-traversal URL like
+    // https://domain.com/../did.json which may escape the intended path prefix.
+    if (pathSegments.some(seg => !SAFE_DID_SEGMENT.test(seg) || seg === '..')) return null;
 
     // Compute DID document URL once (per W3C DID:web spec):
     //   did:web:domain.com           → https://domain.com/.well-known/did.json

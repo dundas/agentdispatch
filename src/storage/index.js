@@ -44,6 +44,8 @@ switch (backend) {
 const STORAGE_AGENT_ID_RE = /^[^\x00-\x1f\x7f\\]+$/;
 const storage = new Proxy(_storage, {
   get(target, prop) {
+    // NOTE: if the storage interface renames createAgent, update this string —
+    // a name mismatch silently bypasses the guard with no error or test failure.
     if (prop === 'createAgent') {
       return async (agent) => {
         if (!agent?.agent_id || typeof agent.agent_id !== 'string') {
