@@ -103,6 +103,8 @@ test('agent_id validation rejects dangerous characters', async () => {
     'agent:bare',              // reserved prefix (no slashes)
     'did:seed:spoofed',        // reserved DID prefix
     'did:web:example.com',     // reserved DID prefix
+    'DID:spoofed',             // reserved prefix — case-insensitive check
+    'AGENT:foo',               // reserved prefix — case-insensitive check
     'a'.repeat(256),
   ];
 

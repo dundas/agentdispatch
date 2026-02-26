@@ -15,17 +15,49 @@ config();
 
 const backend = (process.env.STORAGE_BACKEND || 'memory').toLowerCase();
 
-let storage;
+let _storage;
 
 switch (backend) {
   case 'mech':
-    storage = createMechStorage();
+    _storage = createMechStorage();
     break;
   case 'memory':
   default:
-    storage = memoryStorage;
+    _storage = memoryStorage;
     break;
 }
+
+// Defense-in-depth: validate agent_id before any storage backend writes it.
+// Callers that bypass register() (e.g. DID:web shadow agents, migrations)
+// still go through this guard, ensuring no unsafe ID is ever persisted.
+//
+// The regex blocks only control characters (newlines, null bytes, DEL) and
+// backslashes — the characters that cause signing-string injection or escaping
+// issues in storage backends. Slashes are intentionally allowed because
+// DID:web shadow agent IDs use them as path separators (did-web:host/path/seg).
+// The stricter character-set and reserved-prefix checks live in register() and
+// resolveDIDWebAgent() for agents that go through those code paths.
+const STORAGE_AGENT_ID_RE = /^[^\x00-\x1f\x7f\\]+$/;
+const storage = new Proxy(_storage, {
+  get(target, prop) {
+    if (prop === 'createAgent') {
+      return async (agent) => {
+        if (!agent?.agent_id || typeof agent.agent_id !== 'string') {
+          throw new Error('createAgent: agent_id is required and must be a string');
+        }
+        if (agent.agent_id.length > 255) {
+          throw new Error('createAgent: agent_id must be 255 characters or fewer');
+        }
+        if (!STORAGE_AGENT_ID_RE.test(agent.agent_id)) {
+          throw new Error('createAgent: agent_id contains unsafe characters (control chars, slashes)');
+        }
+        return target.createAgent(agent);
+      };
+    }
+    const value = target[prop];
+    return typeof value === 'function' ? value.bind(target) : value;
+  }
+});
 
 export { storage };
 export const storageBackend = backend;

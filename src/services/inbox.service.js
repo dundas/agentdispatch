@@ -17,10 +17,19 @@ const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
 const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._-]+$/;
 
 /**
- * Return true if `id` is a syntactically valid agent identifier.
- * Accepts: bare agent IDs, legacy agent:// URIs (backward-compat), did:seed: DIDs.
- * Rejects: injection characters, empty/oversized strings.
- * NOTE: a valid id does not mean the agent exists or that the sender is trusted.
+ * Return true if `id` is a syntactically valid agent identifier for use in
+ * message envelopes. Accepts bare agent IDs, legacy agent:// URIs (backward-compat
+ * for pre-PR#16 senders), and did:seed: DIDs. Rejects injection characters and
+ * oversized strings.
+ *
+ * NOTE: validation here is intentionally more permissive than registration.
+ * For example, `agent:bare` (single colon, no slashes) passes SAFE_CHARS and
+ * is accepted in envelopes but would be blocked at register() by the reserved-prefix
+ * guard. This is by design — the envelope layer cannot know whether a given ID was
+ * ever registered, so it only rejects clearly-unsafe inputs.
+ *
+ * A valid `id` does NOT imply the agent exists in storage or that the sender is
+ * trusted. Signature verification is required for that.
  */
 function isValidAgentId(id) {
   if (!id || id.length > 255) return false;
