@@ -29,6 +29,9 @@ export function register(program: Command): void {
       const seed = process.env.ADMP_SEED ?? opts.seed;
       if (seed) {
         validateSeedHex(seed);
+        if (!baseUrl.startsWith('https://')) {
+          warn('Seed will be sent over non-HTTPS connection. Use HTTPS in production.');
+        }
         body.seed = seed;
       }
       if (opts.name) body.name = opts.name;

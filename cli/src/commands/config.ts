@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { loadConfig, resolveConfig, saveConfig, AdmpConfig } from '../config.js';
-import { isJsonMode, error, maskSecret } from '../output.js';
+import { isJsonMode, warn, error, maskSecret } from '../output.js';
 
 const VALID_KEYS: (keyof AdmpConfig)[] = ['base_url', 'agent_id', 'secret_key', 'api_key'];
 
@@ -36,6 +36,9 @@ export function register(program: Command): void {
       if (!VALID_KEYS.includes(key as keyof AdmpConfig)) {
         error(`Unknown key: ${key}. Valid keys: ${VALID_KEYS.join(', ')}`, 'INVALID_ARGUMENT');
         process.exit(1);
+      }
+      if (key === 'secret_key' || key === 'api_key') {
+        warn(`${key} will appear in shell history. Prefer \`admp init\` or env vars.`);
       }
       const existing = loadConfig();
       saveConfig({ ...existing, [key]: value } as AdmpConfig);
