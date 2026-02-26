@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success, isJsonMode, error } from '../output.js';
+import { success, isJsonMode, error, aborted } from '../output.js';
 
 export function register(program: Command): void {
   const cmd = program
@@ -52,7 +52,8 @@ export function register(program: Command): void {
       console.log(`\n${'GROUP ID'.padEnd(idWidth)} ${'NAME'.padEnd(24)} ${'ROLE'.padEnd(10)} MEMBERS`);
       console.log('─'.repeat(idWidth + 1 + 24 + 1 + 10 + 1 + 7));
       for (const g of groups) {
-        console.log(`${g.group_id.padEnd(idWidth)} ${String(g.name).slice(0, 24).padEnd(24)} ${g.role.padEnd(10)} ${g.member_count}`);
+        const name = g.name.length > 24 ? g.name.slice(0, 23) + '…' : g.name;
+        console.log(`${g.group_id.padEnd(idWidth)} ${name.padEnd(24)} ${g.role.padEnd(10)} ${g.member_count}`);
       }
       console.log('');
     });
@@ -87,10 +88,7 @@ export function register(program: Command): void {
       } finally {
         rl.close();
       }
-      if (answer.trim().toLowerCase() !== 'y') {
-        success('Aborted');
-        return;
-      }
+      if (answer.trim().toLowerCase() !== 'y') { aborted(); return; }
 
       const client = new AdmpClient(config);
       await client.request('POST', `/api/groups/${groupId}/leave`, undefined, 'signature');

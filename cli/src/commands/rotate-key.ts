@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
 import { loadConfig, requireConfig, saveConfig } from '../config.js';
 import { success, warn } from '../output.js';
+import { validateSeedHex } from '../validate.js';
 
 interface RotateKeyResponse {
   secret_key?: string;
@@ -21,7 +22,10 @@ export function register(program: Command): void {
 
       const body: Record<string, unknown> = {};
       const seed = process.env.ADMP_SEED ?? opts.seed;
-      if (seed) body.seed = seed;
+      if (seed) {
+        validateSeedHex(seed);
+        body.seed = seed;
+      }
 
       const res = await client.request<RotateKeyResponse>(
         'POST',

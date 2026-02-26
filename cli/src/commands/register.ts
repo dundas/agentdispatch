@@ -2,7 +2,8 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient, AdmpError } from '../client.js';
 import { loadConfig, requireConfig, saveConfig } from '../config.js';
-import { success, warn, error } from '../output.js';
+import { success, warn, error, aborted } from '../output.js';
+import { validateSeedHex } from '../validate.js';
 
 interface RegisterResponse {
   agent_id: string;
@@ -25,7 +26,10 @@ export function register(program: Command): void {
 
       const body: Record<string, unknown> = {};
       const seed = process.env.ADMP_SEED ?? opts.seed;
-      if (seed) body.seed = seed;
+      if (seed) {
+        validateSeedHex(seed);
+        body.seed = seed;
+      }
       if (opts.name) body.name = opts.name;
       if (opts.capabilities) body.capabilities = opts.capabilities.split(',').map(s => s.trim());
 
@@ -76,10 +80,7 @@ export function register(program: Command): void {
         rl.close();
       }
 
-      if (answer.trim().toLowerCase() !== 'y') {
-        console.log('Aborted.');
-        return;
-      }
+      if (answer.trim().toLowerCase() !== 'y') { aborted(); return; }
 
       const client = new AdmpClient(config);
       await client.request('DELETE', `/api/agents/${config.agent_id}`, undefined, 'signature');

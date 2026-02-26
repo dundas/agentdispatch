@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { success, error } from '../output.js';
+import { validateMessageId } from '../validate.js';
 
 interface MessageStatus {
   id: string;
@@ -18,10 +19,7 @@ export function register(program: Command): void {
     .description('Get delivery status of a sent message')
     .addHelpText('after', '\nExample:\n  admp status msg_abc123')
     .action(async (messageId: string) => {
-      if (!/^[\w\-]+$/.test(messageId)) {
-        error('Message ID must contain only alphanumeric characters, hyphens, and underscores', 'INVALID_ARGUMENT');
-        process.exit(1);
-      }
+      validateMessageId(messageId);
       // Note: agent_id is intentionally omitted — /api/messages/:id/status uses
       // api_key auth (cross-agent lookup) and does not embed agent_id in the path.
       const config = requireConfig(['base_url', 'api_key']);

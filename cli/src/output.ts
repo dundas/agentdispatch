@@ -39,6 +39,15 @@ export function error(msg: string, code?: string): void {
   process.stderr.write(prefix + msg + '\n');
 }
 
+/** Outputs a neutral "Aborted" message — not a success, not an error. */
+export function aborted(): void {
+  if (isJsonMode()) {
+    console.log(JSON.stringify({ message: 'Aborted' }));
+  } else {
+    console.log('Aborted.');
+  }
+}
+
 export function maskSecret(value: string | undefined): string {
   if (!value) return '(not set)';
   return value.length <= 8 ? '***' : value.slice(0, 8) + '...';

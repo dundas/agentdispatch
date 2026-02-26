@@ -2,14 +2,7 @@ import { Command } from 'commander';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { success, error } from '../output.js';
-
-/** Rejects message IDs that contain path-separating characters. */
-function validateMessageId(id: string): void {
-  if (!/^[\w\-]+$/.test(id)) {
-    error('Message ID must contain only alphanumeric characters, hyphens, and underscores', 'INVALID_ARGUMENT');
-    process.exit(1);
-  }
-}
+import { validateMessageId } from '../validate.js';
 
 export function register(program: Command): void {
   program

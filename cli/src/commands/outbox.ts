@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success, isJsonMode, error } from '../output.js';
+import { success, isJsonMode, error, aborted } from '../output.js';
 
 export function register(program: Command): void {
   const cmd = program
@@ -67,7 +67,7 @@ export function register(program: Command): void {
       } finally {
         rl.close();
       }
-      if (answer.trim().toLowerCase() !== 'y') { console.log('Aborted.'); return; }
+      if (answer.trim().toLowerCase() !== 'y') { aborted(); return; }
 
       const client = new AdmpClient(config);
       await client.request('DELETE', `/api/agents/${config.agent_id}/outbox/domain`, undefined, 'signature');

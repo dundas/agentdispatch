@@ -91,29 +91,4 @@ describe('Integration: groups', () => {
   });
 });
 
-describe('Unit: --json flag output', () => {
-  test('isJsonMode returns false when --json not in argv', async () => {
-    const { isJsonMode } = await import('../src/output.js');
-    const originalArgv = process.argv;
-    process.argv = ['node', 'admp', 'status', 'msg_123'];
-    expect(isJsonMode()).toBe(false);
-    process.argv = originalArgv;
-  });
-
-  test('isJsonMode returns true when --json in argv', async () => {
-    const { isJsonMode } = await import('../src/output.js');
-    const originalArgv = process.argv;
-    process.argv = ['node', 'admp', 'status', 'msg_123', '--json'];
-    expect(isJsonMode()).toBe(true);
-    process.argv = originalArgv;
-  });
-
-  test('isJsonMode returns true when ADMP_JSON=1', async () => {
-    const { isJsonMode } = await import('../src/output.js');
-    const original = process.env.ADMP_JSON;
-    process.env.ADMP_JSON = '1';
-    expect(isJsonMode()).toBe(true);
-    if (original === undefined) delete process.env.ADMP_JSON;
-    else process.env.ADMP_JSON = original;
-  });
-});
+// isJsonMode unit tests are in src/output.test.ts (co-located with the module they test)

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success, maskSecret, error } from '../output.js';
+import { success, maskSecret, error, aborted } from '../output.js';
 
 export function register(program: Command): void {
   const cmd = program
@@ -81,7 +81,7 @@ export function register(program: Command): void {
         rl.close();
       }
 
-      if (answer.trim().toLowerCase() !== 'y') { console.log('Aborted.'); return; }
+      if (answer.trim().toLowerCase() !== 'y') { aborted(); return; }
 
       const client = new AdmpClient(config);
       await client.request('DELETE', `/api/agents/${config.agent_id}/webhook`, undefined, 'signature');
