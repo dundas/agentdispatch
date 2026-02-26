@@ -19,7 +19,8 @@ import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
 import discoveryRoutes from './routes/discovery.js';
-import { requireApiKey } from './middleware/auth.js';
+import keysRoutes from './routes/keys.js';
+import { requireApiKey, verifyHttpSignatureOnly } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
 import { storage } from './storage/index.js';
@@ -43,6 +44,30 @@ if (process.env.MAILGUN_API_KEY && !process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {
   );
 }
 
+// Warn when no master key is configured — admin endpoints will deny all requests
+if (!process.env.MASTER_API_KEY) {
+  console.warn(
+    'WARNING: MASTER_API_KEY is not set. ' +
+    'Admin endpoints (key issuance, agent approval/rejection) will reject all requests. ' +
+    'Set MASTER_API_KEY to enable administrative operations.'
+  );
+}
+
+// Warn when DID:web federation is open without an allowlist — any internet domain
+// serving a valid DID document can register shadow agents (pending by default, but
+// the outbound DID resolution still creates an SSRF surface via DNS rebinding).
+// DID_WEB_ALLOWED_DOMAINS closes both the auto-approval and SSRF gaps.
+if (process.env.NODE_ENV !== 'test' &&
+    (process.env.REGISTRATION_POLICY || 'open') === 'open' &&
+    !process.env.DID_WEB_ALLOWED_DOMAINS) {
+  console.warn(
+    'WARNING: REGISTRATION_POLICY is "open" and DID_WEB_ALLOWED_DOMAINS is not set. ' +
+    'Any external domain can trigger outbound DID document fetches (SSRF via DNS rebinding) ' +
+    'and register shadow agents. Set DID_WEB_ALLOWED_DOMAINS to restrict which domains can ' +
+    'federate, or REGISTRATION_POLICY=approval_required to require manual approval.'
+  );
+}
+
 // Initialize logger
 const logger = pino({
   level: process.env.NODE_ENV === 'production' ? 'info' : 'debug'
@@ -59,11 +84,58 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(pinoHttp({ logger }));
 
-// Optional API key authentication
-if (process.env.API_KEY_REQUIRED === 'true') {
-  logger.info('API key authentication enabled');
-  app.use('/api', requireApiKey);
-}
+// API key authentication middleware.
+// The middleware is always mounted; enforcement is checked at request time
+// by reading API_KEY_REQUIRED, so the flag can be toggled without restart.
+logger.info(
+  { apiKeyRequired: process.env.API_KEY_REQUIRED === 'true' },
+  `API key enforcement: ${process.env.API_KEY_REQUIRED === 'true' ? 'enabled' : 'disabled'} (API_KEY_REQUIRED=${process.env.API_KEY_REQUIRED ?? 'unset'})`
+);
+app.use('/api', async (req, res, next) => {
+  // Always allow agent self-registration without an API key.
+  // NOTE: This exemption means single-use enrollment tokens presented during
+  // registration are NOT burned (requireApiKey is never invoked). This is
+  // intentional — registration creates the agent identity that the token will
+  // subsequently authenticate. The token is burned on the first non-exempt
+  // API call (e.g. heartbeat, inbox pull).
+  if (req.method === 'POST' && req.path.replace(/\/$/, '') === '/agents/register') return next();
+
+  // If request has a valid HTTP Signature, bypass API key requirement.
+  // This lets agents authenticate with their registered Ed25519 keypair
+  // instead of needing a separate API key.
+  if (req.headers['signature']) {
+    const result = await verifyHttpSignatureOnly(req);
+    if (result.verified) {
+      req.agent = result.agent;
+      req.authMethod = 'http-signature';
+      return next();
+    }
+    // The presence of a Signature header signals intent to use cryptographic auth.
+    // If verification fails, reject immediately — do NOT fall through to API key.
+    // Invariant: once a Signature header is present, verification failure causes
+    // an immediate rejection rather than falling through to API key auth.
+    // Use the specific reason if the agent is pending/rejected (actionable error)
+    // rather than a generic SIGNATURE_INVALID (misleading).
+    if (result.reason === 'REGISTRATION_PENDING') {
+      return res.status(403).json({
+        error: 'REGISTRATION_PENDING',
+        message: 'Agent registration is pending approval'
+      });
+    }
+    if (result.reason === 'REGISTRATION_REJECTED') {
+      return res.status(403).json({
+        error: 'REGISTRATION_REJECTED',
+        message: 'Agent registration has been rejected'
+      });
+    }
+    return res.status(401).json({
+      error: 'SIGNATURE_INVALID',
+      message: 'HTTP signature verification failed'
+    });
+  }
+
+  return requireApiKey(req, res, next);
+});
 
 // Load OpenAPI spec
 const openapiSpec = YAML.load(join(projectRoot, 'openapi.yaml'));
@@ -110,6 +182,7 @@ app.use('/api/agents', agentRoutes);
 app.use('/api/agents', inboxRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/agents', outboxRoutes);
+app.use('/api/keys', keysRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
 app.use('/api', outboxWebhookRouter);  // For /api/webhooks/mailgun
 

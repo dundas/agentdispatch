@@ -105,6 +105,22 @@ export class AgentService {
       blocked_agents: []
     };
 
+    // Apply registration policy.
+    // Precedence: tenant-level policy > REGISTRATION_POLICY env var > 'open' default.
+    // A tenant with registration_policy='approval_required' overrides an env var of 'open'.
+    // DID:web shadow agents bypass this path — see resolveDIDWebAgent in auth.js.
+    const tenant = tenant_id ? await storage.getTenant(tenant_id) : null;
+    const policy = tenant?.registration_policy || process.env.REGISTRATION_POLICY || 'open';
+
+    // Preserve existing approval status on re-registration to prevent
+    // an already-approved agent from being downgraded back to 'pending'.
+    const existingAgent = await storage.getAgent(agent_id);
+    if (existingAgent && existingAgent.registration_status === 'approved') {
+      agent.registration_status = 'approved';
+    } else {
+      agent.registration_status = policy === 'approval_required' ? 'pending' : 'approved';
+    }
+
     await storage.createAgent(agent);
 
     const response = {
@@ -117,6 +133,47 @@ export class AgentService {
     }
 
     return response;
+  }
+
+  /**
+   * Approve a pending agent
+   * @param {string} agentId
+   * @returns {Object} Updated agent
+   */
+  async approve(agentId) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+    if (agent.registration_status === 'approved') {
+      // Idempotent: already approved, return as-is
+      return agent;
+    }
+    // Design decision: re-approving a previously rejected agent is intentional.
+    // An admin should be able to change their mind and approve an agent that was
+    // previously rejected, so we do not block this transition.
+    return await storage.updateAgent(agentId, { registration_status: 'approved' });
+  }
+
+  /**
+   * Reject an agent
+   * @param {string} agentId
+   * @param {string} reason - Optional rejection reason
+   * @returns {Object} Updated agent
+   */
+  async reject(agentId, reason) {
+    const agent = await storage.getAgent(agentId);
+    if (!agent) {
+      throw new Error(`Agent ${agentId} not found`);
+    }
+    if (agent.registration_status === 'rejected') {
+      // Idempotent: already rejected, return as-is
+      return agent;
+    }
+    return await storage.updateAgent(agentId, {
+      registration_status: 'rejected',
+      rejection_reason: reason || null
+    });
   }
 
   /**

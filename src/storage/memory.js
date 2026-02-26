@@ -13,6 +13,8 @@ export class MemoryStorage {
     this.outboxMessages = new Map(); // message_id -> outbox message
     this.outboxes = new Map();      // agent_id -> message_id[]
     this.tenants = new Map();       // tenant_id -> tenant object
+    this.issuedKeys = new Map();    // key_id -> key object
+    this.issuedKeysByHash = new Map(); // key_hash -> key_id
   }
 
   // ============ AGENTS ============
@@ -51,10 +53,18 @@ export class MemoryStorage {
   }
 
   async listAgents(filter = {}) {
-    const agents = Array.from(this.agents.values());
+    let agents = Array.from(this.agents.values());
 
     if (filter.status) {
-      return agents.filter(a => a.heartbeat?.status === filter.status);
+      agents = agents.filter(a => a.heartbeat?.status === filter.status);
+    }
+
+    if (filter.registration_status) {
+      agents = agents.filter(a => a.registration_status === filter.registration_status);
+    }
+
+    if (filter.tenant_id) {
+      agents = agents.filter(a => a.tenant_id === filter.tenant_id);
     }
 
     return agents;
@@ -450,6 +460,57 @@ export class MemoryStorage {
 
   async deleteDomainConfig(agentId) {
     this.domains.delete(agentId);
+    return true;
+  }
+
+  // ============ ISSUED API KEYS ============
+
+  async createIssuedKey(key) {
+    const stored = { ...key, created_at: key.created_at || Date.now() };
+    this.issuedKeys.set(key.key_id, stored);
+    this.issuedKeysByHash.set(key.key_hash, key.key_id);
+    return stored;
+  }
+
+  async getIssuedKey(keyId) {
+    return this.issuedKeys.get(keyId) || null;
+  }
+
+  async getIssuedKeyByHash(keyHash) {
+    const keyId = this.issuedKeysByHash.get(keyHash);
+    if (!keyId) return null;
+    return this.issuedKeys.get(keyId) || null;
+  }
+
+  async listIssuedKeys() {
+    return Array.from(this.issuedKeys.values());
+  }
+
+  async revokeIssuedKey(keyId) {
+    const key = this.issuedKeys.get(keyId);
+    if (!key) return false;
+    const updated = { ...key, revoked: true, revoked_at: Date.now() };
+    this.issuedKeys.set(keyId, updated);
+    return true;
+  }
+
+  async updateIssuedKey(keyId, updates) {
+    const key = this.issuedKeys.get(keyId);
+    if (!key) return null;
+    const updated = { ...key, ...updates };
+    this.issuedKeys.set(keyId, updated);
+    return updated;
+  }
+
+  /**
+   * Atomically burn a single-use token: sets used_at only if it is currently null.
+   * Returns true if this call burned the token, false if it was already burned.
+   * Eliminates TOCTOU race where two concurrent requests both pass the used_at check.
+   */
+  async burnSingleUseKey(keyId) {
+    const key = this.issuedKeys.get(keyId);
+    if (!key || key.used_at) return false;
+    this.issuedKeys.set(keyId, { ...key, used_at: Date.now() });
     return true;
   }
 

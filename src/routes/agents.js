@@ -7,7 +7,7 @@ import express from 'express';
 import { agentService } from '../services/agent.service.js';
 import { groupService } from '../services/group.service.js';
 import { identityService } from '../services/identity.service.js';
-import { authenticateHttpSignature, requireApiKey } from '../middleware/auth.js';
+import { authenticateHttpSignature, requireApiKey, requireMasterKey } from '../middleware/auth.js';
 import { fromBase64, toBase64, hkdfSha256, LABEL_ADMP, keypairFromSeed } from '../utils/crypto.js';
 import { storage } from '../storage/index.js';
 
@@ -44,6 +44,7 @@ router.post('/register', async (req, res) => {
       public_key: agent.public_key,
       did: agent.did,
       registration_mode: agent.registration_mode,
+      registration_status: agent.registration_status,
       key_version: agent.key_version,
       verification_tier: agent.verification_tier,
       tenant_id: agent.tenant_id,
@@ -415,12 +416,20 @@ router.get('/:agentId/identity', authenticateHttpSignature, async (req, res) => 
  */
 router.post('/tenants', requireApiKey, async (req, res) => {
   try {
-    const { tenant_id, name, metadata } = req.body;
+    const { tenant_id, name, metadata, registration_policy } = req.body;
 
     if (!tenant_id) {
       return res.status(400).json({
         error: 'TENANT_ID_REQUIRED',
         message: 'tenant_id is required'
+      });
+    }
+
+    const validPolicies = ['open', 'approval_required'];
+    if (registration_policy && !validPolicies.includes(registration_policy)) {
+      return res.status(400).json({
+        error: 'INVALID_REGISTRATION_POLICY',
+        message: `registration_policy must be one of: ${validPolicies.join(', ')}`
       });
     }
 
@@ -435,7 +444,8 @@ router.post('/tenants', requireApiKey, async (req, res) => {
     const tenant = await storage.createTenant({
       tenant_id,
       name: name || tenant_id,
-      metadata: metadata || {}
+      metadata: metadata || {},
+      registration_policy: registration_policy || 'open'
     });
 
     res.status(201).json(tenant);
@@ -499,6 +509,91 @@ router.delete('/tenants/:tenantId', requireApiKey, async (req, res) => {
   } catch (error) {
     res.status(400).json({
       error: 'DELETE_TENANT_FAILED',
+      message: error.message
+    });
+  }
+});
+
+// ============ APPROVAL WORKFLOW ============
+
+/**
+ * GET /api/agents/tenants/:tenantId/pending
+ * List agents with pending registration status for a tenant
+ */
+router.get('/tenants/:tenantId/pending', requireMasterKey, async (req, res) => {
+  try {
+    const agents = await storage.listAgents({
+      tenant_id: req.params.tenantId,
+      registration_status: 'pending'
+    });
+
+    res.json({ agents: agents.map(a => {
+      const { secret_key, ...pub } = a;
+      return pub;
+    }) });
+  } catch (error) {
+    res.status(400).json({
+      error: 'LIST_PENDING_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/agents/:agentId/approve
+ * Approve a pending agent registration
+ */
+router.post('/:agentId/approve', requireMasterKey, async (req, res) => {
+  try {
+    const agent = await agentService.approve(req.params.agentId);
+    res.json({
+      agent_id: agent.agent_id,
+      registration_status: agent.registration_status
+    });
+  } catch (error) {
+    const status = error.message.includes('not found') ? 404 : 400;
+    res.status(status).json({
+      error: status === 404 ? 'AGENT_NOT_FOUND' : 'APPROVE_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/agents/:agentId/reject
+ * Reject an agent registration
+ * Body: { reason? }
+ */
+router.post('/:agentId/reject', requireMasterKey, async (req, res) => {
+  try {
+    const { reason } = req.body;
+
+    // Validate rejection reason: must be a string, max 500 characters
+    if (reason !== undefined && reason !== null) {
+      if (typeof reason !== 'string') {
+        return res.status(400).json({
+          error: 'INVALID_REASON',
+          message: 'reason must be a string'
+        });
+      }
+      if (reason.length > 500) {
+        return res.status(400).json({
+          error: 'REASON_TOO_LONG',
+          message: 'reason must not exceed 500 characters'
+        });
+      }
+    }
+
+    const agent = await agentService.reject(req.params.agentId, reason);
+    res.json({
+      agent_id: agent.agent_id,
+      registration_status: agent.registration_status,
+      rejection_reason: agent.rejection_reason
+    });
+  } catch (error) {
+    const status = error.message.includes('not found') ? 404 : 400;
+    res.status(status).json({
+      error: status === 404 ? 'AGENT_NOT_FOUND' : 'REJECT_FAILED',
       message: error.message
     });
   }
