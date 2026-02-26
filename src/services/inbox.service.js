@@ -390,11 +390,14 @@ export class InboxService {
       throw new Error(`Unsupported ADMP version: ${envelope.version}`);
     }
 
-    // Validate agent identifiers — accept agent:// URIs, did:seed: DIDs, and bare agent IDs
+    // Validate agent identifiers — accept agent:// URIs, did:seed: DIDs, and bare agent IDs.
+    // All three forms validate the full string (not just the prefix) to block injection
+    // via malicious suffixes like agent://foo\nX-Injected: header.
+    const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
     const validId = (id) =>
-      id.startsWith('agent://') ||
-      id.startsWith('did:seed:') ||
-      /^[a-zA-Z0-9._\-:]+$/.test(id);
+      /^agent:\/\/[a-zA-Z0-9._:-]+$/.test(id) ||
+      /^did:seed:[a-zA-Z0-9._:-]+$/.test(id) ||
+      SAFE_CHARS.test(id);
 
     if (!validId(envelope.from)) {
       throw new Error('Invalid from field (must be agent:// URI, did:seed: DID, or valid agent ID)');

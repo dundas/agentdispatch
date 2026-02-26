@@ -92,6 +92,82 @@ test('GET /api/stats returns stats object', async () => {
   assert.ok(res.body.messages);
 });
 
+test('agent_id validation rejects dangerous characters', async () => {
+  const bad = [
+    'has space',
+    'newline\ninjection',
+    'path/traversal',
+    'null\x00byte',
+    '<script>xss</script>',
+    'agent://legacy-scheme',
+    'a'.repeat(256),
+  ];
+
+  for (const id of bad) {
+    const res = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: id, agent_type: 'test' });
+    assert.equal(res.status, 400, `Expected 400 for agent_id: ${JSON.stringify(id)}`);
+  }
+
+  // Valid IDs should still work
+  const valid = ['simple', 'with-hyphens', 'dots.allowed', 'colons:ok', 'ALL_CAPS', 'a'.repeat(255)];
+  for (const id of valid) {
+    const res = await request(app)
+      .post('/api/agents/register')
+      .send({ agent_id: id, agent_type: 'test' });
+    assert.equal(res.status, 201, `Expected 201 for agent_id: ${JSON.stringify(id)}`);
+  }
+});
+
+test('envelope from/to validation rejects injection attempts', async () => {
+  const sender = await registerAgent('env-sender');
+  const recipient = await registerAgent('env-recipient');
+
+  // Malicious from fields that should be rejected
+  const badFromIds = [
+    'evil\nX-Injected: header',
+    'agent://bad\ninjected',
+    'did:seed:\ninjected',
+    'has spaces',
+    '../traversal',
+  ];
+
+  for (const badId of badFromIds) {
+    const envelope = {
+      version: '1.0',
+      id: `msg-${Date.now()}`,
+      type: 'task.request',
+      from: badId,
+      to: recipient.agent_id,
+      subject: 'injection-test',
+      body: { test: true },
+      timestamp: new Date().toISOString(),
+    };
+    const res = await request(app)
+      .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+      .send(envelope);
+    assert.equal(res.status, 400, `Expected 400 for from: ${JSON.stringify(badId)}`);
+  }
+
+  // Legacy agent:// URI in from field should still pass (backward-compat)
+  const legacyEnvelope = {
+    version: '1.0',
+    id: `msg-${Date.now()}`,
+    type: 'task.request',
+    from: 'agent://legacy-sender',
+    to: recipient.agent_id,
+    subject: 'legacy-compat',
+    body: { test: true },
+    timestamp: new Date().toISOString(),
+  };
+  const legacyRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages`)
+    .send(legacyEnvelope);
+  // 201 (sender not in storage so signature skipped) or 404 — either is fine; just not 400
+  assert.notEqual(legacyRes.status, 400, 'Legacy agent:// envelope from should not be rejected by validation');
+});
+
 test('agent registration, heartbeat, and get agent', async () => {
   const agent = await registerAgent('test-agent', { role: 'tester' });
 

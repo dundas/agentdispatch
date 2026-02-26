@@ -37,8 +37,12 @@ export class AgentService {
     // Allowed: letters, digits, dots, underscores, hyphens, colons (for did-web: prefixes).
     // Blocks newlines (signing string injection), slashes (path traversal), spaces,
     // null bytes, and other characters that are dangerous in URLs or HTTP headers.
-    if (!/^[a-zA-Z0-9._\-:]+$/.test(agent_id)) {
+    if (!/^[a-zA-Z0-9._:-]+$/.test(agent_id)) {
       throw new Error('agent_id may only contain letters, numbers, dots, underscores, hyphens, and colons');
+    }
+
+    if (agent_id.length > 255) {
+      throw new Error('agent_id must be 255 characters or fewer');
     }
 
     // Check if agent already exists
