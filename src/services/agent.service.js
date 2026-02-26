@@ -33,6 +33,14 @@ export class AgentService {
       agent_id = `agent://agent-${uuid()}`;
     }
 
+    // Validate agent_id character set.
+    // Allowed: letters, digits, dots, underscores, hyphens, colons (for did-web: prefixes).
+    // Blocks newlines (signing string injection), slashes (path traversal), spaces,
+    // null bytes, and other characters that are dangerous in URLs or HTTP headers.
+    if (!/^[a-zA-Z0-9._\-:]+$/.test(agent_id)) {
+      throw new Error('agent_id may only contain letters, numbers, dots, underscores, hyphens, and colons');
+    }
+
     // Check if agent already exists
     const existing = await storage.getAgent(agent_id);
     if (existing) {
