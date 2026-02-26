@@ -18,9 +18,11 @@ const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
 // compatibility for pre-PR#16 senders.
 const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
 // VALID_DID_SEED is a subset of SAFE_CHARS (did:seed:abc passes both). It is kept
-// for documentation and to provide a place to tighten did:seed: validation independently
-// if requirements change. Note: did:seed:ab:cd also passes SAFE_CHARS, so the no-colons
-// restriction in the suffix is not strictly enforced at the envelope layer.
+// for documentation and as a named anchor if suffix rules need to diverge from SAFE_CHARS
+// in the future. Important: SAFE_CHARS supersedes it at the envelope layer —
+// did:seed:ab:cd fails VALID_DID_SEED (colons in suffix) but passes SAFE_CHARS, so
+// it is still accepted here. The no-colons restriction is enforced at registration,
+// not at the envelope layer.
 const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._-]+$/;
 
 /**
