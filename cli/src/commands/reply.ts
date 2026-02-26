@@ -19,7 +19,9 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
-      // Validate explicit --to before making any requests
+      // Validate explicit --to before making any requests.
+      // Agent IDs allow dots (e.g. "auth.backend") — intentionally broader than
+      // validateMessageId/validateGroupId which reject dots for server-generated IDs.
       if (opts.to && !/^[\w.\-]+$/.test(opts.to)) {
         error('--to must contain only alphanumeric characters, hyphens, underscores, and dots', 'INVALID_ARGUMENT');
         process.exit(1);

@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { readFileSync } from 'fs';
+import { readFileSync, realpathSync } from 'fs';
 import { isAbsolute } from 'path';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
@@ -14,6 +14,17 @@ function parseBodyOrExit(raw: string): unknown {
     // Reject absolute paths and directory traversal to prevent reading arbitrary files.
     if (isAbsolute(filePath) || filePath.includes('..')) {
       error('File path must be relative and must not contain ..', 'INVALID_ARGUMENT');
+      process.exit(1);
+    }
+    // Resolve symlinks and verify the real path is within CWD.
+    try {
+      const resolved = realpathSync(filePath);
+      if (!resolved.startsWith(process.cwd() + '/')) {
+        error('File path must resolve within the current directory', 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
+    } catch {
+      error(`Could not read body file: ${filePath}`, 'FILE_NOT_FOUND');
       process.exit(1);
     }
     // Read the file in one shot — avoids TOCTOU between stat and read.
@@ -69,6 +80,8 @@ export function register(program: Command): void {
       const config = requireConfig(['agent_id', 'secret_key', 'api_key', 'base_url']);
 
       // Validate agent ID to prevent path traversal in the URL.
+      // Agent IDs allow dots (e.g. "auth.backend") — intentionally broader than
+      // validateMessageId/validateGroupId which reject dots for IDs the server generates.
       if (!/^[\w.\-]+$/.test(opts.to)) {
         error('--to must contain only alphanumeric characters, hyphens, underscores, and dots', 'INVALID_ARGUMENT');
         process.exit(1);

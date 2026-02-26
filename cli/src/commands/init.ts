@@ -17,6 +17,7 @@ function promptSecret(question: string): Promise<string> {
     process.stderr.write('Warning: input not masked (non-interactive terminal)\n');
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     return new Promise<string>(resolve => {
+      rl.once('error', () => { rl.close(); resolve(''); });
       rl.question(question, answer => { rl.close(); resolve(answer); });
     });
   }
