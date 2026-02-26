@@ -510,7 +510,7 @@ The CLI stores credentials in `~/.admp/config.json` with file permissions `0600`
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `base_url` | `string` | No | ADMP hub URL. Defaults to `https://agentdispatch.fly.dev`. |
-| `agent_id` | `string` | Yes* | Your registered agent identifier. Must match `^[a-zA-Z0-9._\-:]+$`. |
+| `agent_id` | `string` | Yes* | Your registered agent identifier. Must match `^[a-zA-Z0-9._:-]+$`. |
 | `secret_key` | `string` | Yes* | Base64-encoded 64-byte Ed25519 secret key. **Never transmitted** over the network; used only for local signing. |
 | `api_key` | `string` | No | API key for `X-Api-Key` authentication (required for `admp send`). |
 

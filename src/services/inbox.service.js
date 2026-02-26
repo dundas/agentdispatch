@@ -16,6 +16,17 @@ const VALID_AGENT_URI = /^agent:\/\/[a-zA-Z0-9._:-]+$/;
 // did:seed: suffixes are hex fingerprints (sha256 truncated to 16 bytes); no colons expected.
 const VALID_DID_SEED = /^did:seed:[a-zA-Z0-9._-]+$/;
 
+/**
+ * Return true if `id` is a syntactically valid agent identifier.
+ * Accepts: bare agent IDs, legacy agent:// URIs (backward-compat), did:seed: DIDs.
+ * Rejects: injection characters, empty/oversized strings.
+ * NOTE: a valid id does not mean the agent exists or that the sender is trusted.
+ */
+function isValidAgentId(id) {
+  if (!id || id.length > 255) return false;
+  return VALID_AGENT_URI.test(id) || VALID_DID_SEED.test(id) || SAFE_CHARS.test(id);
+}
+
 export class InboxService {
   /**
    * Send message to agent's inbox
@@ -397,26 +408,17 @@ export class InboxService {
       throw new Error(`Unsupported ADMP version: ${envelope.version}`);
     }
 
-    // Validate agent identifiers — accept agent:// URIs, did:seed: DIDs, and bare agent IDs.
-    // All three forms validate the full string (not just the prefix) to block injection
-    // via malicious suffixes like agent://foo\nX-Injected: header.
-    // Length is checked first (O(1) guard) to avoid running the regex on huge inputs.
-    //
+    // Validate agent identifiers using module-level isValidAgentId().
     // NOTE: `from` is used for display and signature verification only. When the sender
     // is not found in storage, signature verification is skipped and `from` is UNTRUSTED.
     // Callers must not use `from` for authorization without first verifying the signature.
-    // The agent:// scheme is still accepted in envelopes for backward compatibility with
-    // senders registered before bare-ID format was introduced.
-    const validId = (id) => {
-      if (!id || id.length > 255) return false;
-      return VALID_AGENT_URI.test(id) || VALID_DID_SEED.test(id) || SAFE_CHARS.test(id);
-    };
-
-    if (!validId(envelope.from)) {
+    // agent:// URIs are still accepted in envelopes for backward compatibility with senders
+    // registered before the bare-ID format was introduced (PR #16).
+    if (!isValidAgentId(envelope.from)) {
       throw new Error('Invalid from field (must be agent:// URI, did:seed: DID, or valid agent ID)');
     }
 
-    if (!validId(envelope.to)) {
+    if (!isValidAgentId(envelope.to)) {
       throw new Error('Invalid to field (must be agent:// URI, did:seed: DID, or valid agent ID)');
     }
 

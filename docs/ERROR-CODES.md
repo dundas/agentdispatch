@@ -49,7 +49,7 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 
 | Code | HTTP | Retryable | Description | Hint |
 |------|------|-----------|-------------|------|
-| `REGISTRATION_FAILED` | 400 | No | Agent registration failed | Check `agent_id` uniqueness, length (max 255 chars, checked before regex), character set (`^[a-zA-Z0-9._\-:]+$`), reserved prefixes (`did:` and `agent:` are not allowed at the start of a registered ID), and required fields |
+| `REGISTRATION_FAILED` | 400 | No | Agent registration failed | Check `agent_id` uniqueness, length (max 255 chars, checked before regex), character set (`^[a-zA-Z0-9._:-]+$`), reserved prefixes (`did:` and `agent:` are not allowed at the start of a registered ID), and required fields |
 | `AGENT_NOT_FOUND` | 404 | No | Agent ID not found in storage | Verify `agent_id` is correct and agent is registered |
 | `AGENT_ID_REQUIRED` | 400 | No | No agent ID provided | Include `agent_id` in URL path or `X-Agent-ID` header |
 | `HEARTBEAT_FAILED` | 400 | Yes | Heartbeat update failed | Verify agent exists |
@@ -271,4 +271,4 @@ After 5-6 attempts, log the error and alert. Continued retries are unlikely to s
 - **`REGISTRATION_PENDING` (403)**: Retryable after the agent has been approved by an admin. Poll infrequently (e.g., every 30 seconds) or use a webhook/callback if available.
 - **`SEND_FAILED` in outbox context (400/403/404)**: Retryability depends on the underlying cause. A 403 (unverified domain) is not retryable until the domain is verified. A transient 500 is retryable.
 - **`DOMAIN_VERIFY_FAILED` (400/404)**: DNS propagation may take time. Retry after a delay (e.g., 60 seconds) if you have just configured DNS records.
-- **`REGISTRATION_FAILED` agent_id validation**: If you receive this because of an invalid `agent_id`, check all three constraints in order: (1) the `agent_id` must be 255 characters or fewer; (2) it must match `^[a-zA-Z0-9._\-:]+$`; (3) it must not start with `did:` or `agent:` (reserved prefixes that protect system-generated DID identifiers). Slashes, spaces, and `agent://` prefixes are not valid registered agent IDs.
+- **`REGISTRATION_FAILED` agent_id validation**: If you receive this because of an invalid `agent_id`, check all three constraints in order: (1) the `agent_id` must be 255 characters or fewer; (2) it must match `^[a-zA-Z0-9._:-]+$`; (3) it must not start with `did:` or `agent:` (reserved prefixes that protect system-generated DID identifiers). Slashes, spaces, and `agent://` prefixes are not valid registered agent IDs.

@@ -191,7 +191,7 @@ Date: ...
 `agent_id` must satisfy three constraints, checked in this order:
 
 1. **Length:** 255 characters or fewer (checked first, O(1) guard).
-2. **Character set:** Must match `^[a-zA-Z0-9._\-:]+$`.
+2. **Character set:** Must match `^[a-zA-Z0-9._:-]+$`.
 3. **Reserved prefixes:** Must not start with `did:` or `agent:` (case-insensitive). These prefixes are reserved for system-generated DID identifiers.
 
 The length check runs before the regex so that pathologically long inputs are rejected immediately without executing the pattern match. The reserved-prefix check runs last and catches IDs that pass character validation but would spoof system identifiers.
@@ -243,7 +243,7 @@ All ADMP messages use this canonical JSON envelope:
 **Required fields:** `version`, `from`, `to`, `subject`, `timestamp`
 
 **`from`/`to` field formats — all of the following are accepted:**
-- Bare agent ID: `"my-agent"` (must match `^[a-zA-Z0-9._\-:]+$`)
+- Bare agent ID: `"my-agent"` (must match `^[a-zA-Z0-9._:-]+$`)
 - URI form: `"agent://my-agent"`
 - DID form: `"did:seed:abc123..."`
 

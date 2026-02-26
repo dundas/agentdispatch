@@ -562,6 +562,14 @@ async function resolveDIDWebAgent(did, req) {
       return null;
     }
 
+    // Defense-in-depth: validate domain and path segments contain only safe
+    // characters before using them in agent_id construction or HTTP requests.
+    // A crafted keyId like "did:web:evil.com\nX-Injected: header" could
+    // otherwise inject into signing strings or storage keys.
+    const SAFE_DID_SEGMENT = /^[a-zA-Z0-9._:-]+$/;
+    if (!SAFE_DID_SEGMENT.test(domain)) return null;
+    if (pathSegments.some(seg => !SAFE_DID_SEGMENT.test(seg))) return null;
+
     // Compute DID document URL once (per W3C DID:web spec):
     //   did:web:domain.com           → https://domain.com/.well-known/did.json
     //   did:web:domain.com:path:seg  → https://domain.com/path/seg/did.json
