@@ -17,7 +17,12 @@
     { "path": "fly.toml", "extractor": "architecture", "provides": "Fly.io deployment topology and env vars" },
     { "path": "docker-compose.yml", "extractor": "architecture", "provides": "Local multi-service dev topology" },
     { "path": "package.json", "extractor": "architecture", "provides": "Dependencies, scripts, and metadata" },
-    { "path": "whitepaper/v1.md", "extractor": "generic", "provides": "ADMP v1.0 specification (protocol semantics, message format, security model)" }
+    { "path": "whitepaper/v1.md", "extractor": "generic", "provides": "ADMP v1.0 specification (protocol semantics, message format, security model)" },
+    { "path": "cli/src/index.ts", "extractor": "cli-commands", "provides": "CLI command registration — 16 commands via commander.js" },
+    { "path": "cli/src/auth.ts", "extractor": "typescript-api", "provides": "Auth library exports: buildAuthHeaders, signEnvelope, Ed25519 signing primitives" },
+    { "path": "cli/src/client.ts", "extractor": "typescript-api", "provides": "HTTP client library: AdmpClient class with signature/api-key/none auth modes" },
+    { "path": "cli/src/config.ts", "extractor": "typescript-api", "provides": "Config management: ~/.admp/config.json, env var overrides, requireConfig" },
+    { "path": "cli/package.json", "extractor": "config", "provides": "CLI package metadata, subpath exports, dependencies" }
   ],
   "outputs": [
     {
@@ -47,6 +52,11 @@
       "type": "api-reference",
       "path": "docs/API-REFERENCE.md",
       "audience": "Developers integrating with the ADMP HTTP API"
+    },
+    {
+      "type": "cli-reference",
+      "path": "docs/CLI-REFERENCE.md",
+      "audience": "Developers and agents using the ADMP CLI and library"
     }
   ],
   "validate": [],

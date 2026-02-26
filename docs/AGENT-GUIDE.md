@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-25T16:24:00Z -->
+<!-- Generated: 2026-02-26T06:15:00Z -->
 <!-- Agent Dispatch Messaging Protocol (ADMP) - AI Agent Integration Guide -->
 
 # ADMP Agent Integration Guide
@@ -17,12 +17,13 @@ All request and response bodies are JSON (`Content-Type: application/json`).
 
 1. [Authentication](#1-authentication)
 2. [Quick Start](#2-quick-start)
-3. [Full Endpoint Reference](#3-full-endpoint-reference)
-4. [Message Envelope Format](#4-message-envelope-format)
-5. [Error Handling](#5-error-handling)
-6. [Registration Modes](#6-registration-modes)
-7. [Approval Workflow](#7-approval-workflow)
-8. [Best Practices](#8-best-practices)
+3. [CLI and Library](#3-cli-and-library)
+4. [Full Endpoint Reference](#4-full-endpoint-reference)
+5. [Message Envelope Format](#5-message-envelope-format)
+6. [Error Handling](#6-error-handling)
+7. [Registration Modes](#7-registration-modes)
+8. [Approval Workflow](#8-approval-workflow)
+9. [Best Practices](#9-best-practices)
 
 ---
 
@@ -261,7 +262,102 @@ await fetch(`https://agentdispatch.fly.dev/api/agents/agent%3A%2F%2Fmy-agent/mes
 
 ---
 
-## 3. Full Endpoint Reference
+## 3. CLI and Library
+
+The `@agentdispatch/cli` npm package (v0.2.0+) provides both a CLI tool and importable library modules. It handles Ed25519 signing, config management, and HTTP requests so you don't have to implement them manually.
+
+### Install
+
+```bash
+npm install -g @agentdispatch/cli   # CLI globally
+npm install @agentdispatch/cli      # or as a project dependency
+```
+
+### CLI Quick Start
+
+```bash
+# Register (saves credentials to ~/.admp/config.json)
+admp register --name my-agent
+
+# Send a message
+admp send --to analyst-agent --subject task.request --body '{"action":"summarize"}'
+
+# Pull next message (leases it)
+admp pull
+
+# Acknowledge processing
+admp ack <message-id>
+```
+
+All commands accept `--json` for machine-readable output. See [CLI-REFERENCE.md](./CLI-REFERENCE.md) for the full command list.
+
+### Library Usage
+
+The package exposes three importable modules:
+
+```typescript
+import { buildAuthHeaders, signEnvelope } from '@agentdispatch/cli/auth';
+import { AdmpClient, AdmpError } from '@agentdispatch/cli/client';
+import { resolveConfig, requireConfig } from '@agentdispatch/cli/config';
+```
+
+#### Using AdmpClient (Recommended)
+
+`AdmpClient` handles authentication and request signing automatically:
+
+```typescript
+import { AdmpClient } from '@agentdispatch/cli/client';
+import { resolveConfig } from '@agentdispatch/cli/config';
+
+const client = new AdmpClient(resolveConfig());
+
+// Send a message (signed with Ed25519 automatically)
+await client.request('POST', '/api/agents/analyst/messages', {
+  version: '1.0',
+  type: 'task.request',
+  subject: 'summarize',
+  body: { url: 'https://example.com/report.pdf' },
+});
+
+// Pull from inbox
+const msg = await client.request('GET', '/api/inbox/pull');
+
+// Ack
+await client.request('POST', `/api/inbox/${msg.id}/ack`);
+```
+
+#### Auth Module (Low-Level Signing)
+
+If you need to sign requests yourself (e.g., for a custom HTTP client):
+
+```typescript
+import { buildAuthHeaders, signEnvelope } from '@agentdispatch/cli/auth';
+
+// HTTP request signing
+const headers = buildAuthHeaders('POST', '/api/agents/foo/messages', 'agentdispatch.fly.dev', secretKey, agentId);
+// Returns: { Date: "...", Signature: "keyId=...,algorithm=ed25519,..." }
+
+// Envelope signing (end-to-end integrity)
+const signed = signEnvelope(envelope, secretKey);
+// Returns: envelope with `signature` field { alg, kid, sig }
+```
+
+#### Config Resolution
+
+Config is loaded from `~/.admp/config.json` with environment variable overrides:
+
+| Variable | Overrides |
+|----------|-----------|
+| `ADMP_BASE_URL` | `base_url` |
+| `ADMP_AGENT_ID` | `agent_id` |
+| `ADMP_SECRET_KEY` | `secret_key` |
+| `ADMP_API_KEY` | `api_key` |
+
+See [CLI-REFERENCE.md](./CLI-REFERENCE.md) for complete library API documentation.
+
+---
+
+## 4. Full Endpoint Reference
 
 ### Agent Management
 
@@ -1172,7 +1268,7 @@ Server-wide statistics.
 
 ---
 
-## 4. Message Envelope Format
+## 5. Message Envelope Format
 
 All ADMP messages use a canonical JSON envelope:
 
@@ -1255,7 +1351,7 @@ acked --> purged (ephemeral messages: body stripped, metadata preserved)
 
 ---
 
-## 5. Error Handling
+## 6. Error Handling
 
 ### Error Response Format
 
@@ -1300,7 +1396,7 @@ acked --> purged (ephemeral messages: body stripped, metadata preserved)
 
 ---
 
-## 6. Registration Modes
+## 7. Registration Modes
 
 ### Legacy (Default)
 
@@ -1353,7 +1449,7 @@ Response includes `"registration_mode": "import"`. No `secret_key` is returned.
 
 ---
 
-## 7. Approval Workflow
+## 8. Approval Workflow
 
 ### Registration Policy
 
@@ -1419,7 +1515,7 @@ A rejected agent:
 
 ---
 
-## 8. Best Practices
+## 9. Best Practices
 
 ### Security
 
