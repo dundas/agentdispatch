@@ -1,0 +1,93 @@
+import { Command } from 'commander';
+import { createInterface } from 'readline';
+import { AdmpClient } from '../client.js';
+import { requireConfig } from '../config.js';
+import { success, maskSecret, warn, error, aborted } from '../output.js';
+
+export function register(program: Command): void {
+  const cmd = program
+    .command('webhook')
+    .description('Manage webhook delivery for incoming messages');
+
+  cmd
+    .command('set')
+    .description('Set or update the webhook URL and signing secret')
+    .requiredOption('--url <url>', 'Webhook endpoint URL')
+    .option('--secret <secret>', 'Webhook signing secret (use ADMP_WEBHOOK_SECRET env var to avoid shell history exposure)')
+    .addHelpText('after', '\nSecurity note: --secret appears in shell history. Set ADMP_WEBHOOK_SECRET instead to avoid exposure.\n\nExample:\n  ADMP_WEBHOOK_SECRET=s3cr3t admp webhook set --url https://myapp.com/hook\n  admp webhook set --url https://myapp.com/hook --secret s3cr3t')
+    .action(async (opts: { url: string; secret?: string }) => {
+      const secret = process.env.ADMP_WEBHOOK_SECRET ?? opts.secret;
+      if (!process.env.ADMP_WEBHOOK_SECRET && opts.secret) {
+        warn('--secret appears in shell history. Prefer ADMP_WEBHOOK_SECRET env var.');
+      }
+      if (!secret) {
+        error('Webhook secret required — pass --secret or set ADMP_WEBHOOK_SECRET', 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
+      // Validate URL client-side and reject non-HTTPS schemes before storing.
+      try {
+        const parsed = new URL(opts.url);
+        if (parsed.protocol !== 'https:') {
+          error('Webhook URL must use HTTPS', 'INVALID_ARGUMENT');
+          process.exit(1);
+        }
+      } catch {
+        error(`Invalid webhook URL: ${opts.url}`, 'INVALID_ARGUMENT');
+        process.exit(1);
+      }
+      const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
+      const client = new AdmpClient(config);
+
+      await client.request(
+        'POST',
+        `/api/agents/${config.agent_id}/webhook`,
+        { url: opts.url, secret },
+        'signature'
+      );
+
+      success(`Webhook set to ${opts.url}`);
+    });
+
+  cmd
+    .command('get')
+    .description('Show the current webhook configuration')
+    .addHelpText('after', '\nExample:\n  admp webhook get')
+    .action(async () => {
+      const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
+      const client = new AdmpClient(config);
+
+      const res = await client.request<{ url?: string; secret?: string }>(
+        'GET',
+        `/api/agents/${config.agent_id}/webhook`,
+        undefined,
+        'signature'
+      );
+
+      success('Webhook configuration', {
+        url: res?.url ?? '(not set)',
+        secret: maskSecret(res?.secret),
+      });
+    });
+
+  cmd
+    .command('delete')
+    .description('Delete the webhook configuration')
+    .addHelpText('after', '\nExample:\n  admp webhook delete')
+    .action(async () => {
+      const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
+
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      let answer = 'n';
+      try {
+        answer = await new Promise<string>(r => rl.question('Delete webhook? (y/N) ', r));
+      } finally {
+        rl.close();
+      }
+
+      if (answer.trim().toLowerCase() !== 'y') { aborted(); return; }
+
+      const client = new AdmpClient(config);
+      await client.request('DELETE', `/api/agents/${config.agent_id}/webhook`, undefined, 'signature');
+      success('Webhook deleted.');
+    });
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@agentdispatch/cli",
+  "version": "0.1.0",
+  "description": "CLI for the Agent Dispatch Messaging Protocol (ADMP)",
+  "type": "module",
+  "bin": {
+    "admp": "./bin/admp.js"
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --target node --outfile dist/index.js --minify",
+    "prepack": "bun run build",
+    "test": "bun test"
+  },
+  "keywords": [
+    "admp",
+    "agent",
+    "messaging",
+    "cli",
+    "ai-agents"
+  ],
+  "author": "Agent Dispatch Working Group",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "tweetnacl": "^1.0.3"
+  }
+}
