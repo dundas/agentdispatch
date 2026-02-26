@@ -3,6 +3,7 @@ import { createInterface } from 'readline';
 import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { success, isJsonMode, error, aborted } from '../output.js';
+import { validateGroupId } from '../validate.js';
 
 export function register(program: Command): void {
   const cmd = program
@@ -64,6 +65,7 @@ export function register(program: Command): void {
     .option('--key <key>', 'Access key for key-protected groups')
     .addHelpText('after', '\nExample:\n  admp groups join grp_abc123 --key mykey')
     .action(async (groupId: string, opts: { key?: string }) => {
+      validateGroupId(groupId);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
@@ -79,6 +81,7 @@ export function register(program: Command): void {
     .description('Leave a group')
     .addHelpText('after', '\nExample:\n  admp groups leave grp_abc123')
     .action(async (groupId: string) => {
+      validateGroupId(groupId);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
 
       const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -102,6 +105,7 @@ export function register(program: Command): void {
     .option('--body <json>', 'Message body as JSON', '{}')
     .addHelpText('after', '\nExample:\n  admp groups send grp_abc123 --subject alert --body \'{"msg":"hello"}\'')
     .action(async (groupId: string, opts: { subject: string; body: string }) => {
+      validateGroupId(groupId);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
@@ -129,6 +133,7 @@ export function register(program: Command): void {
     .option('--limit <n>', 'Max number of messages to show', '20')
     .addHelpText('after', '\nExample:\n  admp groups messages grp_abc123 --limit 10')
     .action(async (groupId: string, opts: { limit: string }) => {
+      validateGroupId(groupId);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 

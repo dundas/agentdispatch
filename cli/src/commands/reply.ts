@@ -3,6 +3,7 @@ import { AdmpClient } from '../client.js';
 import { requireConfig } from '../config.js';
 import { signEnvelope } from '../auth.js';
 import { success, error } from '../output.js';
+import { validateMessageId } from '../validate.js';
 
 export function register(program: Command): void {
   program
@@ -14,6 +15,7 @@ export function register(program: Command): void {
     .option('--to <agentId>', 'Recipient agent ID (auto-detected from original message if omitted; requires api_key)')
     .addHelpText('after', '\nNote: omitting --to triggers an automatic status lookup to detect the sender.\nThat lookup uses api-key auth — ensure api_key is configured (admp config set api_key <key>).\n\nExample:\n  admp reply msg_abc123 --subject done --body \'{"result":"ok"}\'\n  admp reply msg_abc123 --to sender-agent --subject done  # skip status lookup (no api_key needed)')
     .action(async (messageId: string, opts: { subject: string; body: string; type: string; to?: string }) => {
+      validateMessageId(messageId);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 

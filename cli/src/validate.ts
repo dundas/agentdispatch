@@ -19,6 +19,19 @@ export function validateMessageId(id: string): void {
 }
 
 /**
+ * Validates that a group ID contains only safe characters for URL paths.
+ */
+export function validateGroupId(id: string): void {
+  if (!/^[\w\-]+$/.test(id)) {
+    error(
+      'Group ID must contain only alphanumeric characters, hyphens, and underscores',
+      'INVALID_ARGUMENT'
+    );
+    process.exit(1);
+  }
+}
+
+/**
  * Validates that a seed value is a 64-character lowercase or uppercase hex string
  * (representing 32 bytes), matching the server's expected format.
  */

@@ -52,7 +52,14 @@ export class AdmpClient {
       const signedPath = url.pathname + url.search;
       // secret_key and agent_id are required for signature auth; callers must
       // call requireConfig(['secret_key', 'agent_id']) before constructing the client.
-      const authHeaders = buildAuthHeaders(method, signedPath, host, this.config.secret_key!, this.config.agent_id!);
+      if (!this.config.secret_key || !this.config.agent_id) {
+        throw new AdmpError(
+          'secret_key and agent_id are required for signature auth — run `admp init` to configure',
+          'MISSING_CONFIG',
+          0
+        );
+      }
+      const authHeaders = buildAuthHeaders(method, signedPath, host, this.config.secret_key, this.config.agent_id);
       Object.assign(headers, authHeaders);
     } else if (auth === 'api-key') {
       if (!this.config.api_key) {
