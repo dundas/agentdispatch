@@ -49,5 +49,27 @@ tmp/
 temp/
 *.tmp
 
-# Brain - secret key stored after registration
-brain/config.json
+# Internal agent tooling (not part of the public project)
+.ai/
+.claude/
+.codex/
+.gemini/
+memory/
+automation/
+ai-dev-tasks/
+skill/
+brain/
+
+# Internal analysis documents
+CODE-REVIEW-GAP-ANALYSIS.md
+MERGE-CHECKLIST.md
+PR-*-GAP-ANALYSIS.md
+PR-*-MERGE-READINESS-FINAL.md
+PR_DESCRIPTION.md
+MECH-PERFORMANCE-ANALYSIS.md
+
+# Proprietary storage backend
+src/storage/mech.js
+
+# Local settings
+.claude/settings.local.json

@@ -160,13 +160,16 @@ export async function verifyHttpSignatureOnly(req) {
       return { verified: false, reason: result.reason };
     }
 
-    // Authorization check: signing agent must match target agent in URL.
+    // Authorization check: signing agent must match target agent in URL,
+    // EXCEPT for cross-agent message sending (POST /agents/:id/messages).
     // Without this, Agent A could sign with their own valid key and
-    // access Agent B's resources via the global API key bypass.
+    // access Agent B's private resources (inbox pull, ack) via the bypass.
+    // Message sending is explicitly allowed cross-agent — that's the protocol's purpose.
     const agentPathMatch = req.path.match(/^\/agents\/([^/]+)/);
     if (agentPathMatch) {
       const targetAgentId = decodeURIComponent(agentPathMatch[1]);
-      if (targetAgentId !== 'register' && result.agent.agent_id !== targetAgentId) {
+      const isMessageSend = req.method === 'POST' && /^\/agents\/[^/]+\/messages\/?$/.test(req.path);
+      if (targetAgentId !== 'register' && !isMessageSend && result.agent.agent_id !== targetAgentId) {
         return { verified: false };
       }
     }
