@@ -7,11 +7,17 @@ import nacl from 'tweetnacl';
 
 import app from './server.js';
 import { fromBase64, toBase64, signMessage, signRequest, hkdfSha256, LABEL_ADMP, keypairFromSeed, generateDID, hashApiKey } from './utils/crypto.js';
-import { createMechStorage } from './storage/mech.js';
 import { requireApiKey } from './middleware/auth.js';
 import { webhookService } from './services/webhook.service.js';
 import { outboxService } from './services/outbox.service.js';
 import { storage } from './storage/index.js';
+
+let createMechStorage = null;
+try {
+  ({ createMechStorage } = await import('./storage/mech.js'));
+} catch {
+  // Optional in open-source branch: mech backend may be intentionally absent.
+}
 
 async function registerAgent(name, metadata = {}) {
   const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -68,6 +74,7 @@ function withAgentHeader(req, agentId) {
 }
 
 const MECH_CONFIGURED =
+  !!createMechStorage &&
   process.env.STORAGE_BACKEND === 'mech' &&
   !!process.env.MECH_APP_ID &&
   !!process.env.MECH_API_KEY;

@@ -59,6 +59,9 @@ automation/
 ai-dev-tasks/
 skill/
 brain/
+.windsurf/
+tasks/*
+!tasks/.gitkeep
 
 # Internal analysis documents
 CODE-REVIEW-GAP-ANALYSIS.md
