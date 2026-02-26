@@ -31,6 +31,10 @@ switch (backend) {
 // Callers that bypass register() (e.g. DID:web shadow agents, migrations)
 // still go through this guard, ensuring no unsafe ID is ever persisted.
 //
+// Only createAgent is intercepted: update paths go through register() or
+// resolveDIDWebAgent() which have their own character-set and prefix guards,
+// and they never change an existing agent_id.
+//
 // The regex blocks only control characters (newlines, null bytes, DEL) and
 // backslashes — the characters that cause signing-string injection or escaping
 // issues in storage backends. Slashes are intentionally allowed because

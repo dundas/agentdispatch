@@ -485,6 +485,10 @@ const _didKeyCache = new Map();
 const _DID_KEY_CACHE_TTL_MS = 5 * 60 * 1000;
 const _DID_KEY_CACHE_MAX = 1000;
 
+// Allowlist for DID:web domain and path segment characters.
+// Module-level so it is compiled once, not on every DID auth attempt.
+const SAFE_DID_SEGMENT = /^[a-zA-Z0-9._:-]+$/;
+
 /**
  * Returns true if the hostname should be blocked from DID web resolution
  * to prevent SSRF attacks targeting internal/private infrastructure.
@@ -566,7 +570,6 @@ async function resolveDIDWebAgent(did, req) {
     // characters before using them in agent_id construction or HTTP requests.
     // A crafted keyId like "did:web:evil.com\nX-Injected: header" could
     // otherwise inject into signing strings or storage keys.
-    const SAFE_DID_SEGMENT = /^[a-zA-Z0-9._:-]+$/;
     if (!SAFE_DID_SEGMENT.test(domain)) return null;
     if (pathSegments.some(seg => !SAFE_DID_SEGMENT.test(seg))) return null;
 

@@ -118,7 +118,9 @@ test('agent_id validation rejects dangerous characters', async () => {
   // Valid IDs should still work — use unique suffix to avoid conflicts across test runs
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
   const valid = ['simple', 'with-hyphens', 'dots.allowed', 'colons:ok', 'ALL_CAPS'].map(id => `${id}-${suffix}`);
-  valid.push(`${'a'.repeat(248)}-${suffix.slice(0, 6)}`); // 255 chars total
+  const boundaryId = `${'a'.repeat(248)}-${suffix.slice(0, 6)}`;
+  assert.equal(boundaryId.length, 255, 'boundary test ID must be exactly 255 chars');
+  valid.push(boundaryId);
   for (const id of valid) {
     const res = await request(app)
       .post('/api/agents/register')
