@@ -57,6 +57,9 @@ export class AgentService {
     // Check if agent already exists
     const existing = await storage.getAgent(agent_id);
     if (existing) {
+      // Re-registration/update is intentionally not supported on this endpoint.
+      // Existing agents must use explicit admin flows (approve/reject/rotate-key)
+      // rather than silently re-registering and mutating registration_status.
       throw new Error(`Agent ${agent_id} already exists`);
     }
 

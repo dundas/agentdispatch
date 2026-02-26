@@ -104,9 +104,9 @@ export class InboxService {
           throw new Error('Invalid message signature');
         }
       } else if (recipient.trusted_agents?.includes(envelope.from)) {
-        // Sender claims a trusted identity but has no registered key material.
-        // Reject to prevent impersonation when a trusted ID is missing from storage.
-        throw new Error(`Sender ${envelope.from} is not registered — signature required for trust-list delivery`);
+        // Sender is registered but omitted signature; trust-list delivery requires
+        // cryptographic proof of identity, not just a claimed from value.
+        throw new Error(`Sender ${envelope.from} is registered but missing signature — signature required for trust-list delivery`);
       }
     } else if (recipient.trusted_agents?.includes(envelope.from)) {
       // Sender is named in the trust list but is not registered — cannot verify identity.

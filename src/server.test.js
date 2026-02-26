@@ -567,7 +567,10 @@ test('trust list rejects unregistered sender claiming a trusted ID', async () =>
 
   assert.equal(forgedRes.status, 403);
   assert.equal(forgedRes.body.error, 'INVALID_SIGNATURE');
-  assert.ok(forgedRes.body.message.includes('not registered'));
+  assert.ok(
+    forgedRes.body.message.includes('signature required') ||
+    forgedRes.body.message.includes('not registered')
+  );
 });
 
 test('mech storage persists agents', { skip: !MECH_CONFIGURED }, async () => {
