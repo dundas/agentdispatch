@@ -261,10 +261,15 @@ export class RoundTableService {
       try {
         await storage.updateRoundTable(rt.id, { status: 'expired' });
 
-        // Notify facilitator and all participants of expiry.
-        // Use rt.expires_at as the canonical close timestamp.
+        // Notify facilitator and all participants of expiry in parallel.
+        // Use rt.expires_at as the canonical close timestamp (not processing time).
+        // Notifications are sent from the facilitator's identity since they created
+        // the session. The facilitator will receive a self-addressed notification —
+        // this is intentional and preserves a single consistent sender for all recipients.
+        // verify_signature: false is required because the server does not hold private
+        // keys on behalf of agents; signature is omitted and delivery is trusted internally.
         const toNotify = [rt.facilitator, ...rt.participants];
-        for (const recipientId of toNotify) {
+        await Promise.allSettled(toNotify.map(async (recipientId) => {
           try {
             await inboxService.send({
               version: '1.0',
@@ -279,7 +284,7 @@ export class RoundTableService {
           } catch (err) {
             logger.warn({ recipientId, err: err.message }, '[RoundTable] Could not notify recipient of expiry');
           }
-        }
+        }));
 
         // Clean up backing group
         try {
