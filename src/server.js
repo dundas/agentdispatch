@@ -17,12 +17,14 @@ import { dirname, join } from 'path';
 import agentRoutes from './routes/agents.js';
 import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
+import roundTableRoutes from './routes/round-tables.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
 import discoveryRoutes from './routes/discovery.js';
 import keysRoutes from './routes/keys.js';
 import { requireApiKey, verifyHttpSignatureOnly } from './middleware/auth.js';
 import { agentService } from './services/agent.service.js';
 import { inboxService } from './services/inbox.service.js';
+import { roundTableService } from './services/round-table.service.js';
 import { storage } from './storage/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -181,6 +183,7 @@ app.use(discoveryRoutes);
 app.use('/api/agents', agentRoutes);
 app.use('/api/agents', inboxRoutes);
 app.use('/api/groups', groupRoutes);
+app.use('/api/round-tables', roundTableRoutes);
 app.use('/api/agents', outboxRoutes);
 app.use('/api/keys', keysRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
@@ -217,13 +220,15 @@ function startBackgroundJobs() {
       const messagesExpired = await storage.expireMessages();
       const messagesDeleted = await storage.cleanupExpiredMessages();
       const ephemeralPurged = await inboxService.purgeExpiredEphemeralMessages();
+      const roundTablesExpired = await roundTableService.expireStale();
 
-      if (leasesReclaimed > 0 || messagesExpired > 0 || messagesDeleted > 0 || ephemeralPurged > 0) {
+      if (leasesReclaimed > 0 || messagesExpired > 0 || messagesDeleted > 0 || ephemeralPurged > 0 || roundTablesExpired > 0) {
         logger.debug({
           leasesReclaimed,
           messagesExpired,
           messagesDeleted,
-          ephemeralPurged
+          ephemeralPurged,
+          roundTablesExpired
         }, 'Cleanup job completed');
       }
     } catch (error) {

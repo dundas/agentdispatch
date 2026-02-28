@@ -15,6 +15,7 @@ export class MemoryStorage {
     this.tenants = new Map();       // tenant_id -> tenant object
     this.issuedKeys = new Map();    // key_id -> key object
     this.issuedKeysByHash = new Map(); // key_hash -> key_id
+    this.roundTables = new Map();   // round_table_id -> round table object
   }
 
   // ============ AGENTS ============
@@ -575,6 +576,40 @@ export class MemoryStorage {
     }
 
     return messages;
+  }
+
+  // ============ ROUND TABLES ============
+
+  async createRoundTable(rt) {
+    const stored = { ...rt, created_at: rt.created_at || new Date().toISOString(), updated_at: new Date().toISOString() };
+    this.roundTables.set(rt.id, stored);
+    return stored;
+  }
+
+  async getRoundTable(id) {
+    return this.roundTables.get(id) || null;
+  }
+
+  async updateRoundTable(id, updates) {
+    const rt = this.roundTables.get(id);
+    if (!rt) return null;
+    const updated = { ...rt, ...updates, updated_at: new Date().toISOString() };
+    this.roundTables.set(id, updated);
+    return updated;
+  }
+
+  async listRoundTables(filter = {}) {
+    let tables = Array.from(this.roundTables.values());
+    if (filter.status) {
+      tables = tables.filter(rt => rt.status === filter.status);
+    }
+    if (filter.participant) {
+      tables = tables.filter(rt =>
+        rt.facilitator === filter.participant ||
+        (rt.participants || []).includes(filter.participant)
+      );
+    }
+    return tables;
   }
 }
 
