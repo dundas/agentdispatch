@@ -4,9 +4,12 @@
  */
 
 import { v4 as uuid } from 'uuid';
+import pino from 'pino';
 import { storage } from '../storage/index.js';
 import { groupService } from './group.service.js';
 import { inboxService } from './inbox.service.js';
+
+const logger = pino({ level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' });
 
 export class RoundTableService {
   /**
@@ -24,7 +27,8 @@ export class RoundTableService {
     if (timeout_minutes < 1 || timeout_minutes > 10080) {
       throw new Error('timeout_minutes must be between 1 and 10080 (7 days)');
     }
-    if (participants.length > 20) {
+    const uniqueParticipants = [...new Set(participants)];
+    if (uniqueParticipants.length > 20) {
       throw new Error('Round Table supports at most 20 participants');
     }
 
@@ -38,16 +42,16 @@ export class RoundTableService {
       name: groupName,
       created_by: facilitator,
       access: { type: 'invite-only' },
-      settings: { max_members: participants.length + 1, message_ttl_sec: timeout_minutes * 60 }
+      settings: { max_members: uniqueParticipants.length + 1, message_ttl_sec: timeout_minutes * 60 }
     });
 
     // Add all participants to the group
-    for (const participantId of participants) {
+    for (const participantId of uniqueParticipants) {
       try {
         await groupService.addMember(group.id, facilitator, participantId, 'member');
       } catch (err) {
         // Log but don't fail creation if a participant doesn't exist yet
-        console.warn(`[RoundTable] Could not add participant ${participantId}: ${err.message}`);
+        logger.warn({ participantId, err: err.message }, '[RoundTable] Could not add participant');
       }
     }
 
@@ -56,12 +60,11 @@ export class RoundTableService {
       topic,
       goal,
       facilitator,
-      participants,
+      participants: uniqueParticipants,
       group_id: group.id,
       status: 'open',
       thread: [],
       outcome: null,
-      artifact_id: null,
       created_at: now.toISOString(),
       expires_at
     };
@@ -69,7 +72,7 @@ export class RoundTableService {
     await storage.createRoundTable(rt);
 
     // Notify each participant with a work_order via ADMP inbox
-    for (const participantId of participants) {
+    for (const participantId of uniqueParticipants) {
       try {
         await inboxService.send({
           from: facilitator,
@@ -81,14 +84,14 @@ export class RoundTableService {
             topic,
             goal,
             facilitator,
-            participants,
+            participants: uniqueParticipants,
             expires_at,
             instructions: `You have been invited to a Round Table deliberation session. POST to /api/round-tables/${id}/speak with {"message":"..."} to contribute. The facilitator will resolve with an outcome when consensus is reached.`
           },
           timestamp: now.toISOString()
         }, { verify_signature: false });
       } catch (err) {
-        console.warn(`[RoundTable] Could not notify participant ${participantId}: ${err.message}`);
+        logger.warn({ participantId, err: err.message }, '[RoundTable] Could not notify participant');
       }
     }
 
@@ -116,6 +119,7 @@ export class RoundTableService {
 
     const thread = [...rt.thread, entry];
     const updated = await storage.updateRoundTable(id, { thread });
+    if (!updated) throw new Error(`Round table ${id} not found`);
 
     // Multicast to all participants via the backing group
     try {
@@ -126,7 +130,7 @@ export class RoundTableService {
         timestamp: entry.timestamp
       });
     } catch (err) {
-      console.warn(`[RoundTable] Group multicast failed for ${id}: ${err.message}`);
+      logger.warn({ id, err: err.message }, '[RoundTable] Group multicast failed');
     }
 
     return { thread_entry_id: entry.id, thread_length: updated.thread.length };
@@ -163,6 +167,7 @@ export class RoundTableService {
       decision: decision || 'approved',
       resolved_at: now
     });
+    if (!updated) throw new Error(`Round table ${id} not found`);
 
     // Multicast resolution to all participants
     try {
@@ -178,14 +183,14 @@ export class RoundTableService {
         timestamp: now
       });
     } catch (err) {
-      console.warn(`[RoundTable] Resolution multicast failed for ${id}: ${err.message}`);
+      logger.warn({ id, err: err.message }, '[RoundTable] Resolution multicast failed');
     }
 
     // Clean up backing group — no longer needed after resolution
     try {
       await groupService.delete(rt.group_id, facilitator);
     } catch (err) {
-      console.warn(`[RoundTable] Group cleanup failed for ${rt.group_id}: ${err.message}`);
+      logger.warn({ groupId: rt.group_id, err: err.message }, '[RoundTable] Group cleanup failed');
     }
 
     return updated;
@@ -213,7 +218,7 @@ export class RoundTableService {
         try {
           await groupService.delete(rt.group_id, rt.facilitator);
         } catch (err) {
-          console.warn(`[RoundTable] Group cleanup on expiry failed for ${rt.group_id}: ${err.message}`);
+          logger.warn({ groupId: rt.group_id, err: err.message }, '[RoundTable] Group cleanup on expiry failed');
         }
         expired++;
       }
