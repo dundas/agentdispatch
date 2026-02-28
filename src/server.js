@@ -36,6 +36,7 @@ config();
 
 const PORT = process.env.PORT || 8080;
 const CLEANUP_INTERVAL_MS = parseInt(process.env.CLEANUP_INTERVAL_MS) || 60000;
+const ROUND_TABLE_PURGE_TTL_MS = parseInt(process.env.ROUND_TABLE_PURGE_TTL_MS) || 7 * 24 * 60 * 60 * 1000;
 
 // Warn about insecure outbox webhook configuration
 if (process.env.MAILGUN_API_KEY && !process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {
@@ -221,14 +222,16 @@ function startBackgroundJobs() {
       const messagesDeleted = await storage.cleanupExpiredMessages();
       const ephemeralPurged = await inboxService.purgeExpiredEphemeralMessages();
       const roundTablesExpired = await roundTableService.expireStale();
+      const roundTablesPurged = await roundTableService.purgeStale(ROUND_TABLE_PURGE_TTL_MS);
 
-      if (leasesReclaimed > 0 || messagesExpired > 0 || messagesDeleted > 0 || ephemeralPurged > 0 || roundTablesExpired > 0) {
+      if (leasesReclaimed > 0 || messagesExpired > 0 || messagesDeleted > 0 || ephemeralPurged > 0 || roundTablesExpired > 0 || roundTablesPurged > 0) {
         logger.debug({
           leasesReclaimed,
           messagesExpired,
           messagesDeleted,
           ephemeralPurged,
-          roundTablesExpired
+          roundTablesExpired,
+          roundTablesPurged
         }, 'Cleanup job completed');
       }
     } catch (error) {

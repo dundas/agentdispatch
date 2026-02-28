@@ -611,6 +611,21 @@ export class MemoryStorage {
     }
     return tables;
   }
+
+  async purgeStaleRoundTables(olderThanMs) {
+    const cutoff = Date.now() - olderThanMs;
+    let purged = 0;
+    for (const [id, rt] of this.roundTables.entries()) {
+      if (rt.status === 'resolved' || rt.status === 'expired') {
+        const closedAt = rt.resolved_at || rt.expires_at;
+        if (closedAt && new Date(closedAt).getTime() < cutoff) {
+          this.roundTables.delete(id);
+          purged++;
+        }
+      }
+    }
+    return purged;
+  }
 }
 
 // Singleton instance

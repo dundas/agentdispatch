@@ -11,6 +11,7 @@ import { requireApiKey } from './middleware/auth.js';
 import { webhookService } from './services/webhook.service.js';
 import { outboxService } from './services/outbox.service.js';
 import { storage } from './storage/index.js';
+import { roundTableService } from './services/round-table.service.js';
 
 let createMechStorage = null;
 try {
@@ -4358,4 +4359,116 @@ test('round table: missing required fields return 400', async () => {
     .set('X-Agent-ID', agent.agent_id)
     .send({ topic: 'Missing participants', goal: 'Test', participants: [] });
   assert.equal(noParticipants.status, 400);
+});
+
+test('round table: facilitator can speak in their own session', async () => {
+  const facilitator = await registerAgent('rt-fac-speak');
+  const participant = await registerAgent('rt-fac-speak-p');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Facilitator speech test',
+      goal: 'Verify facilitator can speak',
+      participants: [participant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+  const rtId = createRes.body.id;
+
+  const speakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({ message: 'I am the facilitator and I can speak.' });
+
+  assert.equal(speakRes.status, 201);
+  assert.equal(speakRes.body.thread_length, 1);
+});
+
+test('round table: expireStale marks session expired and notifies participants', async () => {
+  const facilitator = await registerAgent('rt-expire-fac');
+  const participant = await registerAgent('rt-expire-p');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Expiry test',
+      goal: 'Verify expiry',
+      participants: [participant.agent_id],
+      timeout_minutes: 60
+    });
+
+  assert.equal(createRes.status, 201);
+  const rtId = createRes.body.id;
+
+  // Backdate the expiry to force expiration
+  await storage.updateRoundTable(rtId, {
+    expires_at: new Date(Date.now() - 1000).toISOString()
+  });
+
+  const expired = await roundTableService.expireStale();
+  assert.ok(expired >= 1, 'at least one session should be expired');
+
+  // Confirm status is now expired via storage
+  const rt = await storage.getRoundTable(rtId);
+  assert.equal(rt.status, 'expired');
+
+  // Confirm speak returns 409
+  const lateSpeak = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', participant.agent_id)
+    .send({ message: 'Too late.' });
+  assert.equal(lateSpeak.status, 409);
+});
+
+test('round table: duplicate participants are deduplicated', async () => {
+  const facilitator = await registerAgent('rt-dedup-fac');
+  const participant = await registerAgent('rt-dedup-p');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Dedup test',
+      goal: 'Verify dedup',
+      participants: [participant.agent_id, participant.agent_id, participant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+  assert.equal(createRes.body.participants.length, 1, 'duplicates should be removed');
+  assert.equal(createRes.body.participants[0], participant.agent_id);
+});
+
+test('round table: missing goal returns 400', async () => {
+  const agent = await registerAgent('rt-no-goal');
+
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', agent.agent_id)
+    .send({ topic: 'No goal here', participants: ['other-agent'] });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.error === 'INVALID_GOAL');
+});
+
+test('round table: non-integer timeout_minutes returns 400', async () => {
+  const agent = await registerAgent('rt-float-timeout');
+  const participant = await registerAgent('rt-float-timeout-p');
+
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', agent.agent_id)
+    .send({
+      topic: 'Float timeout',
+      goal: 'Test integer validation',
+      participants: [participant.agent_id],
+      timeout_minutes: 1.5
+    });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.error === 'INVALID_TIMEOUT');
 });
