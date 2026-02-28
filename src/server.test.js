@@ -4203,3 +4203,159 @@ test('trust model: DID web — crafted keyId with .. segment is rejected (SSRF g
     else delete process.env.DID_WEB_ALLOWED_DOMAINS;
   }
 });
+
+// ============ ROUND TABLE TESTS ============
+
+test('round table: full lifecycle — create, speak, resolve', async () => {
+  const facilitator = await registerAgent('rt-facilitator');
+  const participant1 = await registerAgent('rt-participant-one');
+  const participant2 = await registerAgent('rt-participant-two');
+
+  // Create
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Should we use push or pull for credential sync?',
+      goal: 'Reach consensus on sync strategy',
+      participants: [participant1.agent_id, participant2.agent_id],
+      timeout_minutes: 60
+    });
+
+  assert.equal(createRes.status, 201);
+  assert.ok(createRes.body.id.startsWith('rt_'));
+  assert.equal(createRes.body.status, 'open');
+  assert.equal(createRes.body.facilitator, facilitator.agent_id);
+  assert.equal(createRes.body.thread.length, 0);
+  assert.ok(createRes.body.group_id);
+
+  const rtId = createRes.body.id;
+
+  // Speak (participant)
+  const speakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', participant1.agent_id)
+    .send({ message: 'I recommend pull-on-start for simplicity.' });
+
+  assert.equal(speakRes.status, 201);
+  assert.equal(speakRes.body.thread_length, 1);
+
+  // Read — participant sees thread
+  const getRes = await request(app)
+    .get(`/api/round-tables/${rtId}`)
+    .set('X-Agent-ID', participant2.agent_id);
+
+  assert.equal(getRes.status, 200);
+  assert.equal(getRes.body.thread.length, 1);
+  assert.equal(getRes.body.thread[0].from, participant1.agent_id);
+
+  // Resolve (facilitator)
+  const resolveRes = await request(app)
+    .post(`/api/round-tables/${rtId}/resolve`)
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({ outcome: 'Consensus: pull-on-start for all targets.', decision: 'approved' });
+
+  assert.equal(resolveRes.status, 200);
+  assert.equal(resolveRes.body.status, 'resolved');
+  assert.equal(resolveRes.body.outcome, 'Consensus: pull-on-start for all targets.');
+
+  // Speak after resolve → 409
+  const lateSpeak = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', participant1.agent_id)
+    .send({ message: 'Too late.' });
+
+  assert.equal(lateSpeak.status, 409);
+});
+
+test('round table: non-participant cannot read or speak', async () => {
+  const facilitator = await registerAgent('rt-priv-facilitator');
+  const participant = await registerAgent('rt-priv-participant');
+  const outsider = await registerAgent('rt-outsider');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Private deliberation',
+      goal: 'Internal decision',
+      participants: [participant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+  const rtId = createRes.body.id;
+
+  // Outsider cannot read
+  const getRes = await request(app)
+    .get(`/api/round-tables/${rtId}`)
+    .set('X-Agent-ID', outsider.agent_id);
+  assert.equal(getRes.status, 403);
+
+  // Outsider cannot speak
+  const speakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', outsider.agent_id)
+    .send({ message: 'Intruder!' });
+  assert.equal(speakRes.status, 403);
+});
+
+test('round table: non-facilitator cannot resolve', async () => {
+  const facilitator = await registerAgent('rt-res-facilitator');
+  const participant = await registerAgent('rt-res-participant');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Who resolves?',
+      goal: 'Test auth',
+      participants: [participant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+  const rtId = createRes.body.id;
+
+  const resolveRes = await request(app)
+    .post(`/api/round-tables/${rtId}/resolve`)
+    .set('X-Agent-ID', participant.agent_id)
+    .send({ outcome: 'Sneaky resolve.' });
+
+  assert.equal(resolveRes.status, 403);
+});
+
+test('round table: participants cap enforced at 20', async () => {
+  const facilitator = await registerAgent('rt-cap-facilitator');
+
+  const tooManyParticipants = Array.from({ length: 21 }, (_, i) => `fake-agent-${i}`);
+
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Overcrowded',
+      goal: 'Test cap',
+      participants: tooManyParticipants,
+      timeout_minutes: 30
+    });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.message.includes('20'));
+});
+
+test('round table: missing required fields return 400', async () => {
+  const agent = await registerAgent('rt-validation');
+
+  const noTopic = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', agent.agent_id)
+    .send({ goal: 'Missing topic', participants: ['other'] });
+  assert.equal(noTopic.status, 400);
+
+  const noParticipants = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', agent.agent_id)
+    .send({ topic: 'Missing participants', goal: 'Test', participants: [] });
+  assert.equal(noParticipants.status, 400);
+});
