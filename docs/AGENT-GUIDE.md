@@ -347,6 +347,22 @@ See [docs/API-REFERENCE.md](./API-REFERENCE.md) for the complete endpoint docume
 | `POST /api/agents/:id/messages/:msgId/reply` | HTTP Sig (self only) | Reply |
 | `GET /api/messages/:msgId/status` | API Key | Delivery status |
 
+### Round Tables (ephemeral multi-agent deliberation)
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `POST /api/round-tables` | Agent ID | Create session |
+| `GET /api/round-tables` | Agent ID | List my sessions |
+| `GET /api/round-tables/:id` | Agent ID (participants only) | Get session |
+| `POST /api/round-tables/:id/speak` | Agent ID (participants only) | Add message |
+| `POST /api/round-tables/:id/resolve` | Agent ID (facilitator only) | Close session |
+
+**Round Table behavior notes:**
+
+- **`excluded_participants`** — When some requested participants cannot be enrolled in the backing ADMP group (e.g. unregistered agent IDs), the create response includes an `excluded_participants` array listing those that were dropped. This field is only present when at least one participant was excluded; it is absent in the happy path. The stored session record does not carry this field — it is returned at create time only.
+- **Expiry notifications** — When a session times out, the server automatically sends a `notification` message (type `notification`, body `{ reason: "timeout" }`) to the facilitator and all participants. The notification envelope has `from` set to the facilitator's agent ID (the logical author of the session). Facilitators receive a self-addressed copy; agents should not rely on `from === self` as a filter to suppress expiry notifications.
+- **Partial enrollment** — If only some participants enroll successfully, the session is created with the enrolled subset. `rt.participants` and the backing group membership are kept in sync. The group's `max_members` is updated to reflect the actual enrolled count after partial enrollment.
+- **Storage growth** — Resolved and expired sessions accumulate in storage. The server periodically purges records older than `ROUND_TABLE_PURGE_TTL_MS` (default: 7 days). Set this env var to control retention. Custom storage adapters must implement `purgeStaleRoundTables(olderThanMs)`.
+
 ---
 
 ## 7. Error Handling

@@ -11,6 +11,8 @@ import { requireApiKey } from './middleware/auth.js';
 import { webhookService } from './services/webhook.service.js';
 import { outboxService } from './services/outbox.service.js';
 import { storage } from './storage/index.js';
+import { roundTableService } from './services/round-table.service.js';
+import { groupService } from './services/group.service.js';
 
 let createMechStorage = null;
 try {
@@ -4358,4 +4360,232 @@ test('round table: missing required fields return 400', async () => {
     .set('X-Agent-ID', agent.agent_id)
     .send({ topic: 'Missing participants', goal: 'Test', participants: [] });
   assert.equal(noParticipants.status, 400);
+});
+
+test('round table: facilitator can speak in their own session', async () => {
+  const facilitator = await registerAgent('rt-fac-speak');
+  const participant = await registerAgent('rt-fac-speak-p');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Facilitator speech test',
+      goal: 'Verify facilitator can speak',
+      participants: [participant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+  const rtId = createRes.body.id;
+
+  const speakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({ message: 'I am the facilitator and I can speak.' });
+
+  assert.equal(speakRes.status, 201);
+  assert.equal(speakRes.body.thread_length, 1);
+});
+
+test('round table: expireStale marks session expired and notifies facilitator and participants', async () => {
+  const facilitator = await registerAgent('rt-expire-fac');
+  const participant = await registerAgent('rt-expire-p');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Expiry test',
+      goal: 'Verify expiry',
+      participants: [participant.agent_id],
+      timeout_minutes: 60
+    });
+
+  assert.equal(createRes.status, 201);
+  const rtId = createRes.body.id;
+
+  // Drain the work_order invitation from participant inbox before backdating
+  await request(app)
+    .post(`/api/agents/${encodeURIComponent(participant.agent_id)}/inbox/pull`)
+    .set('X-Agent-ID', participant.agent_id);
+
+  // Backdate the expiry to force expiration
+  await storage.updateRoundTable(rtId, {
+    expires_at: new Date(Date.now() - 1000).toISOString()
+  });
+
+  const expired = await roundTableService.expireStale();
+  assert.ok(expired >= 1, 'at least one session should be expired');
+
+  // Confirm status is now expired via storage
+  const rt = await storage.getRoundTable(rtId);
+  assert.equal(rt.status, 'expired');
+
+  // Participant inbox should have an expiry notification
+  const participantPull = await request(app)
+    .post(`/api/agents/${encodeURIComponent(participant.agent_id)}/inbox/pull`)
+    .set('X-Agent-ID', participant.agent_id);
+  assert.equal(participantPull.status, 200);
+  assert.equal(participantPull.body.envelope.type, 'notification');
+  assert.equal(participantPull.body.envelope.body.round_table_id, rtId);
+  assert.equal(participantPull.body.envelope.body.reason, 'timeout');
+
+  // Facilitator inbox should also have an expiry notification
+  const facilitatorPull = await request(app)
+    .post(`/api/agents/${encodeURIComponent(facilitator.agent_id)}/inbox/pull`)
+    .set('X-Agent-ID', facilitator.agent_id);
+  assert.equal(facilitatorPull.status, 200);
+  assert.equal(facilitatorPull.body.envelope.type, 'notification');
+  assert.equal(facilitatorPull.body.envelope.body.round_table_id, rtId);
+
+  // Confirm speak returns 409
+  const lateSpeak = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', participant.agent_id)
+    .send({ message: 'Too late.' });
+  assert.equal(lateSpeak.status, 409);
+});
+
+test('round table: duplicate participants are deduplicated', async () => {
+  const facilitator = await registerAgent('rt-dedup-fac');
+  const participant = await registerAgent('rt-dedup-p');
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Dedup test',
+      goal: 'Verify dedup',
+      participants: [participant.agent_id, participant.agent_id, participant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+  assert.equal(createRes.body.participants.length, 1, 'duplicates should be removed');
+  assert.equal(createRes.body.participants[0], participant.agent_id);
+});
+
+test('round table: missing goal returns 400', async () => {
+  const agent = await registerAgent('rt-no-goal');
+
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', agent.agent_id)
+    .send({ topic: 'No goal here', participants: ['other-agent'] });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.error === 'INVALID_GOAL');
+});
+
+test('round table: non-integer timeout_minutes returns 400', async () => {
+  const agent = await registerAgent('rt-float-timeout');
+  const participant = await registerAgent('rt-float-timeout-p');
+
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', agent.agent_id)
+    .send({
+      topic: 'Float timeout',
+      goal: 'Test integer validation',
+      participants: [participant.agent_id],
+      timeout_minutes: 1.5
+    });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.error === 'INVALID_TIMEOUT');
+});
+
+test('round table: zero-enrollment returns 400 and leaves no orphaned groups', async () => {
+  const facilitator = await registerAgent('rt-zero-enroll-fac');
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // Count groups the facilitator belongs to before the attempt
+  const groupsBefore = (await groupService.listForAgent(facilitator.agent_id)).length;
+
+  // All fake participants — addMember will throw "Agent not found" for each
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Zero enrollment test',
+      goal: 'All participants unknown',
+      participants: [`ghost-${unique}-1`, `ghost-${unique}-2`],
+      timeout_minutes: 30
+    });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.message.toLowerCase().includes('no participants'));
+
+  // No orphaned round-table groups should remain
+  const groupsAfter = (await groupService.listForAgent(facilitator.agent_id)).length;
+  assert.equal(groupsAfter, groupsBefore, 'group created during enrollment should be cleaned up');
+});
+
+test('round table: partial enrollment — only enrolled participants stored, excluded_participants returned', async () => {
+  const facilitator = await registerAgent('rt-partial-fac');
+  const validParticipant = await registerAgent('rt-partial-p');
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Partial enrollment test',
+      goal: 'Verify split-brain prevention',
+      participants: [validParticipant.agent_id, `ghost-${unique}`],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+
+  // Only the valid participant should be in participants
+  assert.equal(createRes.body.participants.length, 1);
+  assert.equal(createRes.body.participants[0], validParticipant.agent_id);
+
+  // The ghost agent should be in excluded_participants
+  assert.ok(Array.isArray(createRes.body.excluded_participants));
+  assert.equal(createRes.body.excluded_participants.length, 1);
+  assert.ok(createRes.body.excluded_participants[0].startsWith('ghost-'));
+
+  // The backing group's max_members should be aligned to enrolled count + 1 (= 2)
+  const groupRes = await request(app)
+    .get(`/api/groups/${encodeURIComponent(createRes.body.group_id)}`)
+    .set('X-Agent-ID', facilitator.agent_id);
+  assert.equal(groupRes.status, 200);
+  assert.equal(groupRes.body.settings.max_members, 2);
+
+  // Enrolled participant can speak
+  const rtId = createRes.body.id;
+  const speakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', validParticipant.agent_id)
+    .send({ message: 'I am enrolled and can speak.' });
+  assert.equal(speakRes.status, 201);
+
+  // A real registered agent that was not enrolled cannot speak (enforced by _requireParticipant)
+  const nonEnrolled = await registerAgent('rt-partial-non-enrolled');
+  const nonEnrolledSpeakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', nonEnrolled.agent_id)
+    .send({ message: 'I was not enrolled and should not speak.' });
+  assert.equal(nonEnrolledSpeakRes.status, 403);
+});
+
+test('round table: facilitator cannot be listed as a participant', async () => {
+  const facilitator = await registerAgent('rt-fac-as-participant');
+  const otherParticipant = await registerAgent('rt-fac-as-participant-p');
+
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Self-inclusion test',
+      goal: 'Verify facilitator cannot be a participant',
+      participants: [facilitator.agent_id, otherParticipant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'FACILITATOR_IN_PARTICIPANTS');
 });

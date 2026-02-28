@@ -10,11 +10,7 @@ import { authenticateAgent } from '../middleware/auth.js';
 const router = express.Router();
 
 function getErrorStatusCode(error) {
-  const msg = error.message || '';
-  if (msg.includes('not found')) return 404;
-  if (msg.includes('Not a participant') || msg.includes('Only the facilitator')) return 403;
-  if (msg.includes('already resolved') || msg.includes('has expired') || msg.includes('maximum of 200')) return 409;
-  return 400;
+  return error.statusCode || 400;
 }
 
 /**
@@ -44,8 +40,11 @@ router.post('/', authenticateAgent, async (req, res) => {
     if (invalidParticipant !== undefined) {
       return res.status(400).json({ error: 'INVALID_PARTICIPANT_ID', message: 'each participant must be a non-empty string of 255 characters or less' });
     }
-    if (timeout_minutes !== undefined && (typeof timeout_minutes !== 'number' || !Number.isFinite(timeout_minutes))) {
-      return res.status(400).json({ error: 'INVALID_TIMEOUT', message: 'timeout_minutes must be a number' });
+    if (timeout_minutes !== undefined && (typeof timeout_minutes !== 'number' || !Number.isFinite(timeout_minutes) || !Number.isInteger(timeout_minutes))) {
+      return res.status(400).json({ error: 'INVALID_TIMEOUT', message: 'timeout_minutes must be an integer' });
+    }
+    if (participants.includes(req.agent.agent_id)) {
+      return res.status(400).json({ error: 'FACILITATOR_IN_PARTICIPANTS', message: 'facilitator cannot be listed as a participant' });
     }
 
     const rt = await roundTableService.create({
@@ -53,7 +52,7 @@ router.post('/', authenticateAgent, async (req, res) => {
       goal: goal.trim(),
       facilitator: req.agent.agent_id,
       participants,
-      timeout_minutes: timeout_minutes || 30
+      timeout_minutes: timeout_minutes ?? 30
     });
 
     res.status(201).json(rt);
