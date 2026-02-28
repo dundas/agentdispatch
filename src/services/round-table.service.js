@@ -132,8 +132,12 @@ export class RoundTableService {
       }
     }
 
-    // Include excluded participants in the response so callers know who was dropped
-    return { ...rt, excluded_participants: excludedParticipants };
+    // Include excluded_participants when non-empty so callers know who was dropped.
+    // Omit the field on the happy path to keep the create and GET response shapes consistent.
+    if (excludedParticipants.length > 0) {
+      return { ...rt, excluded_participants: excludedParticipants };
+    }
+    return rt;
   }
 
   /**

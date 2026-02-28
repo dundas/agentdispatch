@@ -4521,3 +4521,37 @@ test('round table: zero-enrollment returns 400 and leaves no orphaned groups', a
   const groupsAfter = (await groupService.listForAgent(facilitator.agent_id)).length;
   assert.equal(groupsAfter, groupsBefore, 'group created during enrollment should be cleaned up');
 });
+
+test('round table: partial enrollment — only enrolled participants stored, excluded_participants returned', async () => {
+  const facilitator = await registerAgent('rt-partial-fac');
+  const validParticipant = await registerAgent('rt-partial-p');
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const createRes = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Partial enrollment test',
+      goal: 'Verify split-brain prevention',
+      participants: [validParticipant.agent_id, `ghost-${unique}`],
+      timeout_minutes: 30
+    });
+
+  assert.equal(createRes.status, 201);
+
+  // Only the valid participant should be in participants
+  assert.equal(createRes.body.participants.length, 1);
+  assert.equal(createRes.body.participants[0], validParticipant.agent_id);
+
+  // The ghost agent should be in excluded_participants
+  assert.ok(Array.isArray(createRes.body.excluded_participants));
+  assert.equal(createRes.body.excluded_participants.length, 1);
+  assert.ok(createRes.body.excluded_participants[0].startsWith('ghost-'));
+
+  // The backing group's max_members should be aligned to enrolled count + 1 (= 2)
+  const groupRes = await request(app)
+    .get(`/api/groups/${encodeURIComponent(createRes.body.group_id)}`)
+    .set('X-Agent-ID', facilitator.agent_id);
+  assert.equal(groupRes.status, 200);
+  assert.equal(groupRes.body.settings.max_members, 2);
+});
