@@ -12,6 +12,7 @@ import { webhookService } from './services/webhook.service.js';
 import { outboxService } from './services/outbox.service.js';
 import { storage } from './storage/index.js';
 import { roundTableService } from './services/round-table.service.js';
+import { groupService } from './services/group.service.js';
 
 let createMechStorage = null;
 try {
@@ -4495,8 +4496,12 @@ test('round table: non-integer timeout_minutes returns 400', async () => {
   assert.ok(res.body.error === 'INVALID_TIMEOUT');
 });
 
-test('round table: zero-enrollment returns 400 and leaves no orphaned records', async () => {
+test('round table: zero-enrollment returns 400 and leaves no orphaned groups', async () => {
   const facilitator = await registerAgent('rt-zero-enroll-fac');
+  const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // Count groups the facilitator belongs to before the attempt
+  const groupsBefore = (await groupService.listForAgent(facilitator.agent_id)).length;
 
   // All fake participants — addMember will throw "Agent not found" for each
   const res = await request(app)
@@ -4505,10 +4510,14 @@ test('round table: zero-enrollment returns 400 and leaves no orphaned records', 
     .send({
       topic: 'Zero enrollment test',
       goal: 'All participants unknown',
-      participants: ['ghost-agent-1', 'ghost-agent-2'],
+      participants: [`ghost-${unique}-1`, `ghost-${unique}-2`],
       timeout_minutes: 30
     });
 
   assert.equal(res.status, 400);
   assert.ok(res.body.message.toLowerCase().includes('no participants'));
+
+  // No orphaned round-table groups should remain
+  const groupsAfter = (await groupService.listForAgent(facilitator.agent_id)).length;
+  assert.equal(groupsAfter, groupsBefore, 'group created during enrollment should be cleaned up');
 });

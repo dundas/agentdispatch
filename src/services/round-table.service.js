@@ -71,7 +71,11 @@ export class RoundTableService {
     }
 
     if (enrolledParticipants.length === 0) {
-      try { await groupService.delete(group.id, facilitator); } catch (_) {}
+      try {
+        await groupService.delete(group.id, facilitator);
+      } catch (err) {
+        logger.warn({ groupId: group.id, err: err.message }, '[RoundTable] Could not clean up group on zero-enrollment');
+      }
       throw makeError('No participants could be enrolled; round table not created', 400);
     }
 

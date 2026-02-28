@@ -62,10 +62,13 @@ switch (backend) {
 // re-validated here — this guard only fires on new writes via createAgent().
 const STORAGE_AGENT_ID_RE = /^[a-zA-Z0-9._:/-]+$/;
 
-// Startup assertion: if the storage interface renames createAgent, the Proxy guard
-// silently becomes a no-op. Crashing at startup is better than a silent bypass.
+// Startup assertions: if the storage interface renames required methods, crash at
+// startup rather than silently failing at runtime.
 if (typeof _storage.createAgent !== 'function') {
   throw new Error('storage: createAgent is missing — update the Proxy guard in storage/index.js');
+}
+if (typeof _storage.purgeStaleRoundTables !== 'function') {
+  throw new Error('storage: purgeStaleRoundTables is missing — implement it in the storage adapter (see memory.js for reference)');
 }
 
 const storage = new Proxy(_storage, {
