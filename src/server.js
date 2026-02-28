@@ -36,8 +36,10 @@ config();
 
 const PORT = process.env.PORT || 8080;
 const CLEANUP_INTERVAL_MS = parseInt(process.env.CLEANUP_INTERVAL_MS) || 60000;
-const _purgeTtlParsed = parseInt(process.env.ROUND_TABLE_PURGE_TTL_MS);
-const ROUND_TABLE_PURGE_TTL_MS = Number.isNaN(_purgeTtlParsed) ? 7 * 24 * 60 * 60 * 1000 : _purgeTtlParsed;
+const ROUND_TABLE_PURGE_TTL_MS = (() => {
+  const parsed = parseInt(process.env.ROUND_TABLE_PURGE_TTL_MS);
+  return Number.isNaN(parsed) ? 7 * 24 * 60 * 60 * 1000 : parsed;
+})();
 
 // Warn about insecure outbox webhook configuration
 if (process.env.MAILGUN_API_KEY && !process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {

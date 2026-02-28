@@ -4554,4 +4554,38 @@ test('round table: partial enrollment — only enrolled participants stored, exc
     .set('X-Agent-ID', facilitator.agent_id);
   assert.equal(groupRes.status, 200);
   assert.equal(groupRes.body.settings.max_members, 2);
+
+  // Enrolled participant can speak
+  const rtId = createRes.body.id;
+  const speakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', validParticipant.agent_id)
+    .send({ message: 'I am enrolled and can speak.' });
+  assert.equal(speakRes.status, 201);
+
+  // A real registered agent that was not enrolled cannot speak (enforced by _requireParticipant)
+  const nonEnrolled = await registerAgent('rt-partial-non-enrolled');
+  const nonEnrolledSpeakRes = await request(app)
+    .post(`/api/round-tables/${rtId}/speak`)
+    .set('X-Agent-ID', nonEnrolled.agent_id)
+    .send({ message: 'I was not enrolled and should not speak.' });
+  assert.equal(nonEnrolledSpeakRes.status, 403);
+});
+
+test('round table: facilitator cannot be listed as a participant', async () => {
+  const facilitator = await registerAgent('rt-fac-as-participant');
+  const otherParticipant = await registerAgent('rt-fac-as-participant-p');
+
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Self-inclusion test',
+      goal: 'Verify facilitator cannot be a participant',
+      participants: [facilitator.agent_id, otherParticipant.agent_id],
+      timeout_minutes: 30
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'FACILITATOR_IN_PARTICIPANTS');
 });

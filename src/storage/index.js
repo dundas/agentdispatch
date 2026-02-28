@@ -67,6 +67,9 @@ const STORAGE_AGENT_ID_RE = /^[a-zA-Z0-9._:/-]+$/;
 if (typeof _storage.createAgent !== 'function') {
   throw new Error('storage: createAgent is missing — update the Proxy guard in storage/index.js');
 }
+// BREAKING CHANGE for custom storage adapters: purgeStaleRoundTables(olderThanMs) is now
+// required. On a rolling deployment, update your storage adapter before deploying new
+// application instances to avoid startup failure. See memory.js for the reference implementation.
 if (typeof _storage.purgeStaleRoundTables !== 'function') {
   throw new Error('storage: purgeStaleRoundTables is missing — implement it in the storage adapter (see memory.js for reference)');
 }

@@ -617,6 +617,9 @@ export class MemoryStorage {
     let purged = 0;
     for (const [id, rt] of this.roundTables.entries()) {
       if (rt.status === 'resolved' || rt.status === 'expired') {
+        // Use resolved_at/expires_at as the canonical close time, not processing time.
+        // Records are retained for the full TTL measured from when the session logically
+        // closed, even if the cleanup job runs late.
         const closedAt = rt.resolved_at || rt.expires_at;
         if (closedAt && new Date(closedAt).getTime() < cutoff) {
           this.roundTables.delete(id);

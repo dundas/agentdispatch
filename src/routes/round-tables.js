@@ -43,6 +43,9 @@ router.post('/', authenticateAgent, async (req, res) => {
     if (timeout_minutes !== undefined && (typeof timeout_minutes !== 'number' || !Number.isFinite(timeout_minutes) || !Number.isInteger(timeout_minutes))) {
       return res.status(400).json({ error: 'INVALID_TIMEOUT', message: 'timeout_minutes must be an integer' });
     }
+    if (participants.includes(req.agent.agent_id)) {
+      return res.status(400).json({ error: 'FACILITATOR_IN_PARTICIPANTS', message: 'facilitator cannot be listed as a participant' });
+    }
 
     const rt = await roundTableService.create({
       topic: topic.trim(),
