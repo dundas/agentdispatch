@@ -4387,7 +4387,7 @@ test('round table: facilitator can speak in their own session', async () => {
   assert.equal(speakRes.body.thread_length, 1);
 });
 
-test('round table: expireStale marks session expired and notifies participants', async () => {
+test('round table: expireStale marks session expired and notifies facilitator and participants', async () => {
   const facilitator = await registerAgent('rt-expire-fac');
   const participant = await registerAgent('rt-expire-p');
 
@@ -4404,6 +4404,11 @@ test('round table: expireStale marks session expired and notifies participants',
   assert.equal(createRes.status, 201);
   const rtId = createRes.body.id;
 
+  // Drain the work_order invitation from participant inbox before backdating
+  await request(app)
+    .post(`/api/agents/${encodeURIComponent(participant.agent_id)}/inbox/pull`)
+    .set('X-Agent-ID', participant.agent_id);
+
   // Backdate the expiry to force expiration
   await storage.updateRoundTable(rtId, {
     expires_at: new Date(Date.now() - 1000).toISOString()
@@ -4415,6 +4420,23 @@ test('round table: expireStale marks session expired and notifies participants',
   // Confirm status is now expired via storage
   const rt = await storage.getRoundTable(rtId);
   assert.equal(rt.status, 'expired');
+
+  // Participant inbox should have an expiry notification
+  const participantPull = await request(app)
+    .post(`/api/agents/${encodeURIComponent(participant.agent_id)}/inbox/pull`)
+    .set('X-Agent-ID', participant.agent_id);
+  assert.equal(participantPull.status, 200);
+  assert.equal(participantPull.body.envelope.type, 'notification');
+  assert.equal(participantPull.body.envelope.body.round_table_id, rtId);
+  assert.equal(participantPull.body.envelope.body.reason, 'timeout');
+
+  // Facilitator inbox should also have an expiry notification
+  const facilitatorPull = await request(app)
+    .post(`/api/agents/${encodeURIComponent(facilitator.agent_id)}/inbox/pull`)
+    .set('X-Agent-ID', facilitator.agent_id);
+  assert.equal(facilitatorPull.status, 200);
+  assert.equal(facilitatorPull.body.envelope.type, 'notification');
+  assert.equal(facilitatorPull.body.envelope.body.round_table_id, rtId);
 
   // Confirm speak returns 409
   const lateSpeak = await request(app)
@@ -4471,4 +4493,22 @@ test('round table: non-integer timeout_minutes returns 400', async () => {
 
   assert.equal(res.status, 400);
   assert.ok(res.body.error === 'INVALID_TIMEOUT');
+});
+
+test('round table: zero-enrollment returns 400 and leaves no orphaned records', async () => {
+  const facilitator = await registerAgent('rt-zero-enroll-fac');
+
+  // All fake participants — addMember will throw "Agent not found" for each
+  const res = await request(app)
+    .post('/api/round-tables')
+    .set('X-Agent-ID', facilitator.agent_id)
+    .send({
+      topic: 'Zero enrollment test',
+      goal: 'All participants unknown',
+      participants: ['ghost-agent-1', 'ghost-agent-2'],
+      timeout_minutes: 30
+    });
+
+  assert.equal(res.status, 400);
+  assert.ok(res.body.message.toLowerCase().includes('no participants'));
 });

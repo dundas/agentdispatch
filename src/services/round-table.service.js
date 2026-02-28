@@ -24,6 +24,7 @@ export class RoundTableService {
    * a work_order to each participant inviting them to join.
    * Only participants successfully enrolled in the backing group are stored,
    * preventing a split-brain between rt.participants and group membership.
+   * Returns `excluded_participants` so callers know who was dropped.
    */
   async create({ topic, goal, facilitator, participants, timeout_minutes = 30 }) {
     if (!topic || !goal || !facilitator) {
@@ -44,7 +45,8 @@ export class RoundTableService {
     const now = new Date();
     const expires_at = new Date(now.getTime() + timeout_minutes * 60 * 1000).toISOString();
 
-    // Create backing ADMP group (invite-only, facilitator is owner)
+    // Create backing ADMP group (invite-only, facilitator is owner).
+    // max_members is initially the upper bound; adjusted after enrollment below.
     const groupName = `round-table-${id}`;
     const group = await groupService.create({
       name: groupName,
@@ -57,18 +59,31 @@ export class RoundTableService {
     // A participant that doesn't exist yet cannot be enrolled and is excluded rather
     // than silently included in rt.participants (split-brain prevention).
     const enrolledParticipants = [];
+    const excludedParticipants = [];
     for (const participantId of uniqueParticipants) {
       try {
         await groupService.addMember(group.id, facilitator, participantId, 'member');
         enrolledParticipants.push(participantId);
       } catch (err) {
         logger.warn({ participantId, err: err.message }, '[RoundTable] Could not enroll participant — excluded from session');
+        excludedParticipants.push(participantId);
       }
     }
 
     if (enrolledParticipants.length === 0) {
       try { await groupService.delete(group.id, facilitator); } catch (_) {}
       throw makeError('No participants could be enrolled; round table not created', 400);
+    }
+
+    // Align max_members to actual enrolled count + facilitator
+    if (enrolledParticipants.length < uniqueParticipants.length) {
+      try {
+        await groupService.update(group.id, facilitator, {
+          settings: { max_members: enrolledParticipants.length + 1, message_ttl_sec: timeout_minutes * 60 }
+        });
+      } catch (err) {
+        logger.warn({ groupId: group.id, err: err.message }, '[RoundTable] Could not update group max_members after partial enrollment');
+      }
     }
 
     const rt = {
@@ -91,6 +106,8 @@ export class RoundTableService {
     for (const participantId of enrolledParticipants) {
       try {
         await inboxService.send({
+          version: '1.0',
+          id: uuid(),
           from: facilitator,
           to: participantId,
           type: 'work_order',
@@ -111,7 +128,8 @@ export class RoundTableService {
       }
     }
 
-    return rt;
+    // Include excluded participants in the response so callers know who was dropped
+    return { ...rt, excluded_participants: excludedParticipants };
   }
 
   /**
@@ -221,7 +239,8 @@ export class RoundTableService {
 
   /**
    * Mark expired Round Tables (called by cleanup loop).
-   * Notifies all participants of expiry and cleans up backing groups.
+   * Notifies facilitator and all participants of expiry, cleans up backing groups.
+   * Each record is processed independently — a failure on one does not abort the rest.
    */
   async expireStale() {
     const tables = await storage.listRoundTables({ status: 'open' });
@@ -229,23 +248,28 @@ export class RoundTableService {
     let expired = 0;
 
     for (const rt of tables) {
-      if (rt.expires_at && new Date(rt.expires_at).getTime() < now) {
+      if (!rt.expires_at || new Date(rt.expires_at).getTime() >= now) continue;
+
+      try {
         await storage.updateRoundTable(rt.id, { status: 'expired' });
 
-        // Notify participants of expiry
-        const expiredAt = new Date().toISOString();
-        for (const participantId of rt.participants) {
+        // Notify facilitator and all participants of expiry.
+        // Use rt.expires_at as the canonical close timestamp.
+        const toNotify = [rt.facilitator, ...rt.participants];
+        for (const recipientId of toNotify) {
           try {
             await inboxService.send({
+              version: '1.0',
+              id: uuid(),
               from: rt.facilitator,
-              to: participantId,
+              to: recipientId,
               type: 'notification',
               subject: `Round Table expired: ${rt.topic}`,
               body: { round_table_id: rt.id, topic: rt.topic, reason: 'timeout', expires_at: rt.expires_at },
-              timestamp: expiredAt
+              timestamp: rt.expires_at
             }, { verify_signature: false });
           } catch (err) {
-            logger.warn({ participantId, err: err.message }, '[RoundTable] Could not notify participant of expiry');
+            logger.warn({ recipientId, err: err.message }, '[RoundTable] Could not notify recipient of expiry');
           }
         }
 
@@ -255,7 +279,10 @@ export class RoundTableService {
         } catch (err) {
           logger.warn({ groupId: rt.group_id, err: err.message }, '[RoundTable] Group cleanup on expiry failed');
         }
+
         expired++;
+      } catch (err) {
+        logger.warn({ id: rt.id, err: err.message }, '[RoundTable] Failed to expire record — will retry next cycle');
       }
     }
 
@@ -267,7 +294,7 @@ export class RoundTableService {
    * Called by the cleanup loop to prevent unbounded storage growth.
    */
   async purgeStale(olderThanMs = 7 * 24 * 60 * 60 * 1000) {
-    return await storage.purgeStaleRoundTables(olderThanMs);
+    return storage.purgeStaleRoundTables(olderThanMs);
   }
 
   // ---- internal helpers ----
