@@ -20,6 +20,7 @@ import * as rotateKeyCmd from './commands/rotate-key.js';
 import * as webhookCmd from './commands/webhook.js';
 import * as groupsCmd from './commands/groups.js';
 import * as outboxCmd from './commands/outbox.js';
+import * as roundTablesCmd from './commands/round-tables.js';
 
 export const program = new Command();
 
@@ -33,7 +34,7 @@ const commandModules = [
   initCmd, configCmd, registerCmd, agentCmd,
   sendCmd, pullCmd, ackCmd, nackCmd, replyCmd,
   statusCmd, inboxCmd, heartbeatCmd, rotateKeyCmd,
-  webhookCmd, groupsCmd, outboxCmd,
+  webhookCmd, groupsCmd, outboxCmd, roundTablesCmd,
 ];
 
 for (const mod of commandModules) {
