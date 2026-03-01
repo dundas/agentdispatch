@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import { AdmpClient, AdmpError } from '../client.js';
 import { requireConfig } from '../config.js';
 import { success, error, warn, isJsonMode } from '../output.js';
+import { validateRoundTableId } from '../validate.js';
 
 // ---- Types ------------------------------------------------------------------
 
@@ -40,15 +41,16 @@ interface CreateRoundTableResponse extends RoundTable {
 
 // ---- Helpers ----------------------------------------------------------------
 
+// NO_COLOR compliance — mirrors the pattern in output.ts
+const NO_COLOR = 'NO_COLOR' in process.env;
+function cyan(s: string): string  { return NO_COLOR ? s : `\x1b[36m${s}\x1b[0m`; }
+function green(s: string): string { return NO_COLOR ? s : `\x1b[32m${s}\x1b[0m`; }
+function yellow(s: string): string { return NO_COLOR ? s : `\x1b[33m${s}\x1b[0m`; }
+function bold(s: string): string  { return NO_COLOR ? s : `\x1b[1m${s}\x1b[0m`; }
+function dim(s: string): string   { return NO_COLOR ? s : `\x1b[2m${s}\x1b[0m`; }
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function validateRtId(id: string): void {
-  if (!/^[\w\-]+$/.test(id)) {
-    error('Round table ID must contain only alphanumeric characters, hyphens, and underscores', 'INVALID_ARGUMENT');
-    process.exit(1);
-  }
 }
 
 function printEntry(entry: RoundTableEntry): void {
@@ -57,7 +59,7 @@ function printEntry(entry: RoundTableEntry): void {
     return;
   }
   const ts = new Date(entry.timestamp).toLocaleTimeString();
-  console.log(`[${ts}] \x1b[36m${entry.from}\x1b[0m`);
+  console.log(`[${ts}] ${cyan(entry.from)}`);
   console.log(`  ${entry.message}`);
   console.log('');
 }
@@ -68,7 +70,7 @@ function printClosure(rt: RoundTable): void {
     return;
   }
   console.log('');
-  console.log(rt.status === 'resolved' ? '\x1b[32m✓ Round table resolved\x1b[0m' : '\x1b[33m⚠ Round table expired\x1b[0m');
+  console.log(rt.status === 'resolved' ? green('✓ Round table resolved') : yellow('⚠ Round table expired'));
   if (rt.outcome) console.log(`  Outcome:  ${rt.outcome}`);
   if (rt.decision) console.log(`  Decision: ${rt.decision}`);
   console.log('');
@@ -184,7 +186,7 @@ Examples:
     .description('Get a Round Table session and its full thread')
     .addHelpText('after', '\nExample:\n  admp round-tables get rt_abc123def456')
     .action(async (id: string) => {
-      validateRtId(id);
+      validateRoundTableId(id);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
@@ -193,7 +195,7 @@ Examples:
       if (isJsonMode()) { console.log(JSON.stringify(rt, null, 2)); return; }
 
       console.log('');
-      console.log(`\x1b[1m${rt.topic}\x1b[0m  \x1b[2m${rt.id}\x1b[0m`);
+      console.log(`${bold(rt.topic)}  ${dim(rt.id)}`);
       console.log(`  Goal:         ${rt.goal}`);
       console.log(`  Facilitator:  ${rt.facilitator}`);
       console.log(`  Participants: ${rt.participants.join(', ') || '(none)'}`);
@@ -206,7 +208,7 @@ Examples:
       if (rt.thread.length === 0) {
         console.log('  (no messages yet)');
       } else {
-        console.log('\x1b[2m─'.repeat(60) + '\x1b[0m');
+        console.log(dim('─'.repeat(60)));
         for (const entry of rt.thread) {
           printEntry(entry);
         }
@@ -221,7 +223,7 @@ Examples:
     .requiredOption('--message <m>', 'Message to contribute (max 10000 chars)')
     .addHelpText('after', '\nExample:\n  admp round-tables speak rt_abc123def456 --message "I propose we use event sourcing."')
     .action(async (id: string, opts: { message: string }) => {
-      validateRtId(id);
+      validateRoundTableId(id);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
@@ -247,7 +249,7 @@ Examples:
   admp round-tables resolve rt_abc123def456 --outcome "We will use event sourcing."
   admp round-tables resolve rt_abc123def456 --outcome "Rejected." --decision rejected`)
     .action(async (id: string, opts: { outcome: string; decision?: string }) => {
-      validateRtId(id);
+      validateRoundTableId(id);
       const config = requireConfig(['agent_id', 'secret_key', 'base_url']);
       const client = new AdmpClient(config);
 
@@ -274,7 +276,7 @@ Examples:
   admp round-tables watch rt_abc123def456 --json --on-speak 'my-agent-handler'
   admp round-tables watch rt_abc123def456 --no-exit-on-close`)
     .action(async (id: string, opts: { interval: string; onSpeak?: string; exitOnClose: boolean }) => {
-      validateRtId(id);
+      validateRoundTableId(id);
 
       const intervalMs = (() => {
         const n = parseInt(opts.interval, 10);
@@ -298,7 +300,7 @@ Examples:
         console.log(JSON.stringify({ event: 'watch_start', round_table: rt }));
       } else {
         console.log('');
-        console.log(`\x1b[1mWatching Round Table\x1b[0m \x1b[2m${rt.id}\x1b[0m`);
+        console.log(`${bold('Watching Round Table')} ${dim(rt.id)}`);
         console.log(`  Topic:        ${rt.topic}`);
         console.log(`  Goal:         ${rt.goal}`);
         console.log(`  Expires:      ${rt.expires_at}`);
@@ -306,7 +308,7 @@ Examples:
         console.log(`  Status:       ${rt.status}`);
         if (lastLength > 0) console.log(`  Thread:       ${lastLength} existing entries (skipped)`);
         console.log(`Polling every ${intervalMs}ms — Ctrl+C to exit`);
-        console.log('\x1b[2m' + '─'.repeat(60) + '\x1b[0m');
+        console.log(dim('─'.repeat(60)));
         console.log('');
       }
 
@@ -314,8 +316,6 @@ Examples:
         printClosure(rt);
         process.exit(rt.status === 'resolved' ? 0 : 1);
       }
-
-      let running = true;
 
       // Signal handlers — report only entries seen during this watch, not pre-existing ones
       const handleSignal = (signal: string) => {
@@ -334,10 +334,10 @@ Examples:
       // Poll loop
       const MAX_CONSECUTIVE_ERRORS = 10;
       let consecutiveErrors = 0;
+      let capWarned = false;
 
-      while (running) {
+      while (true) {
         await sleep(intervalMs);
-        if (!running) break;
 
         let current: RoundTable;
         try {
@@ -367,9 +367,10 @@ Examples:
         }
         lastLength = current.thread.length;
 
-        // Warn if thread is at server-side cap — no new entries will appear until session closes
-        if (lastLength >= 200 && newEntries.length === 0 && current.status === 'open') {
+        // Warn once when thread hits the server-side cap
+        if (!capWarned && lastLength >= 200 && current.status === 'open') {
           warn('Thread is at the 200-entry cap — no new messages can be added until the session resolves or expires');
+          capWarned = true;
         }
 
         // Auto-exit when session closes

@@ -32,6 +32,19 @@ export function validateGroupId(id: string): void {
 }
 
 /**
+ * Validates that a round table ID contains only safe characters for URL paths.
+ */
+export function validateRoundTableId(id: string): void {
+  if (!/^[\w\-]+$/.test(id)) {
+    error(
+      'Round table ID must contain only alphanumeric characters, hyphens, and underscores',
+      'INVALID_ARGUMENT'
+    );
+    process.exit(1);
+  }
+}
+
+/**
  * Validates that a seed value is a 64-character lowercase or uppercase hex string
  * (representing 32 bytes), matching the server's expected format.
  */
