@@ -21,6 +21,10 @@ router.post('/register', async (req, res) => {
   try {
     const { agent_id, agent_type, metadata, webhook_url, webhook_secret, seed, public_key, tenant_id, auto_ack_on_pull } = req.body;
 
+    if (auto_ack_on_pull !== undefined && typeof auto_ack_on_pull !== 'boolean') {
+      return res.status(400).json({ error: 'INVALID_INPUT', message: 'auto_ack_on_pull must be a boolean' });
+    }
+
     // Convert seed from base64 string to Uint8Array if provided
     let seedBytes;
     if (seed) {

@@ -81,8 +81,10 @@ router.post('/:agentId/inbox/pull', authenticateHttpSignature, async (req, res) 
     res.json({
       message_id: message.id,
       envelope: message.envelope,
-      lease_until: message.lease_until,
-      attempts: message.attempts
+      // auto_acked messages are already acked in storage; lease_until is not meaningful.
+      lease_until: message.auto_acked ? null : message.lease_until,
+      attempts: message.attempts,
+      ...(message.auto_acked && { auto_acked: true })
     });
   } catch (error) {
     res.status(400).json({

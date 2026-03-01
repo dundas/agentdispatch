@@ -12,6 +12,11 @@ import { webhookService } from './webhook.service.js';
 // Safe agent identifier patterns — module-level constants so they are compiled once,
 // not recreated on every message send.
 const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
+
+// Message types that always require explicit ack, regardless of the recipient's
+// auto_ack_on_pull preference. Losing a work order or fix request silently is
+// always worse than a queue backlog.
+const RETAIN_TYPES = new Set(['work_order', 'fix_request']);
 // VALID_AGENT_URI is NOT a subset of SAFE_CHARS — agent://foo contains slashes which
 // are not in the allowlist. It is the only branch that accepts legacy agent:// URIs.
 // Do not delete it assuming it is a no-op; doing so would silently break backward
@@ -132,7 +137,6 @@ export class InboxService {
     // retain_until_acked: message must be explicitly acked before removal, regardless
     // of the recipient's auto_ack_on_pull preference. Work orders and fix requests
     // always retain — losing them silently is worse than a queue backlog.
-    const RETAIN_TYPES = new Set(['work_order', 'fix_request']);
     const retainUntilAcked = options.retain_until_acked || RETAIN_TYPES.has(envelope.type) || false;
 
     // Create message record
@@ -199,6 +203,11 @@ export class InboxService {
   async pull(agentId, options = {}) {
     const visibility_timeout = options.visibility_timeout || 60;
 
+    // Fetch agent preference once, before any write, so a lookup failure cannot
+    // leave the message in a partially-written state.
+    const agent = await agentService.getAgent(agentId);
+    const autoAck = agent?.auto_ack_on_pull ?? false;
+
     // Get available messages
     const now = Date.now();
     let messages = await storage.getInbox(agentId, 'queued');
@@ -213,7 +222,20 @@ export class InboxService {
     // Get oldest message (FIFO)
     const message = messages.sort((a, b) => a.created_at - b.created_at)[0];
 
-    // Lease the message
+    // auto_ack_on_pull: skip the lease and immediately ack. This avoids the state
+    // inconsistency of returning a 'leased' snapshot while storage holds 'acked'.
+    // If the ack write throws, it propagates — the message stays queued for retry.
+    // retain_until_acked overrides auto_ack_on_pull regardless of agent preference.
+    if (autoAck && !message.retain_until_acked) {
+      const acked = await storage.updateMessage(message.id, {
+        status: 'acked',
+        acked_at: Date.now(),
+        attempts: message.attempts + 1
+      });
+      return { ...acked, auto_acked: true };
+    }
+
+    // Standard lease path
     const leaseUntil = Date.now() + (visibility_timeout * 1000);
 
     const leased = await storage.updateMessage(message.id, {
@@ -221,19 +243,6 @@ export class InboxService {
       lease_until: leaseUntil,
       attempts: message.attempts + 1
     });
-
-    // auto_ack_on_pull: if the recipient opted in and the sender did not require
-    // explicit ack, immediately ack after leasing. If the ack write fails we do NOT
-    // return the message — the lease will expire and the message requeues, preventing
-    // silent data loss (a failed ack is safer than a silently consumed message).
-    const agent = await agentService.getAgent(agentId);
-    if (agent?.auto_ack_on_pull && !leased.retain_until_acked) {
-      await storage.updateMessage(message.id, {
-        status: 'acked',
-        acked_at: Date.now()
-      });
-      return { ...leased, auto_acked: true };
-    }
 
     return leased;
   }

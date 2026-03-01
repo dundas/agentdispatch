@@ -55,13 +55,16 @@ async function sendSignedMessage(sender, recipientId, options = {}) {
     envelope.signature.sig = 'invalid-signature';
   }
 
-  // Build send body — envelope fields plus optional ephemeral/ttl
+  // Build send body — envelope fields plus optional ephemeral/ttl/retain_until_acked
   const sendBody = { ...envelope };
   if (options.ephemeral !== undefined) {
     sendBody.ephemeral = options.ephemeral;
   }
   if (options.ttl !== undefined) {
     sendBody.ttl = options.ttl;
+  }
+  if (options.retain_until_acked !== undefined) {
+    sendBody.retain_until_acked = options.retain_until_acked;
   }
 
   const res = await request(app)
@@ -1128,6 +1131,129 @@ test('non-ephemeral messages behave as before (backward compat)', async () => {
 
   assert.equal(statusRes.status, 200);
   assert.equal(statusRes.body.status, 'acked');
+});
+
+test('auto_ack_on_pull: message is immediately acked on pull, auto_acked returned in response', async () => {
+  const sender = await registerAgent('aap-sender');
+  // Register recipient with auto_ack_on_pull: true
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const recipientRes = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `aap-recipient-${suffix}`, agent_type: 'test', auto_ack_on_pull: true });
+  assert.equal(recipientRes.status, 201);
+  assert.equal(recipientRes.body.auto_ack_on_pull, true);
+  const recipient = recipientRes.body;
+
+  // Send a notification (not a retain type)
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    type: 'notification',
+    subject: 'auto-ack-test',
+    body: { ping: true }
+  });
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Pull — hub should auto-ack immediately
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 200);
+  assert.equal(pullRes.body.message_id, messageId);
+  assert.equal(pullRes.body.auto_acked, true);
+  assert.equal(pullRes.body.lease_until, null);
+
+  // Message should be acked in storage — further ack should fail
+  const ackRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages/${messageId}/ack`)
+    .send({});
+  assert.equal(ackRes.status, 400); // already acked, not leased
+
+  // Status confirms acked
+  const statusRes = await request(app).get(`/api/messages/${messageId}/status`);
+  assert.equal(statusRes.status, 200);
+  assert.equal(statusRes.body.status, 'acked');
+});
+
+test('retain_until_acked overrides auto_ack_on_pull — explicit ack required', async () => {
+  const sender = await registerAgent('retain-sender');
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const recipientRes = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `retain-recipient-${suffix}`, agent_type: 'test', auto_ack_on_pull: true });
+  assert.equal(recipientRes.status, 201);
+  const recipient = recipientRes.body;
+
+  // Send with retain_until_acked: true (overrides recipient auto_ack_on_pull)
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    type: 'notification',
+    subject: 'retain-test',
+    body: { important: true },
+    retain_until_acked: true
+  });
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Pull — should be leased, NOT auto-acked
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 200);
+  assert.equal(pullRes.body.message_id, messageId);
+  assert.equal(pullRes.body.auto_acked, undefined); // not auto-acked
+  assert.ok(pullRes.body.lease_until);              // has a real lease
+
+  // Explicit ack should succeed
+  const ackRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages/${messageId}/ack`)
+    .send({});
+  assert.equal(ackRes.status, 200);
+  assert.equal(ackRes.body.ok, true);
+});
+
+test('work_order type always sets retain_until_acked server-side', async () => {
+  const sender = await registerAgent('wo-retain-sender');
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const recipientRes = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `wo-retain-recipient-${suffix}`, agent_type: 'test', auto_ack_on_pull: true });
+  assert.equal(recipientRes.status, 201);
+  const recipient = recipientRes.body;
+
+  // Send a work_order — server should set retain_until_acked automatically
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    type: 'work_order',
+    subject: 'retain-by-type',
+    body: { task: 'do something important' }
+  });
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Pull — should be leased (not auto-acked) because work_order always retains
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 200);
+  assert.equal(pullRes.body.message_id, messageId);
+  assert.equal(pullRes.body.auto_acked, undefined); // not auto-acked despite agent preference
+  assert.ok(pullRes.body.lease_until);
+
+  // Explicit ack required
+  const ackRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages/${messageId}/ack`)
+    .send({});
+  assert.equal(ackRes.status, 200);
+});
+
+test('auto_ack_on_pull: invalid non-boolean value rejected at registration', async () => {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const res = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `aap-invalid-${suffix}`, agent_type: 'test', auto_ack_on_pull: 'yes' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'INVALID_INPUT');
 });
 
 test('groups: owner can add member; non-member cannot add members', async () => {

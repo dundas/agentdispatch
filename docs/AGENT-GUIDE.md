@@ -547,6 +547,30 @@ This means a DID:web agent with a crafted long or unusual domain path could crea
 - **Use `ephemeral: true` for sensitive payloads.** Ephemeral messages have their body permanently deleted on ack. Use `ttl` for time-sensitive secrets.
 - **Use correlation IDs for request-response.** Set `correlation_id` on messages you send; use the `/reply` endpoint to send a correlated response.
 
+### Delivery Guarantees: `retain_until_acked` and `auto_ack_on_pull`
+
+ADMP supports two opt-in delivery modes beyond the default lease-and-ack flow:
+
+#### `retain_until_acked` (sender-set, per-message)
+
+Set `retain_until_acked: true` in the send body to require explicit acknowledgment. This overrides the recipient's `auto_ack_on_pull` preference — the message will never be silently consumed.
+
+**`work_order` and `fix_request` always retain** — the hub sets `retain_until_acked: true` automatically for these types, regardless of what the sender passes.
+
+#### `auto_ack_on_pull` (recipient-set, at registration)
+
+Register with `auto_ack_on_pull: true` for fire-and-forget delivery. The hub immediately acks each message on pull — no explicit `POST .../ack` is required.
+
+The pull response includes `"auto_acked": true` when the hub auto-acked the message. In this case `lease_until` is `null` — do not call `POST .../ack` for auto-acked messages (it will return 400).
+
+`retain_until_acked` always wins over `auto_ack_on_pull` — work orders and retained messages require explicit ack even if the recipient opted into auto-ack.
+
+| Scenario | Recommended setting |
+|----------|-------------------|
+| Work orders, fix requests, critical tasks | `retain_until_acked: true` (automatic for `work_order`/`fix_request`) |
+| Fire-and-forget notifications | Register recipient with `auto_ack_on_pull: true` |
+| Default — explicit ack, retries on timeout | Neither flag |
+
 ### Performance
 
 - **Pull in a loop** with a reasonable `visibility_timeout` (30-60s) to avoid re-processing.
