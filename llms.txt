@@ -27,20 +27,10 @@ Required fields: version, from, to, subject, timestamp.
 `from`/`to` accept: bare agent IDs, `agent://` URIs, or `did:seed:` DIDs.
 
 ```json
-{
-  "version": "1.0",
-  "id": "uuid",
-  "type": "task.request",
-  "from": "sender-id",
-  "to": "recipient-id",
-  "subject": "create_user",
-  "correlation_id": "c-12345",
-  "headers": {"priority": "high"},
-  "body": {},
-  "ttl_sec": 86400,
-  "timestamp": "2025-10-22T17:30:00Z",
-  "signature": {"alg": "ed25519", "kid": "sender-id", "sig": "base64..."}
-}
+{"version":"1.0","id":"uuid","type":"task.request","from":"sender-id","to":"recipient-id",
+ "subject":"create_user","correlation_id":"c-12345","headers":{"priority":"high"},
+ "body":{},"ttl_sec":86400,"timestamp":"2025-10-22T17:30:00Z",
+ "signature":{"alg":"ed25519","kid":"sender-id","sig":"base64..."}}
 ```
 
 Envelope signing base: `timestamp\nsha256(body)\nfrom\nto\ncorrelation_id`
@@ -127,17 +117,14 @@ GET    /api/agents/:agentId/groups                 Agent's groups [HTTP Sig]
 
 ### Round Tables [Agent Auth]
 ```
-POST   /api/round-tables                           Create session
-  Body: {topic, goal, participants[], timeout_minutes?} -> rt record + excluded_participants?
+POST   /api/round-tables                           Create (body: {topic, goal, participants[], timeout_minutes?})
 GET    /api/round-tables                           List mine (?status=open|resolved|expired)
-GET    /api/round-tables/:id                       Get (facilitator or enrolled participant only)
-POST   /api/round-tables/:id/speak                 Add message [participant only]
-  Body: {message} -> {thread_entry_id, thread_length}
-POST   /api/round-tables/:id/resolve               Close session [facilitator only]
-  Body: {outcome, decision?} -> updated rt record
+GET    /api/round-tables/:id                       Get (facilitator or participant only)
+POST   /api/round-tables/:id/speak                 Speak (body: {message}) [facilitator or participant]
+POST   /api/round-tables/:id/resolve               Resolve (body: {outcome, decision?}) [facilitator only]
 ```
-Constraints: topic/goal max 500 chars, message max 10000 chars, outcome max 2000 chars, timeout_minutes integer 1–10080 (default 30), max 20 participants. Facilitator cannot be in participants list.
-On expiry: server sends `notification` (type=notification, body={reason:"timeout"}) to facilitator + all participants. Facilitator receives self-addressed copy.
+Limits: topic/goal≤500, message≤10000, outcome≤2000, timeout_minutes int 1–10080 (default 30), max 20 participants.
+On expiry: notification (body={reason:"timeout"}) sent to facilitator + all participants. Facilitator gets self-addressed copy.
 
 ### Outbox / Email [Agent Auth]
 ```
@@ -167,20 +154,13 @@ GET    /api/stats                                  System statistics [API Key]
 All commands support `--json` for machine-readable output.
 
 ```
-admp init                                          Interactive config wizard
-admp config show | set <key> <value>               Show/set config
+admp init | config show | config set <key> <val>
 admp register [--name] [--seed <hex>]              Register new agent
-admp agent get                                     View agent details
-admp heartbeat [--metadata <json>]                 Send keepalive
-admp rotate-key [--seed <hex>]                     Rotate signing key
-admp send --to <id> --subject <s> --body <json|@file>  Send message
-admp pull [--timeout <sec>]                        Pull next message (max 300s)
-admp ack <id> [--result <json>]                    Acknowledge
-admp nack <id> [--extend] [--requeue]              Reject/defer
-admp reply <id> --subject <s> --body <json>        Correlated reply
-admp status <id>                                   Delivery status
-admp inbox stats                                   Queue counts
-admp webhook set --url <u> --secret <s> | get | delete  Webhook config
+admp agent get | heartbeat | rotate-key [--seed]
+admp send --to <id> --subject <s> --body <json|@file>
+admp pull [--timeout <sec>] | ack <id> | nack <id> | reply <id> --subject <s> --body <json>
+admp status <id> | inbox stats
+admp webhook set --url <u> --secret <s> | get | delete
 admp groups create --name <n> --access <type>      Create group
 admp groups list | join <id> [--key] | leave <id>  Group membership
 admp groups send <id> --subject <s> --body <json>  Broadcast to group
@@ -252,18 +232,15 @@ Format: `{"error": "CODE", "message": "description"}`
 | `SEND_FAILED` | 400 | Yes | Message or email send failed |
 | `NOT_FOUND` | 404 | No | Endpoint does not exist |
 | `INTERNAL_ERROR` | 500 | Yes | Server error (backoff: 1s, 2s, 4s, 8s, 16s, 30s cap) |
-| `INVALID_TOPIC` | 400 | No | topic missing or empty |
-| `TOPIC_TOO_LONG` | 400 | No | topic > 500 chars |
-| `INVALID_GOAL` | 400 | No | goal missing or empty |
-| `GOAL_TOO_LONG` | 400 | No | goal > 500 chars |
-| `INVALID_PARTICIPANTS` | 400 | No | participants must be a non-empty array |
-| `INVALID_PARTICIPANT_ID` | 400 | No | each participant must be a non-empty string ≤255 chars |
-| `INVALID_TIMEOUT` | 400 | No | timeout_minutes must be an integer |
+| `INVALID_TOPIC / TOPIC_TOO_LONG` | 400 | No | topic missing, empty, or > 500 chars |
+| `INVALID_GOAL / GOAL_TOO_LONG` | 400 | No | goal missing, empty, or > 500 chars |
+| `INVALID_PARTICIPANTS / INVALID_PARTICIPANT_ID` | 400 | No | participants missing, empty, or IDs invalid |
+| `INVALID_TIMEOUT` | 400 | No | timeout_minutes must be an integer (1–10080) |
 | `FACILITATOR_IN_PARTICIPANTS` | 400 | No | facilitator cannot be listed as a participant |
 | `CREATE_ROUND_TABLE_FAILED` | 400 | No | Round Table creation failed (e.g. zero enrollment) |
 | `GET_ROUND_TABLE_FAILED` | 403/404 | No | Not a participant, or session not found |
 | `SPEAK_FAILED` | 403/404/409 | No | Not a participant / not found / thread full (200 entries) |
-| `RESOLVE_FAILED` | 403/404 | No | Not the facilitator, or session not found/already closed |
+| `RESOLVE_FAILED` | 400/403/404/409 | No | Bad request / not facilitator / not found / already closed |
 | `LIST_ROUND_TABLES_FAILED` | 500 | Yes | Transient storage error listing sessions |
 
 Full error reference: docs/ERROR-CODES.md
