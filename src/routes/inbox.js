@@ -16,7 +16,7 @@ const router = express.Router();
  */
 router.post('/:agentId/messages', async (req, res) => {
   try {
-    const { ephemeral, ttl, ...envelope } = req.body;
+    const { ephemeral, ttl, retain_until_acked, ...envelope } = req.body;
 
     // Ensure to field matches URL
     if (!envelope.to) {
@@ -25,7 +25,8 @@ router.post('/:agentId/messages', async (req, res) => {
 
     const message = await inboxService.send(envelope, {
       ephemeral: ephemeral || false,
-      ttl: ttl || null
+      ttl: ttl || null,
+      retain_until_acked: retain_until_acked || false
     });
 
     res.status(201).json({

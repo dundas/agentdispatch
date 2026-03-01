@@ -129,6 +129,12 @@ export class InboxService {
       }
     }
 
+    // retain_until_acked: message must be explicitly acked before removal, regardless
+    // of the recipient's auto_ack_on_pull preference. Work orders and fix requests
+    // always retain — losing them silently is worse than a queue backlog.
+    const RETAIN_TYPES = new Set(['work_order', 'fix_request']);
+    const retainUntilAcked = options.retain_until_acked || RETAIN_TYPES.has(envelope.type) || false;
+
     // Create message record
     const message = {
       id: envelope.id || uuid(),
@@ -141,7 +147,8 @@ export class InboxService {
       attempts: 0,
       ephemeral,
       ephemeral_ttl_sec: ephemeralTTLSec,
-      expires_at: ephemeralTTLSec ? Date.now() + (ephemeralTTLSec * 1000) : null
+      expires_at: ephemeralTTLSec ? Date.now() + (ephemeralTTLSec * 1000) : null,
+      retain_until_acked: retainUntilAcked
     };
 
     const created = await storage.createMessage(message);
@@ -214,6 +221,19 @@ export class InboxService {
       lease_until: leaseUntil,
       attempts: message.attempts + 1
     });
+
+    // auto_ack_on_pull: if the recipient opted in and the sender did not require
+    // explicit ack, immediately ack after leasing. If the ack write fails we do NOT
+    // return the message — the lease will expire and the message requeues, preventing
+    // silent data loss (a failed ack is safer than a silently consumed message).
+    const agent = await agentService.getAgent(agentId);
+    if (agent?.auto_ack_on_pull && !leased.retain_until_acked) {
+      await storage.updateMessage(message.id, {
+        status: 'acked',
+        acked_at: Date.now()
+      });
+      return { ...leased, auto_acked: true };
+    }
 
     return leased;
   }
