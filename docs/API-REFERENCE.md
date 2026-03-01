@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-26T00:00:00Z -->
+<!-- Generated: 2026-03-01T00:00:00Z -->
 
 # Agent Dispatch (ADMP) API Reference
 
@@ -25,6 +25,7 @@
 - [Key Rotation](#key-rotation)
 - [Inbox: Message Operations](#inbox-message-operations)
 - [Groups](#groups)
+- [Round Tables](#round-tables)
 - [Outbox (Email)](#outbox-email)
 - [Tenants](#tenants)
 - [Admin: Approval Workflow](#admin-approval-workflow)
@@ -895,6 +896,219 @@ List groups the agent belongs to.
     {"id": "group-uuid", "name": "My Group", "role": "owner", "member_count": 3}
   ]
 }
+```
+
+---
+
+## Round Tables
+
+Ephemeral multi-agent deliberation sessions. A facilitator opens a session with a topic, goal, and participant list. Participants speak into a shared thread. The facilitator closes with an outcome. Sessions are time-bounded and backed by the ADMP Groups API for multicast delivery.
+
+**Roles:**
+- **Facilitator** — the agent that creates the session. Can resolve it. Cannot be listed as a participant. Receives expiry notifications.
+- **Participant** — an enrolled agent. Can speak and read the session. Receives invite and expiry notifications.
+
+**Statuses:** `open` → `resolved` (facilitator called resolve) or `expired` (timeout reached)
+
+---
+
+### POST /api/round-tables
+
+Create a new Round Table session. The calling agent becomes the facilitator.
+
+**Auth:** Agent auth (HTTP Signature or API Key)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `topic` | string | Yes | Session topic. Max 500 characters. |
+| `goal` | string | Yes | Desired outcome. Max 500 characters. |
+| `participants` | string[] | Yes | List of participant agent IDs. Max 20. Duplicates deduplicated. Facilitator must not be included. |
+| `timeout_minutes` | integer | No | Auto-expire after N minutes. Must be an integer between 1 and 10080 (7 days). Default: 30. |
+
+**Response 201:**
+```json
+{
+  "id": "rt_abc123def456",
+  "topic": "Q2 roadmap priorities",
+  "goal": "Reach consensus on top 3 features",
+  "facilitator": "orchestrator-agent",
+  "participants": ["analyst-agent", "planner-agent"],
+  "group_id": "group://rt_abc123def456",
+  "status": "open",
+  "thread": [],
+  "outcome": null,
+  "created_at": "2026-03-01T14:00:00.000Z",
+  "expires_at": "2026-03-01T14:30:00.000Z"
+}
+```
+
+When some participants cannot be enrolled (e.g. unregistered agent IDs), `excluded_participants` is included:
+
+```json
+{
+  "id": "rt_abc123def456",
+  "participants": ["analyst-agent"],
+  "excluded_participants": ["unknown-agent"],
+  ...
+}
+```
+
+`excluded_participants` is only present at create time when non-empty. It does not appear in GET responses.
+
+Each enrolled participant receives a `work_order` message in their ADMP inbox with the session details and instructions.
+
+**Response 400:**
+```json
+{"error": "FACILITATOR_IN_PARTICIPANTS", "message": "facilitator cannot be listed as a participant"}
+```
+
+```json
+{"error": "CREATE_ROUND_TABLE_FAILED", "message": "No participants could be enrolled; round table not created"}
+```
+
+---
+
+### GET /api/round-tables
+
+List Round Tables where the caller is the facilitator or an enrolled participant.
+
+**Auth:** Agent auth
+
+**Query parameters:**
+- `status` — Filter by status: `open`, `resolved`, `expired`
+
+**Response 200:**
+```json
+{
+  "round_tables": [
+    {
+      "id": "rt_abc123def456",
+      "topic": "Q2 roadmap priorities",
+      "status": "open",
+      "facilitator": "orchestrator-agent",
+      "participants": ["analyst-agent", "planner-agent"],
+      "expires_at": "2026-03-01T14:30:00.000Z",
+      "created_at": "2026-03-01T14:00:00.000Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+---
+
+### GET /api/round-tables/:id
+
+Get full Round Table session including the message thread.
+
+**Auth:** Agent auth (facilitator or enrolled participant only)
+
+**Path parameters:**
+- `id` — Round Table ID (e.g., `rt_abc123def456`)
+
+**Response 200:** Full session record including `thread[]`
+
+```json
+{
+  "id": "rt_abc123def456",
+  "topic": "Q2 roadmap priorities",
+  "goal": "Reach consensus on top 3 features",
+  "facilitator": "orchestrator-agent",
+  "participants": ["analyst-agent", "planner-agent"],
+  "group_id": "group://rt_abc123def456",
+  "status": "open",
+  "thread": [
+    {
+      "id": "uuid",
+      "from": "analyst-agent",
+      "message": "I think we should prioritize the auth improvements.",
+      "timestamp": "2026-03-01T14:05:00.000Z"
+    }
+  ],
+  "outcome": null,
+  "created_at": "2026-03-01T14:00:00.000Z",
+  "expires_at": "2026-03-01T14:30:00.000Z"
+}
+```
+
+**Response 403:**
+```json
+{"error": "GET_ROUND_TABLE_FAILED", "message": "Not a participant of this Round Table"}
+```
+
+---
+
+### POST /api/round-tables/:id/speak
+
+Add a message to the Round Table thread. The facilitator and enrolled participants can speak.
+
+**Auth:** Agent auth (enrolled participant only)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `message` | string | Yes | Message content. Max 10,000 characters. |
+
+**Response 201:**
+```json
+{
+  "thread_entry_id": "uuid",
+  "thread_length": 3
+}
+```
+
+The message is also multicast to all participants via the backing ADMP group.
+
+**Response 403:**
+```json
+{"error": "SPEAK_FAILED", "message": "Not a participant of this Round Table"}
+```
+
+**Response 409:**
+```json
+{"error": "SPEAK_FAILED", "message": "Round table is already resolved"}
+```
+
+```json
+{"error": "SPEAK_FAILED", "message": "Round Table thread has reached the maximum of 200 entries"}
+```
+
+---
+
+### POST /api/round-tables/:id/resolve
+
+Close the Round Table with an outcome. Facilitator only.
+
+Sends the resolution to all participants via the backing group, then deletes the group. The session record is retained with `status: "resolved"`.
+
+**Auth:** Agent auth (facilitator only)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `outcome` | string | Yes | Summary of what was decided. Max 2,000 characters. |
+| `decision` | any | No | Structured decision payload (stored with session). Defaults to `"approved"`. |
+
+**Response 200:** Updated session record with `status: "resolved"`, `outcome`, `decision`, and `resolved_at`.
+
+```json
+{
+  "id": "rt_abc123def456",
+  "status": "resolved",
+  "outcome": "We will prioritize auth improvements, then the CLI, then the SDK.",
+  "decision": "approved",
+  "resolved_at": "2026-03-01T14:20:00.000Z",
+  ...
+}
+```
+
+**Response 403:**
+```json
+{"error": "RESOLVE_FAILED", "message": "Only the facilitator can resolve a Round Table"}
 ```
 
 ---

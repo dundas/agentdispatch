@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-26T00:00:00Z -->
+<!-- Generated: 2026-03-01T00:00:00Z -->
 <!-- Source: Extracted from Agent Dispatch (ADMP) source files -->
 
 # ADMP Error Codes Reference
@@ -13,6 +13,7 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 - [Agent Errors](#agent-errors)
 - [Message and Inbox Errors](#message-and-inbox-errors)
 - [Group Errors](#group-errors)
+- [Round Table Errors](#round-table-errors)
 - [Outbox (Email) Errors](#outbox-email-errors)
 - [Tenant Errors](#tenant-errors)
 - [System Errors](#system-errors)
@@ -113,6 +114,26 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `INVALID_SUBJECT` | 400 | No | Subject too long | Max 200 characters |
 | `BODY_TOO_LARGE` | 400 | No | Message body exceeds 1MB | Reduce body size |
 | `GET_MESSAGES_FAILED` | 400/403 | No | Cannot get messages | Must be a member |
+
+---
+
+## Round Table Errors
+
+| Code | HTTP | Retryable | Description | Hint |
+|------|------|-----------|-------------|------|
+| `INVALID_TOPIC` | 400 | No | topic is missing or empty | Provide a non-empty string of at most 500 characters |
+| `TOPIC_TOO_LONG` | 400 | No | topic exceeds 500 characters | Shorten the topic |
+| `INVALID_GOAL` | 400 | No | goal is missing or empty | Provide a non-empty string of at most 500 characters |
+| `GOAL_TOO_LONG` | 400 | No | goal exceeds 500 characters | Shorten the goal |
+| `INVALID_PARTICIPANTS` | 400 | No | participants is missing or not a non-empty array | Provide at least one participant agent ID |
+| `INVALID_PARTICIPANT_ID` | 400 | No | A participant entry is not a valid string or exceeds 255 chars | Each participant must be a registered agent ID |
+| `INVALID_TIMEOUT` | 400 | No | timeout_minutes is not an integer | Must be an integer between 1 and 10080 (7 days) |
+| `FACILITATOR_IN_PARTICIPANTS` | 400 | No | The calling agent (facilitator) is listed as a participant | Remove the facilitator's own agent ID from participants |
+| `CREATE_ROUND_TABLE_FAILED` | 400 | No | Round Table creation failed | Most commonly: no participants could be enrolled (all provided IDs are unregistered). The backing group is cleaned up automatically. |
+| `GET_ROUND_TABLE_FAILED` | 403/404 | No | Session not found or caller is not a participant | Verify the session ID. Only the facilitator and enrolled participants can read a session. |
+| `SPEAK_FAILED` | 403/404/409 | No | Cannot speak into session | 403: caller is not an enrolled participant. 404: session not found. 409: session is resolved/expired, or thread has reached the 200-entry limit. |
+| `RESOLVE_FAILED` | 400/403/404/409 | No | Cannot resolve session | 400: outcome is missing. 403: caller is not the facilitator. 404: session not found. 409: session is already resolved or expired. |
+| `LIST_ROUND_TABLES_FAILED` | 500 | Yes | Transient error listing Round Tables | Retry with backoff |
 
 ---
 
