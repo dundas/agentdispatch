@@ -10,6 +10,8 @@
     { "path": "src/routes/inbox.js", "extractor": "rest-api", "provides": "Message send, pull, ack, nack, reply, status, inbox stats endpoints" },
     { "path": "src/routes/groups.js", "extractor": "rest-api", "provides": "Group creation, membership, messaging, join/leave endpoints" },
     { "path": "src/routes/outbox.js", "extractor": "rest-api", "provides": "Outbound email via Mailgun — domain config, send, message queries, webhooks" },
+    { "path": "src/routes/round-tables.js", "extractor": "rest-api", "provides": "Round Table endpoints — create, list, get, speak, resolve ephemeral multi-agent deliberation sessions" },
+    { "path": "src/services/round-table.service.js", "extractor": "generic", "provides": "Round Table service — enrollment, expiry, notifications, purge logic" },
     { "path": "src/routes/discovery.js", "extractor": "rest-api", "provides": "Public key directory (.well-known/agent-keys.json) and DID document endpoints" },
     { "path": "src/middleware/auth.js", "extractor": "generic", "provides": "Authentication model: HTTP Signatures, API keys, DID:web federation, enrollment tokens" },
     { "path": "src/services/agent.service.js", "extractor": "generic", "provides": "Agent lifecycle: registration modes, approval workflow, key rotation" },
