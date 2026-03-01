@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { spawn } from 'child_process';
 import { AdmpClient, AdmpError } from '../client.js';
 import { requireConfig } from '../config.js';
-import { success, error, warn, isJsonMode } from '../output.js';
+import { success, error, warn, isJsonMode, green, yellow, cyan, bold, dim } from '../output.js';
 import { validateRoundTableId } from '../validate.js';
 
 // ---- Types ------------------------------------------------------------------
@@ -40,14 +40,6 @@ interface CreateRoundTableResponse extends RoundTable {
 }
 
 // ---- Helpers ----------------------------------------------------------------
-
-// NO_COLOR compliance — mirrors the pattern in output.ts
-const NO_COLOR = 'NO_COLOR' in process.env;
-function cyan(s: string): string  { return NO_COLOR ? s : `\x1b[36m${s}\x1b[0m`; }
-function green(s: string): string { return NO_COLOR ? s : `\x1b[32m${s}\x1b[0m`; }
-function yellow(s: string): string { return NO_COLOR ? s : `\x1b[33m${s}\x1b[0m`; }
-function bold(s: string): string  { return NO_COLOR ? s : `\x1b[1m${s}\x1b[0m`; }
-function dim(s: string): string   { return NO_COLOR ? s : `\x1b[2m${s}\x1b[0m`; }
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));

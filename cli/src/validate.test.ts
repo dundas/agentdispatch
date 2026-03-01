@@ -1,5 +1,5 @@
 import { test, expect, beforeEach, afterEach } from 'bun:test';
-import { validateMessageId, validateGroupId, validateSeedHex } from './validate.js';
+import { validateMessageId, validateGroupId, validateSeedHex, validateRoundTableId } from './validate.js';
 
 // All validators call process.exit(1) on failure, so we intercept it.
 let exitCalled: number | null;
@@ -50,6 +50,23 @@ test('validateGroupId: rejects slashes', () => {
 
 test('validateGroupId: rejects dots', () => {
   validateGroupId('grp.abc');
+  expect(exitCalled).toBe(1);
+});
+
+// --- validateRoundTableId ---
+
+test('validateRoundTableId: accepts valid round table ID', () => {
+  validateRoundTableId('rt_abc123-def');
+  expect(exitCalled).toBeNull();
+});
+
+test('validateRoundTableId: rejects slashes', () => {
+  validateRoundTableId('rt/abc');
+  expect(exitCalled).toBe(1);
+});
+
+test('validateRoundTableId: rejects dots', () => {
+  validateRoundTableId('rt.abc');
   expect(exitCalled).toBe(1);
 });
 

@@ -2,12 +2,12 @@
 // Tests that toggle NO_COLOR after import won't affect this cached value.
 const NO_COLOR = 'NO_COLOR' in process.env;
 
-function green(s: string): string  { return NO_COLOR ? s : `\x1b[32m${s}\x1b[0m`; }
-function yellow(s: string): string { return NO_COLOR ? s : `\x1b[33m${s}\x1b[0m`; }
-function red(s: string): string    { return NO_COLOR ? s : `\x1b[31m${s}\x1b[0m`; }
-function cyan(s: string): string   { return NO_COLOR ? s : `\x1b[36m${s}\x1b[0m`; }
-function bold(s: string): string   { return NO_COLOR ? s : `\x1b[1m${s}\x1b[0m`; }
-function dim(s: string): string    { return NO_COLOR ? s : `\x1b[2m${s}\x1b[0m`; }
+export function green(s: string): string  { return NO_COLOR ? s : `\x1b[32m${s}\x1b[0m`; }
+export function yellow(s: string): string { return NO_COLOR ? s : `\x1b[33m${s}\x1b[0m`; }
+export function red(s: string): string    { return NO_COLOR ? s : `\x1b[31m${s}\x1b[0m`; }
+export function cyan(s: string): string   { return NO_COLOR ? s : `\x1b[36m${s}\x1b[0m`; }
+export function bold(s: string): string   { return NO_COLOR ? s : `\x1b[1m${s}\x1b[0m`; }
+export function dim(s: string): string    { return NO_COLOR ? s : `\x1b[2m${s}\x1b[0m`; }
 
 export function isJsonMode(): boolean {
   return process.argv.includes('--json') || process.env.ADMP_JSON === '1';
