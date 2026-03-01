@@ -132,7 +132,7 @@ afterAll(async () => {
 describe('Suite 1: Agent Registration & Authentication', () => {
   
   test('1.1: Register sender agent', async () => {
-    const response = await request('POST', '/v1/agents', {
+    const response = await request('POST', '/api/agents', {
       body: {
         agent_id: ctx.sender.id,
         public_key: ctx.sender.keypair.publicKey,
@@ -150,7 +150,7 @@ describe('Suite 1: Agent Registration & Authentication', () => {
   });
 
   test('1.2: Register recipient agent', async () => {
-    const response = await request('POST', '/v1/agents', {
+    const response = await request('POST', '/api/agents', {
       body: {
         agent_id: ctx.recipient.id,
         public_key: ctx.recipient.keypair.publicKey,
@@ -165,7 +165,7 @@ describe('Suite 1: Agent Registration & Authentication', () => {
   });
 
   test('1.3: Create inbox key for sender', async () => {
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.sender.id)}/keys`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.sender.id)}/keys`, {
       body: {
         scopes: ['send', 'pull', 'ack', 'nack', 'reply'],
         subject_patterns: ['*'],
@@ -183,7 +183,7 @@ describe('Suite 1: Agent Registration & Authentication', () => {
   });
 
   test('1.4: Create inbox key for recipient', async () => {
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/keys`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/keys`, {
       body: {
         scopes: ['send', 'pull', 'ack', 'nack', 'reply'],
         subject_patterns: ['*'],
@@ -197,7 +197,7 @@ describe('Suite 1: Agent Registration & Authentication', () => {
   });
 
   test('1.5: List inbox keys', async () => {
-    const response = await request('GET', `/v1/agents/${encodeURIComponent(ctx.sender.id)}/keys`);
+    const response = await request('GET', `/api/agents/${encodeURIComponent(ctx.sender.id)}/keys`);
     
     expect(response.status).toBe(200);
     expect(Array.isArray(response.data)).toBe(true);
@@ -205,7 +205,7 @@ describe('Suite 1: Agent Registration & Authentication', () => {
   });
 
   test('1.6: Reject request without authentication', async () => {
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`);
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`);
     
     expect(response.status).toBe(401);
   });
@@ -237,7 +237,7 @@ describe('Suite 2: Message Sending', () => {
       ttl_sec: 86400,
     };
 
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
         'Idempotency-Key': `create-invoice-${messageId}`,
@@ -283,7 +283,7 @@ describe('Suite 2: Message Sending', () => {
       sig: signature,
     };
 
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -316,7 +316,7 @@ describe('Suite 2: Message Sending', () => {
       },
     };
 
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -345,7 +345,7 @@ describe('Suite 2: Message Sending', () => {
     };
 
     // First send
-    const response1 = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response1 = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
         'Idempotency-Key': idempotencyKey,
@@ -357,7 +357,7 @@ describe('Suite 2: Message Sending', () => {
     const firstMessageId = response1.data.message_id;
 
     // Second send with same idempotency key
-    const response2 = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response2 = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
         'Idempotency-Key': idempotencyKey,
@@ -382,7 +382,7 @@ describe('Suite 2: Message Sending', () => {
       ttl_sec: 86400,
     };
 
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -405,7 +405,7 @@ describe('Suite 2: Message Sending', () => {
       ttl_sec: 86400,
     };
 
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -424,7 +424,7 @@ describe('Suite 2: Message Sending', () => {
 describe('Suite 3: Message Pull & Lease', () => {
 
   test('3.1: Pull message from inbox', async () => {
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
       },
@@ -449,7 +449,7 @@ describe('Suite 3: Message Pull & Lease', () => {
   });
 
   test('3.2: Verify leased message not returned in second pull', async () => {
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
       },
@@ -468,7 +468,7 @@ describe('Suite 3: Message Pull & Lease', () => {
 
   test('3.3: Pull with type filter', async () => {
     // First, send a message with different type
-    await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -486,7 +486,7 @@ describe('Suite 3: Message Pull & Lease', () => {
     });
 
     // Pull only task.request messages
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
       },
@@ -518,7 +518,7 @@ describe('Suite 4: Message Ack & Nack', () => {
     }
 
     const response = await request('POST', 
-      `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${ctx.leasedMessage.message_id}/ack`,
+      `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${ctx.leasedMessage.message_id}/ack`,
       {
         headers: {
           'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
@@ -533,7 +533,7 @@ describe('Suite 4: Message Ack & Nack', () => {
   test('4.2: Nack message (requeue)', async () => {
     // Send a new message
     const messageId = `msg-${uuidv4()}`;
-    await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -551,7 +551,7 @@ describe('Suite 4: Message Ack & Nack', () => {
     });
 
     // Pull and lease it
-    const pullResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
+    const pullResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
       },
@@ -566,7 +566,7 @@ describe('Suite 4: Message Ack & Nack', () => {
 
     // Nack it
     const nackResponse = await request('POST', 
-      `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/nack`,
+      `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/nack`,
       {
         headers: {
           'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
@@ -591,7 +591,7 @@ describe('Suite 5: Message Reply', () => {
   test('5.1: Send reply to original sender', async () => {
     // Send message with correlation_id
     const correlationId = `req-${uuidv4()}`;
-    const sendResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const sendResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -613,7 +613,7 @@ describe('Suite 5: Message Reply', () => {
     const originalMessageId = sendResponse.data.message_id;
 
     // Recipient pulls the message
-    const pullResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
+    const pullResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
       },
@@ -625,7 +625,7 @@ describe('Suite 5: Message Reply', () => {
 
     // Recipient replies
     const replyResponse = await request('POST', 
-      `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/reply`,
+      `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/reply`,
       {
         headers: {
           'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
@@ -645,7 +645,7 @@ describe('Suite 5: Message Reply', () => {
     expect(replyResponse.data.correlation_id).toBe(correlationId);
     
     // Verify reply appears in sender's inbox
-    const senderPullResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.sender.id)}/inbox/pull`, {
+    const senderPullResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.sender.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -670,7 +670,7 @@ describe('Suite 5: Message Reply', () => {
 describe('Suite 6: Error Handling', () => {
 
   test('6.1: Reject message without required fields', async () => {
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -686,7 +686,7 @@ describe('Suite 6: Error Handling', () => {
 
   test('6.2: Reject request with expired inbox key', async () => {
     // Create key that expires immediately
-    const expiredKeyResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.sender.id)}/keys`, {
+    const expiredKeyResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.sender.id)}/keys`, {
       body: {
         scopes: ['send'],
         subject_patterns: ['*'],
@@ -699,7 +699,7 @@ describe('Suite 6: Error Handling', () => {
     const expiredKey = expiredKeyResponse.data.key;
 
     // Try to use expired key
-    const response = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const response = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${expiredKey}`,
       },
@@ -721,7 +721,7 @@ describe('Suite 6: Error Handling', () => {
 
   test('6.3: Handle non-existent message ID', async () => {
     const response = await request('POST', 
-      `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages/non-existent-id/ack`,
+      `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages/non-existent-id/ack`,
       {
         headers: {
           'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
@@ -744,7 +744,7 @@ describe('Suite 7: Full Lifecycle', () => {
     
     // Step 1: Sender sends message
     console.log('  → Sender sends request...');
-    const sendResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
+    const sendResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -765,7 +765,7 @@ describe('Suite 7: Full Lifecycle', () => {
 
     // Step 2: Recipient pulls message
     console.log('  → Recipient pulls message...');
-    const pullResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
+    const pullResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.recipient.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
       },
@@ -778,7 +778,7 @@ describe('Suite 7: Full Lifecycle', () => {
     // Step 3: Recipient processes and replies
     console.log('  → Recipient replies...');
     const replyResponse = await request('POST', 
-      `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/reply`,
+      `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/reply`,
       {
         headers: {
           'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
@@ -795,7 +795,7 @@ describe('Suite 7: Full Lifecycle', () => {
     // Step 4: Recipient acks original message
     console.log('  → Recipient acks request...');
     const ackResponse = await request('POST', 
-      `/v1/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/ack`,
+      `/api/agents/${encodeURIComponent(ctx.recipient.id)}/messages/${message.message_id}/ack`,
       {
         headers: {
           'Authorization': `Bearer ${ctx.recipient.inboxKey}`,
@@ -806,7 +806,7 @@ describe('Suite 7: Full Lifecycle', () => {
 
     // Step 5: Sender pulls reply
     console.log('  → Sender pulls reply...');
-    const senderPullResponse = await request('POST', `/v1/agents/${encodeURIComponent(ctx.sender.id)}/inbox/pull`, {
+    const senderPullResponse = await request('POST', `/api/agents/${encodeURIComponent(ctx.sender.id)}/inbox/pull`, {
       headers: {
         'Authorization': `Bearer ${ctx.sender.inboxKey}`,
       },
@@ -824,7 +824,7 @@ describe('Suite 7: Full Lifecycle', () => {
     // Step 6: Sender acks reply
     console.log('  → Sender acks reply...');
     const senderAckResponse = await request('POST', 
-      `/v1/agents/${encodeURIComponent(ctx.sender.id)}/messages/${reply.message_id}/ack`,
+      `/api/agents/${encodeURIComponent(ctx.sender.id)}/messages/${reply.message_id}/ack`,
       {
         headers: {
           'Authorization': `Bearer ${ctx.sender.inboxKey}`,
