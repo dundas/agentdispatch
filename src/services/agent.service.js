@@ -127,7 +127,7 @@ export class AgentService {
       },
       trusted_agents: [],
       blocked_agents: [],
-      auto_ack_on_pull: auto_ack_on_pull || false
+      auto_ack_on_pull
     };
 
     // Apply registration policy.

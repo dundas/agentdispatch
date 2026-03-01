@@ -30,7 +30,7 @@ router.post('/:agentId/messages', async (req, res) => {
     const message = await inboxService.send(envelope, {
       ephemeral: ephemeral || false,
       ttl: ttl || null,
-      retain_until_acked: retain_until_acked || false
+      retain_until_acked
     });
 
     res.status(201).json({

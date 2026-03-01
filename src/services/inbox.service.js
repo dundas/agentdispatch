@@ -204,8 +204,13 @@ export class InboxService {
     const visibility_timeout = options.visibility_timeout || 60;
 
     // Prefer caller-provided preference (avoids a storage round-trip when the route
-    // already has the authenticated agent). Fall back to a storage lookup when the
-    // caller does not supply it (e.g. tests using legacy auth without a Signature header).
+    // already has the authenticated agent via HTTP Signature middleware).
+    // Falls back to a storage lookup for legacy auth paths and test paths that
+    // do not send a Signature header — this adds one extra sequential read on those
+    // paths. The cost is acceptable because (a) auto_ack_on_pull agents are rare,
+    // (b) the lookup is cheap for the memory backend, and (c) the alternative
+    // (always looking up) was worse. Future: if the Mech backend proves slow here,
+    // thread auto_ack_on_pull through the auth middleware for all auth methods.
     let autoAck;
     if (options.auto_ack_on_pull !== undefined) {
       autoAck = options.auto_ack_on_pull;
