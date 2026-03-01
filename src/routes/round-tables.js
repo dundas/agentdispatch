@@ -5,7 +5,7 @@
 
 import express from 'express';
 import { roundTableService } from '../services/round-table.service.js';
-import { authenticateAgent } from '../middleware/auth.js';
+import { authenticateHttpSignature } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -17,7 +17,7 @@ function getErrorStatusCode(error) {
  * POST /api/round-tables
  * Create a new Round Table session
  */
-router.post('/', authenticateAgent, async (req, res) => {
+router.post('/', authenticateHttpSignature, async (req, res) => {
   try {
     const { topic, goal, participants, timeout_minutes } = req.body;
 
@@ -65,7 +65,7 @@ router.post('/', authenticateAgent, async (req, res) => {
  * GET /api/round-tables
  * List Round Tables, optionally filtered by status and/or participant
  */
-router.get('/', authenticateAgent, async (req, res) => {
+router.get('/', authenticateHttpSignature, async (req, res) => {
   try {
     const { status } = req.query;
     const tables = await roundTableService.list({
@@ -82,7 +82,7 @@ router.get('/', authenticateAgent, async (req, res) => {
  * GET /api/round-tables/:id
  * Get a Round Table session (facilitator or participant only)
  */
-router.get('/:id', authenticateAgent, async (req, res) => {
+router.get('/:id', authenticateHttpSignature, async (req, res) => {
   try {
     const rt = await roundTableService.get(req.params.id, req.agent.agent_id);
     res.json(rt);
@@ -95,7 +95,7 @@ router.get('/:id', authenticateAgent, async (req, res) => {
  * POST /api/round-tables/:id/speak
  * Contribute a message to the thread (participants only)
  */
-router.post('/:id/speak', authenticateAgent, async (req, res) => {
+router.post('/:id/speak', authenticateHttpSignature, async (req, res) => {
   try {
     const { message } = req.body;
 
@@ -121,7 +121,7 @@ router.post('/:id/speak', authenticateAgent, async (req, res) => {
  * POST /api/round-tables/:id/resolve
  * Resolve a Round Table (facilitator only)
  */
-router.post('/:id/resolve', authenticateAgent, async (req, res) => {
+router.post('/:id/resolve', authenticateHttpSignature, async (req, res) => {
   try {
     const { outcome, decision } = req.body;
 

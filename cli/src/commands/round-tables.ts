@@ -336,6 +336,11 @@ Examples:
         try {
           current = await client.request<RoundTable>('GET', `/api/round-tables/${id}`, undefined, 'signature');
         } catch (err) {
+          if (err instanceof AdmpError && err.status < 500) {
+            // Fatal client error (403 removed from session, 404 session deleted, etc.) — stop watching
+            error(`Watch terminated: ${err.message}`, err.code);
+            process.exit(1);
+          }
           const msg = err instanceof AdmpError ? err.message : String(err);
           warn(`Poll error (will retry): ${msg}`);
           continue;

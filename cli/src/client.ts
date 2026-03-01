@@ -40,7 +40,7 @@ export class AdmpClient {
     timeoutOverrideMs?: number
   ): Promise<T> {
     const url = new URL(path, this.config.base_url);
-    const host = url.hostname;
+    const host = url.host; // includes port for non-standard ports (e.g. localhost:8099)
 
     // Only set Content-Type when there is a body; avoids spurious header on GETs.
     const headers: Record<string, string> = {};
