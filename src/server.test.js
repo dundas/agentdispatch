@@ -1247,6 +1247,39 @@ test('work_order type always sets retain_until_acked server-side', async () => {
   assert.equal(ackRes.status, 200);
 });
 
+test('fix_request type always sets retain_until_acked server-side', async () => {
+  const sender = await registerAgent('fr-retain-sender');
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const recipientRes = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: `fr-retain-recipient-${suffix}`, agent_type: 'test', auto_ack_on_pull: true });
+  assert.equal(recipientRes.status, 201);
+  const recipient = recipientRes.body;
+
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    type: 'fix_request',
+    subject: 'retain-fix-request',
+    body: { bug: 'critical' }
+  });
+  assert.equal(sendRes.status, 201);
+  const messageId = sendRes.body.message_id;
+
+  // Pull — should be leased, not auto-acked (fix_request is in RETAIN_TYPES)
+  const pullRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/inbox/pull`)
+    .send({ visibility_timeout: 60 });
+
+  assert.equal(pullRes.status, 200);
+  assert.equal(pullRes.body.message_id, messageId);
+  assert.equal(pullRes.body.auto_acked, undefined);
+  assert.ok(pullRes.body.lease_until);
+
+  const ackRes = await request(app)
+    .post(`/api/agents/${encodeURIComponent(recipient.agent_id)}/messages/${messageId}/ack`)
+    .send({});
+  assert.equal(ackRes.status, 200);
+});
+
 test('auto_ack_on_pull: invalid non-boolean value rejected at registration', async () => {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const res = await request(app)
@@ -1254,6 +1287,19 @@ test('auto_ack_on_pull: invalid non-boolean value rejected at registration', asy
     .send({ agent_id: `aap-invalid-${suffix}`, agent_type: 'test', auto_ack_on_pull: 'yes' });
   assert.equal(res.status, 400);
   assert.equal(res.body.error, 'INVALID_INPUT');
+});
+
+test('retain_until_acked: invalid non-boolean value rejected on send', async () => {
+  const sender = await registerAgent('rua-invalid-sender');
+  const recipient = await registerAgent('rua-invalid-recipient');
+  const sendRes = await sendSignedMessage(sender, recipient.agent_id, {
+    type: 'notification',
+    subject: 'rua-invalid',
+    body: { test: true },
+    retain_until_acked: 'yes'
+  });
+  assert.equal(sendRes.status, 400);
+  assert.equal(sendRes.body.error, 'INVALID_INPUT');
 });
 
 test('groups: owner can add member; non-member cannot add members', async () => {

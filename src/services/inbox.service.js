@@ -203,10 +203,16 @@ export class InboxService {
   async pull(agentId, options = {}) {
     const visibility_timeout = options.visibility_timeout || 60;
 
-    // Fetch agent preference once, before any write, so a lookup failure cannot
-    // leave the message in a partially-written state.
-    const agent = await agentService.getAgent(agentId);
-    const autoAck = agent?.auto_ack_on_pull ?? false;
+    // Prefer caller-provided preference (avoids a storage round-trip when the route
+    // already has the authenticated agent). Fall back to a storage lookup when the
+    // caller does not supply it (e.g. tests using legacy auth without a Signature header).
+    let autoAck;
+    if (options.auto_ack_on_pull !== undefined) {
+      autoAck = options.auto_ack_on_pull;
+    } else {
+      const agent = await agentService.getAgent(agentId);
+      autoAck = agent?.auto_ack_on_pull ?? false;
+    }
 
     // Get available messages
     const now = Date.now();
