@@ -78,8 +78,11 @@ function fireHook(cmd: string, entry: RoundTableEntry): void {
   const child = spawn('/bin/sh', ['-c', cmd], {
     stdio: ['pipe', 'inherit', 'inherit'],
   });
-  child.stdin.write(JSON.stringify(entry) + '\n');
-  child.stdin.end();
+  if (child.stdin) {
+    child.stdin.on('error', () => { /* ignore EPIPE — hook exited before reading stdin */ });
+    child.stdin.write(JSON.stringify(entry) + '\n');
+    child.stdin.end();
+  }
   child.on('error', (err) => warn(`--on-speak hook error: ${err.message}`));
   child.on('exit', (code) => {
     if (code !== 0 && code !== null) warn(`--on-speak hook exited with code ${code}`);
@@ -288,7 +291,8 @@ Examples:
       // Initial fetch — print banner and initialise cursor so we don't replay history
       const rt = await client.request<RoundTable>('GET', `/api/round-tables/${id}`, undefined, 'signature');
 
-      let lastLength = rt.thread.length;
+      const initialLength = rt.thread.length; // entries that existed before this watch started
+      let lastLength = initialLength;
 
       if (isJsonMode()) {
         console.log(JSON.stringify({ event: 'watch_start', round_table: rt }));
@@ -313,14 +317,14 @@ Examples:
 
       let running = true;
 
-      // Signal handlers — capture lastLength in closure for the summary
+      // Signal handlers — report only entries seen during this watch, not pre-existing ones
       const handleSignal = (signal: string) => {
-        running = false;
+        const entriesSeen = lastLength - initialLength;
         if (isJsonMode()) {
-          console.log(JSON.stringify({ event: 'interrupted', signal, entries_seen: lastLength }));
+          console.log(JSON.stringify({ event: 'interrupted', signal, entries_seen: entriesSeen }));
         } else {
           console.log(`\nReceived ${signal} — stopping watch.`);
-          console.log(`  Entries seen: ${lastLength}`);
+          console.log(`  Entries seen: ${entriesSeen}`);
         }
         process.exit(0);
       };
@@ -328,6 +332,9 @@ Examples:
       process.once('SIGINT',  () => handleSignal('SIGINT'));
 
       // Poll loop
+      const MAX_CONSECUTIVE_ERRORS = 10;
+      let consecutiveErrors = 0;
+
       while (running) {
         await sleep(intervalMs);
         if (!running) break;
@@ -335,14 +342,20 @@ Examples:
         let current: RoundTable;
         try {
           current = await client.request<RoundTable>('GET', `/api/round-tables/${id}`, undefined, 'signature');
+          consecutiveErrors = 0; // reset on success
         } catch (err) {
           if (err instanceof AdmpError && err.status < 500) {
             // Fatal client error (403 removed from session, 404 session deleted, etc.) — stop watching
             error(`Watch terminated: ${err.message}`, err.code);
             process.exit(1);
           }
+          consecutiveErrors++;
           const msg = err instanceof AdmpError ? err.message : String(err);
           warn(`Poll error (will retry): ${msg}`);
+          if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+            error(`Watch terminated: ${MAX_CONSECUTIVE_ERRORS} consecutive poll errors`, 'POLL_FAILED');
+            process.exit(1);
+          }
           continue;
         }
 
@@ -354,9 +367,13 @@ Examples:
         }
         lastLength = current.thread.length;
 
+        // Warn if thread is at server-side cap — no new entries will appear until session closes
+        if (lastLength >= 200 && newEntries.length === 0 && current.status === 'open') {
+          warn('Thread is at the 200-entry cap — no new messages can be added until the session resolves or expires');
+        }
+
         // Auto-exit when session closes
         if (opts.exitOnClose && current.status !== 'open') {
-          running = false;
           printClosure(current);
           process.exit(current.status === 'resolved' ? 0 : 1);
         }
