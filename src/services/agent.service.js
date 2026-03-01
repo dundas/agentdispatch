@@ -27,7 +27,7 @@ export class AgentService {
    * @param {string} params.tenant_id - Tenant ID (required for seed-based)
    * @returns {Object} Agent with keypair
    */
-  async register({ agent_id, agent_type = 'generic', metadata = {}, webhook_url, webhook_secret, seed, public_key, tenant_id }) {
+  async register({ agent_id, agent_type = 'generic', metadata = {}, webhook_url, webhook_secret, seed, public_key, tenant_id, auto_ack_on_pull = false }) {
     // Generate agent_id if not provided
     if (!agent_id) {
       agent_id = `agent-${uuid()}`;
@@ -126,7 +126,8 @@ export class AgentService {
         timeout_ms: parseInt(process.env.HEARTBEAT_TIMEOUT_MS) || 300000
       },
       trusted_agents: [],
-      blocked_agents: []
+      blocked_agents: [],
+      auto_ack_on_pull
     };
 
     // Apply registration policy.

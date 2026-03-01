@@ -16,7 +16,11 @@ const router = express.Router();
  */
 router.post('/:agentId/messages', async (req, res) => {
   try {
-    const { ephemeral, ttl, ...envelope } = req.body;
+    const { ephemeral, ttl, retain_until_acked, ...envelope } = req.body;
+
+    if (retain_until_acked !== undefined && typeof retain_until_acked !== 'boolean') {
+      return res.status(400).json({ error: 'INVALID_INPUT', message: 'retain_until_acked must be a boolean' });
+    }
 
     // Ensure to field matches URL
     if (!envelope.to) {
@@ -25,7 +29,8 @@ router.post('/:agentId/messages', async (req, res) => {
 
     const message = await inboxService.send(envelope, {
       ephemeral: ephemeral || false,
-      ttl: ttl || null
+      ttl: ttl || null,
+      retain_until_acked
     });
 
     res.status(201).json({
@@ -69,9 +74,15 @@ router.post('/:agentId/inbox/pull', authenticateHttpSignature, async (req, res) 
   try {
     const { visibility_timeout } = req.body;
 
-    const message = await inboxService.pull(req.params.agentId, {
-      visibility_timeout
-    });
+    // If req.agent is populated by HTTP Signature auth, pass the preference directly
+    // to avoid a redundant storage round-trip in the service. Falls back to a service-
+    // level lookup when req.agent is unavailable (e.g. legacy auth without signature).
+    const pullOpts = { visibility_timeout };
+    if (req.agent?.auto_ack_on_pull !== undefined) {
+      pullOpts.auto_ack_on_pull = req.agent.auto_ack_on_pull;
+    }
+
+    const message = await inboxService.pull(req.params.agentId, pullOpts);
 
     if (!message) {
       return res.status(204).send();
@@ -80,8 +91,10 @@ router.post('/:agentId/inbox/pull', authenticateHttpSignature, async (req, res) 
     res.json({
       message_id: message.id,
       envelope: message.envelope,
-      lease_until: message.lease_until,
-      attempts: message.attempts
+      // auto_acked messages are already acked in storage; lease_until is not meaningful.
+      lease_until: message.auto_acked ? null : message.lease_until,
+      attempts: message.attempts,
+      ...(message.auto_acked && { auto_acked: true })
     });
   } catch (error) {
     res.status(400).json({

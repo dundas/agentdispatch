@@ -19,7 +19,11 @@ const router = express.Router();
  */
 router.post('/register', async (req, res) => {
   try {
-    const { agent_id, agent_type, metadata, webhook_url, webhook_secret, seed, public_key, tenant_id } = req.body;
+    const { agent_id, agent_type, metadata, webhook_url, webhook_secret, seed, public_key, tenant_id, auto_ack_on_pull } = req.body;
+
+    if (auto_ack_on_pull !== undefined && typeof auto_ack_on_pull !== 'boolean') {
+      return res.status(400).json({ error: 'INVALID_INPUT', message: 'auto_ack_on_pull must be a boolean' });
+    }
 
     // Convert seed from base64 string to Uint8Array if provided
     let seedBytes;
@@ -35,7 +39,8 @@ router.post('/register', async (req, res) => {
       webhook_secret,
       seed: seedBytes,
       public_key,
-      tenant_id
+      tenant_id,
+      auto_ack_on_pull
     });
 
     const response = {
@@ -50,7 +55,8 @@ router.post('/register', async (req, res) => {
       tenant_id: agent.tenant_id,
       webhook_url: agent.webhook_url,
       webhook_secret: agent.webhook_secret,
-      heartbeat: agent.heartbeat
+      heartbeat: agent.heartbeat,
+      auto_ack_on_pull: agent.auto_ack_on_pull
     };
 
     // Only include secret_key when available (legacy and seed-based modes)
