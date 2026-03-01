@@ -132,7 +132,7 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `CREATE_ROUND_TABLE_FAILED` | 400 | No | Round Table creation failed | Most commonly: no participants could be enrolled (all provided IDs are unregistered). The backing group is cleaned up automatically. |
 | `GET_ROUND_TABLE_FAILED` | 403/404 | No | Session not found or caller is not a participant | Verify the session ID. Only the facilitator and enrolled participants can read a session. |
 | `SPEAK_FAILED` | 403/404/409 | No | Cannot speak into session | 403: caller is not an enrolled participant. 404: session not found. 409: session is resolved/expired, or thread has reached the 200-entry limit. |
-| `RESOLVE_FAILED` | 403/404 | No | Cannot resolve session | 403: caller is not the facilitator. 404: session not found. 409: session is already resolved or expired. |
+| `RESOLVE_FAILED` | 400/403/404/409 | No | Cannot resolve session | 400: outcome is missing. 403: caller is not the facilitator. 404: session not found. 409: session is already resolved or expired. |
 | `LIST_ROUND_TABLES_FAILED` | 500 | Yes | Transient error listing Round Tables | Retry with backoff |
 
 ---

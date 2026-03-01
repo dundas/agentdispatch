@@ -129,7 +129,7 @@ GET    /api/agents/:agentId/groups                 Agent's groups [HTTP Sig]
 ```
 POST   /api/round-tables                           Create session
   Body: {topic, goal, participants[], timeout_minutes?} -> rt record + excluded_participants?
-GET    /api/round-tables                           List mine (?status=active|resolved|expired)
+GET    /api/round-tables                           List mine (?status=open|resolved|expired)
 GET    /api/round-tables/:id                       Get (facilitator or enrolled participant only)
 POST   /api/round-tables/:id/speak                 Add message [participant only]
   Body: {message} -> {thread_entry_id, thread_length}
