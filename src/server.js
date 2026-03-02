@@ -19,6 +19,7 @@ import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
 import roundTableRoutes from './routes/round-tables.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
+import emailInboundRouter from './routes/email-inbound.js';
 import discoveryRoutes from './routes/discovery.js';
 import keysRoutes from './routes/keys.js';
 import { requireApiKey, verifyHttpSignatureOnly } from './middleware/auth.js';
@@ -54,6 +55,14 @@ if (!process.env.RESEND_WEBHOOK_SECRET) {
     'WARNING: RESEND_WEBHOOK_SECRET is not set. ' +
     'Resend webhooks will accept unauthenticated requests. ' +
     'Set RESEND_WEBHOOK_SECRET for production use.'
+  );
+}
+
+if (!process.env.INBOUND_EMAIL_SECRET) {
+  console.warn(
+    'WARNING: INBOUND_EMAIL_SECRET is not set. ' +
+    'Inbound email webhook will accept unauthenticated requests. ' +
+    'Set INBOUND_EMAIL_SECRET to secure the /webhooks/email/inbound endpoint.'
   );
 }
 
@@ -204,6 +213,7 @@ app.use('/api/round-tables', roundTableRoutes);
 app.use('/api/agents', outboxRoutes);
 app.use('/api/keys', keysRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
+app.use('/api', emailInboundRouter);  // For /api/webhooks/email/inbound
 
 // 404 handler
 app.use((req, res) => {

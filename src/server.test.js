@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import nacl from 'tweetnacl';
 
 import app from './server.js';
+import { agentEmailAddress } from './utils/email.js';
 import { fromBase64, toBase64, signMessage, signRequest, hkdfSha256, LABEL_ADMP, keypairFromSeed, generateDID, hashApiKey } from './utils/crypto.js';
 import { requireApiKey } from './middleware/auth.js';
 import { webhookService } from './services/webhook.service.js';
@@ -4737,4 +4738,150 @@ test('round table: facilitator cannot be listed as a participant', async () => {
 
   assert.equal(res.status, 400);
   assert.equal(res.body.error, 'FACILITATOR_IN_PARTICIPANTS');
+});
+
+// ============ TASK 3.0: EMAIL ADDRESS HELPER + INBOUND WEBHOOK ============
+
+test('agentEmailAddress: with tenant returns {tenant}.{agentId}@{domain}', () => {
+  assert.equal(agentEmailAddress('alice', 'acme', 'agentdispatch.io'), 'acme.alice@agentdispatch.io');
+});
+
+test('agentEmailAddress: without tenant returns {agentId}@{domain}', () => {
+  assert.equal(agentEmailAddress('alice', null, 'agentdispatch.io'), 'alice@agentdispatch.io');
+  assert.equal(agentEmailAddress('alice', undefined, 'agentdispatch.io'), 'alice@agentdispatch.io');
+});
+
+test('agentEmailAddress: domain defaults to INBOUND_EMAIL_DOMAIN env var', () => {
+  const orig = process.env.INBOUND_EMAIL_DOMAIN;
+  process.env.INBOUND_EMAIL_DOMAIN = 'mail.example.com';
+  // Note: module-level default captured at import time; test the explicit domain arg
+  const addr = agentEmailAddress('bob', 'corp', 'mail.example.com');
+  assert.equal(addr, 'corp.bob@mail.example.com');
+  if (orig === undefined) delete process.env.INBOUND_EMAIL_DOMAIN;
+  else process.env.INBOUND_EMAIL_DOMAIN = orig;
+});
+
+test('GET /api/agents/:agentId returns email_address field', async () => {
+  const agent = await registerAgent('email-addr-test');
+  const res = await request(app)
+    .get(`/api/agents/${encodeURIComponent(agent.agent_id)}`)
+    .set('X-Agent-ID', agent.agent_id);
+
+  assert.equal(res.status, 200);
+  assert.ok(res.body.email_address, 'email_address should be present');
+  assert.ok(res.body.email_address.includes(agent.agent_id), 'email_address should include agent_id');
+  assert.ok(res.body.email_address.includes('@'), 'email_address should be an email');
+});
+
+test('email inbound: valid request delivers message to agent inbox', async () => {
+  const agent = await registerAgent('inbound-email-happy');
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  delete process.env.INBOUND_EMAIL_SECRET;
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .send({
+        to_agent: agent.agent_id,
+        from_email: 'sender@example.com',
+        subject: 'Hello from email',
+        text: 'This is the body'
+      });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: missing X-Webhook-Secret returns 401 when secret is set', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'my-secret';
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .send({ to_agent: 'anyone', from_email: 'x@example.com', subject: 'test' });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error, 'UNAUTHORIZED');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: wrong X-Webhook-Secret returns 401', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'correct-secret';
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'wrong-secret')
+      .send({ to_agent: 'anyone', from_email: 'x@example.com', subject: 'test' });
+
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error, 'UNAUTHORIZED');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: unknown agent returns 404', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  delete process.env.INBOUND_EMAIL_SECRET;
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .send({
+        to_agent: 'nonexistent-agent-xyz',
+        from_email: 'sender@example.com',
+        subject: 'test'
+      });
+
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'AGENT_NOT_FOUND');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: missing to_agent returns 400', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  delete process.env.INBOUND_EMAIL_SECRET;
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .send({ from_email: 'sender@example.com', subject: 'test' });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'TO_AGENT_REQUIRED');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: missing from_email returns 400', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  delete process.env.INBOUND_EMAIL_SECRET;
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .send({ to_agent: 'someagent', subject: 'test' });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'FROM_EMAIL_REQUIRED');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
 });

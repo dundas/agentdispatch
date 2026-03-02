@@ -10,6 +10,7 @@ import { identityService } from '../services/identity.service.js';
 import { authenticateHttpSignature, requireApiKey, requireMasterKey } from '../middleware/auth.js';
 import { fromBase64, toBase64, hkdfSha256, LABEL_ADMP, keypairFromSeed } from '../utils/crypto.js';
 import { storage } from '../storage/index.js';
+import { agentEmailAddress } from '../utils/email.js';
 
 const router = express.Router();
 
@@ -108,7 +109,10 @@ router.get('/:agentId', authenticateHttpSignature, async (req, res) => {
     // Don't expose secret key
     const { secret_key, ...publicAgent } = agent;
 
-    res.json(publicAgent);
+    res.json({
+      ...publicAgent,
+      email_address: agentEmailAddress(agent.agent_id, agent.tenant_id)
+    });
   } catch (error) {
     res.status(404).json({
       error: 'AGENT_NOT_FOUND',
