@@ -5,8 +5,11 @@
 
 import crypto from 'crypto';
 import { Router } from 'express';
+import pino from 'pino';
 import { inboxService } from '../services/inbox.service.js';
 import { storage } from '../storage/index.js';
+
+const logger = pino();
 
 const router = Router();
 
@@ -31,32 +34,36 @@ router.post('/webhooks/email/inbound', async (req, res) => {
   try {
     // --- Signature verification ---
     const secret = getInboundSecret();
+    if (!secret) {
+      return res.status(500).json({
+        error: 'SERVER_MISCONFIGURATION',
+        message: 'INBOUND_EMAIL_SECRET is not configured'
+      });
+    }
+
     const incomingSecret = req.headers['x-webhook-secret'];
+    if (!incomingSecret) {
+      return res.status(401).json({
+        error: 'UNAUTHORIZED',
+        message: 'X-Webhook-Secret header is required'
+      });
+    }
 
-    if (secret) {
-      if (!incomingSecret) {
-        return res.status(401).json({
-          error: 'UNAUTHORIZED',
-          message: 'X-Webhook-Secret header is required'
-        });
-      }
+    let valid = false;
+    try {
+      valid = crypto.timingSafeEqual(
+        Buffer.from(incomingSecret),
+        Buffer.from(secret)
+      );
+    } catch {
+      valid = false;
+    }
 
-      let valid = false;
-      try {
-        valid = crypto.timingSafeEqual(
-          Buffer.from(incomingSecret),
-          Buffer.from(secret)
-        );
-      } catch {
-        valid = false;
-      }
-
-      if (!valid) {
-        return res.status(401).json({
-          error: 'UNAUTHORIZED',
-          message: 'Invalid webhook secret'
-        });
-      }
+    if (!valid) {
+      return res.status(401).json({
+        error: 'UNAUTHORIZED',
+        message: 'Invalid webhook secret'
+      });
     }
 
     // --- Input validation ---
@@ -107,9 +114,10 @@ router.post('/webhooks/email/inbound', async (req, res) => {
 
     res.status(200).json({ ok: true });
   } catch (error) {
+    logger.error({ error: error.message }, 'Email inbound webhook failed');
     res.status(500).json({
       error: 'INBOUND_FAILED',
-      message: error.message
+      message: 'Internal server error'
     });
   }
 });

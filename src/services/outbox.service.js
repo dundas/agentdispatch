@@ -388,6 +388,11 @@ export class OutboxService {
     const secret = getResendWebhookSecret();
     if (!secret) return false;
 
+    // Timestamp freshness: reject webhooks older than 5 minutes to prevent replay attacks
+    const tsSeconds = Number(svixTimestamp);
+    if (!Number.isFinite(tsSeconds)) return false;
+    if (Math.abs(Date.now() / 1000 - tsSeconds) > 300) return false;
+
     const signingString = `${svixId}.${svixTimestamp}.${rawBody}`;
 
     const hmac = crypto.createHmac('sha256', secret);

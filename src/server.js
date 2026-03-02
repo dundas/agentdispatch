@@ -61,8 +61,8 @@ if (!process.env.RESEND_WEBHOOK_SECRET) {
 if (!process.env.INBOUND_EMAIL_SECRET) {
   console.warn(
     'WARNING: INBOUND_EMAIL_SECRET is not set. ' +
-    'Inbound email webhook will accept unauthenticated requests. ' +
-    'Set INBOUND_EMAIL_SECRET to secure the /webhooks/email/inbound endpoint.'
+    'The /webhooks/email/inbound endpoint will reject all requests with 500. ' +
+    'Set INBOUND_EMAIL_SECRET to enable inbound email delivery.'
   );
 }
 

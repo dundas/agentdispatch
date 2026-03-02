@@ -4776,11 +4776,12 @@ test('GET /api/agents/:agentId returns email_address field', async () => {
 test('email inbound: valid request delivers message to agent inbox', async () => {
   const agent = await registerAgent('inbound-email-happy');
   const origSecret = process.env.INBOUND_EMAIL_SECRET;
-  delete process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
 
   try {
     const res = await request(app)
       .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
       .send({
         to_agent: agent.agent_id,
         from_email: 'sender@example.com',
@@ -4833,11 +4834,12 @@ test('email inbound: wrong X-Webhook-Secret returns 401', async () => {
 
 test('email inbound: unknown agent returns 404', async () => {
   const origSecret = process.env.INBOUND_EMAIL_SECRET;
-  delete process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
 
   try {
     const res = await request(app)
       .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
       .send({
         to_agent: 'nonexistent-agent-xyz',
         from_email: 'sender@example.com',
@@ -4854,11 +4856,12 @@ test('email inbound: unknown agent returns 404', async () => {
 
 test('email inbound: missing to_agent returns 400', async () => {
   const origSecret = process.env.INBOUND_EMAIL_SECRET;
-  delete process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
 
   try {
     const res = await request(app)
       .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
       .send({ from_email: 'sender@example.com', subject: 'test' });
 
     assert.equal(res.status, 400);
@@ -4871,15 +4874,33 @@ test('email inbound: missing to_agent returns 400', async () => {
 
 test('email inbound: missing from_email returns 400', async () => {
   const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
+
+  try {
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({ to_agent: 'someagent', subject: 'test' });
+
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'FROM_EMAIL_REQUIRED');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: no INBOUND_EMAIL_SECRET configured returns 500', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
   delete process.env.INBOUND_EMAIL_SECRET;
 
   try {
     const res = await request(app)
       .post('/api/webhooks/email/inbound')
-      .send({ to_agent: 'someagent', subject: 'test' });
+      .send({ to_agent: 'anyone', from_email: 'x@example.com', subject: 'test' });
 
-    assert.equal(res.status, 400);
-    assert.equal(res.body.error, 'FROM_EMAIL_REQUIRED');
+    assert.equal(res.status, 500);
+    assert.equal(res.body.error, 'SERVER_MISCONFIGURATION');
   } finally {
     if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
     else process.env.INBOUND_EMAIL_SECRET = origSecret;
