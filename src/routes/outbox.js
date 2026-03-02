@@ -1,15 +1,16 @@
 /**
  * Outbox Routes
- * Domain configuration and outbound email via Mailgun
+ * Domain configuration and outbound email via Resend
  */
 
 import { Router } from 'express';
+import express from 'express';
 import { authenticateAgent } from '../middleware/auth.js';
 import { outboxService } from '../services/outbox.service.js';
 
 // Agent-scoped routes (mounted at /api/agents, require authenticateAgent middleware)
 const router = Router();
-// Webhook routes (mounted at /api, no agent auth — called by Mailgun)
+// Webhook routes (mounted at /api, no agent auth — called by Resend)
 const webhookRouter = Router();
 
 // ============ DOMAIN MANAGEMENT ============
@@ -105,7 +106,7 @@ router.delete('/:agentId/outbox/domain', authenticateAgent, async (req, res) => 
 
 /**
  * POST /api/agents/:agentId/outbox/send
- * Send an email via Mailgun
+ * Send an email via Resend
  */
 router.post('/:agentId/outbox/send', authenticateAgent, async (req, res) => {
   try {
@@ -213,50 +214,60 @@ router.get('/:agentId/outbox/messages/:messageId', authenticateAgent, async (req
   }
 });
 
-// ============ MAILGUN WEBHOOK ============
+// ============ RESEND WEBHOOK ============
 
 /**
- * POST /api/webhooks/mailgun
- * Receive delivery status updates from Mailgun
+ * POST /api/webhooks/resend
+ * Receive delivery status updates from Resend (via Svix)
+ * Uses express.raw() to capture the raw body needed for Svix signature verification.
  */
-webhookRouter.post('/webhooks/mailgun', async (req, res) => {
-  try {
-    const { signature, event_data } = req.body;
+webhookRouter.post(
+  '/webhooks/resend',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    try {
+      const svixId = req.headers['svix-id'];
+      const svixTimestamp = req.headers['svix-timestamp'];
+      const svixSignature = req.headers['svix-signature'];
 
-    // Verify webhook signature if signing key is configured
-    if (process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {
-      // Signing key is set — signature is mandatory
-      if (!signature) {
-        return res.status(400).json({
-          error: 'SIGNATURE_REQUIRED',
-          message: 'Webhook signature is required when signing key is configured'
-        });
+      // Verify webhook signature if secret is configured
+      if (process.env.RESEND_WEBHOOK_SECRET) {
+        // Secret is set — signature headers are mandatory
+        if (!svixId || !svixTimestamp || !svixSignature) {
+          return res.status(400).json({
+            error: 'SIGNATURE_REQUIRED',
+            message: 'Webhook signature headers are required when secret is configured'
+          });
+        }
+
+        const valid = outboxService.verifyWebhookSignature(
+          svixId,
+          svixTimestamp,
+          svixSignature,
+          req.body.toString()
+        );
+
+        if (!valid) {
+          return res.status(403).json({
+            error: 'INVALID_SIGNATURE',
+            message: 'Invalid Resend webhook signature'
+          });
+        }
       }
 
-      const valid = outboxService.verifyWebhookSignature(
-        signature.timestamp,
-        signature.token,
-        signature.signature
-      );
+      const event = JSON.parse(req.body.toString());
 
-      if (!valid) {
-        return res.status(403).json({
-          error: 'INVALID_SIGNATURE',
-          message: 'Invalid Mailgun webhook signature'
-        });
-      }
+      await outboxService.handleWebhook(event);
+
+      res.status(200).json({ status: 'ok' });
+    } catch (error) {
+      res.status(500).json({
+        error: 'WEBHOOK_FAILED',
+        message: error.message
+      });
     }
-
-    await outboxService.handleWebhook({ event_data });
-
-    res.status(200).json({ status: 'ok' });
-  } catch (error) {
-    res.status(500).json({
-      error: 'WEBHOOK_FAILED',
-      message: error.message
-    });
   }
-});
+);
 
 export default router;
 export { webhookRouter as outboxWebhookRouter };

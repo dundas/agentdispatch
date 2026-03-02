@@ -1,6 +1,6 @@
 /**
  * Outbox Service
- * Handles outbound email delivery via Mailgun
+ * Handles outbound email delivery via Resend
  */
 
 import crypto from 'crypto';
@@ -13,16 +13,12 @@ const logger = pino();
 const MAX_ATTEMPTS = 3;
 
 // Read env vars dynamically so they can be overridden in tests
-function getMailgunApiUrl() {
-  return process.env.MAILGUN_API_URL || 'https://api.mailgun.net/v3';
+function getResendApiKey() {
+  return process.env.RESEND_API_KEY || '';
 }
 
-function getMailgunApiKey() {
-  return process.env.MAILGUN_API_KEY || '';
-}
-
-function getMailgunWebhookSigningKey() {
-  return process.env.MAILGUN_WEBHOOK_SIGNING_KEY || '';
+function getResendWebhookSecret() {
+  return process.env.RESEND_WEBHOOK_SECRET || '';
 }
 
 export class OutboxService {
@@ -30,24 +26,18 @@ export class OutboxService {
     this.deliveryAttempts = new Map(); // outboxMessageId -> attempts
   }
 
-  // ============ MAILGUN HTTP HELPERS ============
+  // ============ RESEND HTTP HELPERS ============
 
-  _authHeader() {
-    return 'Basic ' + Buffer.from(`api:${getMailgunApiKey()}`).toString('base64');
-  }
-
-  async _mailgunRequest(path, { method = 'GET', body, formData } = {}) {
-    const url = `${getMailgunApiUrl()}${path}`;
+  async _resendRequest(path, { method = 'GET', body } = {}) {
+    const url = `https://api.resend.com${path}`;
     const headers = {
-      'Authorization': this._authHeader()
+      'Authorization': `Bearer ${getResendApiKey()}`,
+      'Content-Type': 'application/json'
     };
 
     const init = { method, headers };
 
-    if (formData) {
-      init.body = formData;
-    } else if (body !== undefined) {
-      headers['Content-Type'] = 'application/json';
+    if (body !== undefined) {
       init.body = JSON.stringify(body);
     }
 
@@ -57,14 +47,14 @@ export class OutboxService {
     let json = null;
     try { json = JSON.parse(text); } catch { /* not json */ }
 
-    return { status: res.status, ok: res.ok, json, text };
+    return { status: res.status, ok: res.ok, json };
   }
 
   // ============ DOMAIN MANAGEMENT ============
 
   async addDomain(agentId, domain) {
-    if (!getMailgunApiKey()) {
-      throw new Error('MAILGUN_API_KEY is not configured');
+    if (!getResendApiKey()) {
+      throw new Error('RESEND_API_KEY is not configured');
     }
 
     const agent = await storage.getAgent(agentId);
@@ -76,29 +66,30 @@ export class OutboxService {
       throw new Error(`Agent ${agentId} already has domain ${existing.domain} configured. Remove it first.`);
     }
 
-    // Add domain to Mailgun
-    const form = new FormData();
-    form.append('name', domain);
-
-    const { ok, json, status } = await this._mailgunRequest('/domains', {
+    // Add domain to Resend
+    const { ok, json, status } = await this._resendRequest('/domains', {
       method: 'POST',
-      formData: form
+      body: { name: domain }
     });
 
     if (!ok && status !== 409) {
-      // 409 = domain already exists in Mailgun (may be shared across agents)
-      throw new Error(`Failed to add domain to Mailgun: ${json?.message || `HTTP ${status}`}`);
+      // 409 = domain already exists in Resend (may be shared across agents)
+      throw new Error(`Failed to add domain to Resend: ${json?.message || `HTTP ${status}`}`);
     }
 
-    // Fetch DNS records from Mailgun
-    const dnsRecords = await this._getDomainDnsRecords(domain);
+    // Fetch DNS records from Resend
+    const resendDomainId = json?.id;
+    const dnsRecords = resendDomainId
+      ? await this._getDomainDnsRecords(resendDomainId)
+      : [];
 
     // Store domain config
     const config = {
       domain,
+      resend_domain_id: resendDomainId || null,
       status: 'pending',
       dns_records: dnsRecords,
-      mailgun_state: json?.domain?.state || 'unverified'
+      provider_state: json?.status || 'not_started'
     };
 
     const stored = await storage.setDomainConfig(agentId, config);
@@ -108,34 +99,20 @@ export class OutboxService {
     return stored;
   }
 
-  async _getDomainDnsRecords(domain) {
-    const { ok, json } = await this._mailgunRequest(`/domains/${encodeURIComponent(domain)}`);
+  async _getDomainDnsRecords(resendDomainId) {
+    const { ok, json } = await this._resendRequest(`/domains/${encodeURIComponent(resendDomainId)}`);
 
     if (!ok) return [];
 
     const records = [];
 
-    // Sending records (SPF, DKIM)
-    if (json?.sending_dns_records) {
-      for (const r of json.sending_dns_records) {
+    if (Array.isArray(json?.records)) {
+      for (const r of json.records) {
         records.push({
-          type: r.record_type,
+          type: r.type,
           name: r.name,
           value: r.value,
-          valid: r.valid
-        });
-      }
-    }
-
-    // Receiving records (MX) — not needed for outbox-only but included for completeness
-    if (json?.receiving_dns_records) {
-      for (const r of json.receiving_dns_records) {
-        records.push({
-          type: r.record_type,
-          name: r.name,
-          value: r.value,
-          priority: r.priority,
-          valid: r.valid
+          valid: r.status === 'verified'
         });
       }
     }
@@ -151,30 +128,35 @@ export class OutboxService {
     const config = await storage.getDomainConfig(agentId);
     if (!config) throw new Error(`No domain configured for agent ${agentId}`);
 
-    if (!getMailgunApiKey()) {
-      throw new Error('MAILGUN_API_KEY is not configured');
+    if (!getResendApiKey()) {
+      throw new Error('RESEND_API_KEY is not configured');
     }
 
-    // Ask Mailgun to verify DNS records
-    const { ok, json } = await this._mailgunRequest(
-      `/domains/${encodeURIComponent(config.domain)}/verify`,
-      { method: 'PUT' }
+    const resendDomainId = config.resend_domain_id;
+    if (!resendDomainId) {
+      throw new Error('Domain has no resend_domain_id — cannot verify');
+    }
+
+    // Ask Resend to verify DNS records
+    const { ok, json } = await this._resendRequest(
+      `/domains/${encodeURIComponent(resendDomainId)}/verify`,
+      { method: 'POST' }
     );
 
     if (!ok) {
-      throw new Error(`Mailgun verification request failed: ${json?.message || 'unknown error'}`);
+      throw new Error(`Resend verification request failed: ${json?.message || 'unknown error'}`);
     }
 
     // Refresh DNS record status
-    const dnsRecords = await this._getDomainDnsRecords(config.domain);
+    const dnsRecords = await this._getDomainDnsRecords(resendDomainId);
 
-    const mailgunState = json?.domain?.state || config.mailgun_state;
-    const verified = mailgunState === 'active';
+    const providerState = json?.status || config.provider_state;
+    const verified = providerState === 'verified';
 
     const updated = await storage.setDomainConfig(agentId, {
       ...config,
       status: verified ? 'verified' : 'pending',
-      mailgun_state: mailgunState,
+      provider_state: providerState,
       dns_records: dnsRecords,
       verified_at: verified ? Date.now() : config.verified_at
     });
@@ -192,7 +174,7 @@ export class OutboxService {
     const config = await storage.getDomainConfig(agentId);
     if (!config) throw new Error(`No domain configured for agent ${agentId}`);
 
-    // Note: We do NOT delete from Mailgun — domain may be shared or reused.
+    // Note: We do NOT delete from Resend — domain may be shared or reused.
     // Only remove local config binding.
     await storage.deleteDomainConfig(agentId);
 
@@ -214,8 +196,8 @@ export class OutboxService {
       throw new Error(`Domain ${domainConfig.domain} is not verified (status: ${domainConfig.status})`);
     }
 
-    if (!getMailgunApiKey()) {
-      throw new Error('MAILGUN_API_KEY is not configured');
+    if (!getResendApiKey()) {
+      throw new Error('RESEND_API_KEY is not configured');
     }
 
     // Construct from address
@@ -272,19 +254,21 @@ export class OutboxService {
     }
 
     try {
-      const form = new FormData();
-      form.append('from', outboxMessage.from);
-      form.append('to', outboxMessage.to);
-      form.append('subject', outboxMessage.subject);
-      form.append('text', outboxMessage.body);
+      const emailBody = {
+        from: outboxMessage.from,
+        to: [outboxMessage.to],
+        subject: outboxMessage.subject,
+        text: outboxMessage.body
+      };
+
       if (outboxMessage.html) {
-        form.append('html', outboxMessage.html);
+        emailBody.html = outboxMessage.html;
       }
 
-      const { ok, json, status } = await this._mailgunRequest(
-        `/${encodeURIComponent(domain)}/messages`,
-        { method: 'POST', formData: form }
-      );
+      const { ok, json, status } = await this._resendRequest('/emails', {
+        method: 'POST',
+        body: emailBody
+      });
 
       this.deliveryAttempts.set(outboxMessage.id, attempts + 1);
 
@@ -303,13 +287,13 @@ export class OutboxService {
           outbox_id: outboxMessage.id,
           provider_message_id: json?.id,
           to: outboxMessage.to
-        }, 'Email sent via Mailgun');
+        }, 'Email sent via Resend');
 
         return;
       }
 
       // Send failed — schedule retry if under limit
-      const error = `Mailgun HTTP ${status}: ${json?.message || 'unknown'}`;
+      const error = `Resend HTTP ${status}: ${json?.message || 'unknown'}`;
       await storage.updateOutboxMessage(outboxMessage.id, {
         attempts: attempts + 1,
         error
@@ -346,39 +330,36 @@ export class OutboxService {
     }, delayMs);
   }
 
-  // ============ MAILGUN WEBHOOKS ============
+  // ============ RESEND WEBHOOKS ============
 
   async handleWebhook(event) {
-    if (!event?.event_data) return;
+    const eventType = event?.type;
+    if (!eventType) return;
 
-    const mailgunId = event.event_data?.message?.headers?.['message-id'];
-    if (!mailgunId) return;
+    const providerId = event.data?.email_id;
+    if (!providerId) return;
 
-    const eventType = event.event_data?.event;
-
-    logger.info({ event: eventType, provider_message_id: mailgunId }, 'Mailgun webhook received');
+    logger.info({ event: eventType, provider_message_id: providerId }, 'Resend webhook received');
 
     // Find outbox message by provider_message_id via storage scan
     // In production with persistent storage, this would be an indexed query
-    const outboxMessage = await this._findOutboxMessageByProviderId(mailgunId);
+    const outboxMessage = await this._findOutboxMessageByProviderId(providerId);
     if (!outboxMessage) {
-      logger.debug({ provider_message_id: mailgunId }, 'No outbox message found for provider_message_id');
+      logger.debug({ provider_message_id: providerId }, 'No outbox message found for provider_message_id');
       return;
     }
 
     const updates = {};
 
     switch (eventType) {
-      case 'delivered':
+      case 'email.delivered':
         updates.status = 'delivered';
         updates.delivered_at = Date.now();
         break;
-      case 'failed':
-      case 'bounced':
+      case 'email.bounced':
+      case 'email.complained':
         updates.status = 'failed';
-        updates.error = event.event_data?.reason ||
-          event.event_data?.['delivery-status']?.description ||
-          `Mailgun event: ${eventType}`;
+        updates.error = `Resend event: ${eventType}`;
         break;
       default:
         // Other events (opened, clicked, etc.) — log but don't update status
@@ -403,18 +384,25 @@ export class OutboxService {
     return null;
   }
 
-  verifyWebhookSignature(timestamp, token, signature) {
-    const signingKey = getMailgunWebhookSigningKey();
-    if (!signingKey) return false;
+  verifyWebhookSignature(svixId, svixTimestamp, svixSignature, rawBody) {
+    const secret = getResendWebhookSecret();
+    if (!secret) return false;
 
-    const hmac = crypto.createHmac('sha256', signingKey);
-    hmac.update(timestamp + token);
-    const expected = hmac.digest('hex');
+    const signingString = `${svixId}.${svixTimestamp}.${rawBody}`;
+
+    const hmac = crypto.createHmac('sha256', secret);
+    hmac.update(signingString);
+    const computed = hmac.digest('base64');
+
+    // svix-signature format: "v1,{base64sig}" — strip the "v1," prefix
+    const incoming = svixSignature.startsWith('v1,')
+      ? svixSignature.slice(3)
+      : svixSignature;
 
     try {
       return crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(expected)
+        Buffer.from(incoming),
+        Buffer.from(computed)
       );
     } catch {
       return false;

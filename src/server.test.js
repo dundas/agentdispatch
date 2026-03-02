@@ -1367,13 +1367,13 @@ test('outbox domain: POST requires domain field', async () => {
 test('outbox domain: POST fails without MAILGUN_API_KEY', async () => {
   const agent = await registerAgent('outbox-nokey');
 
-  // MAILGUN_API_KEY is not set in test env, so this should fail
+  // RESEND_API_KEY is not set in test env, so this should fail
   const res = await request(app)
     .post(`/api/agents/${encodeURIComponent(agent.agent_id)}/outbox/domain`)
     .send({ domain: 'test.example.com' });
 
   assert.equal(res.status, 400);
-  assert.ok(res.body.message.includes('MAILGUN_API_KEY'));
+  assert.ok(res.body.message.includes('RESEND_API_KEY'));
 });
 
 test('outbox domain: DELETE returns 404 when no domain configured', async () => {
@@ -1554,10 +1554,10 @@ test('outbox storage: outbox message CRUD via storage layer', async () => {
   // Update
   const updated = await storage.updateOutboxMessage('outbox-crud-test', {
     status: 'sent',
-    mailgun_id: '<test@mailgun>'
+    provider_message_id: 're_test123'
   });
   assert.equal(updated.status, 'sent');
-  assert.equal(updated.mailgun_id, '<test@mailgun>');
+  assert.equal(updated.provider_message_id, 're_test123');
 
   // List
   const messages = await storage.getOutboxMessages(agentId);
@@ -1572,14 +1572,12 @@ test('outbox storage: outbox message CRUD via storage layer', async () => {
   assert.ok(!queued.some(m => m.id === 'outbox-crud-test'));
 });
 
-test('outbox webhook: mailgun webhook endpoint accepts events', async () => {
+test('outbox webhook: resend webhook endpoint accepts events', async () => {
   const res = await request(app)
-    .post('/api/webhooks/mailgun')
+    .post('/api/webhooks/resend')
     .send({
-      event_data: {
-        event: 'delivered',
-        message: { headers: { 'message-id': '<test@mailgun>' } }
-      }
+      type: 'email.delivered',
+      data: { email_id: 're_test123' }
     });
 
   assert.equal(res.status, 200);
@@ -1587,35 +1585,32 @@ test('outbox webhook: mailgun webhook endpoint accepts events', async () => {
 });
 
 test('outbox webhook signature verification', () => {
-  // Test the signature verification method directly
-  const timestamp = '1234567890';
-  const token = 'test-token';
-
+  // Test the signature verification method directly (Svix format: svixId, svixTimestamp, svixSignature, rawBody)
   // Without signing key set, should return false
-  const result = outboxService.verifyWebhookSignature(timestamp, token, 'fake-sig');
+  const result = outboxService.verifyWebhookSignature('msg_123', '1234567890', 'v1,fake-sig', '{"type":"email.delivered"}');
   assert.equal(result, false);
 });
 
 test('outbox send: happy path with verified domain creates outbox message', async () => {
   const agent = await registerAgent('outbox-send-happy');
 
-  // Set up a verified domain config directly in storage (bypassing Mailgun API)
+  // Set up a verified domain config directly in storage (bypassing Resend API)
   await storage.setDomainConfig(agent.agent_id, {
     domain: 'verified.example.com',
     status: 'verified',
     dns_records: [],
-    mailgun_state: 'active'
+    provider_state: 'verified'
   });
 
-  // Set MAILGUN_API_KEY so the service doesn't reject the send
-  const origKey = process.env.MAILGUN_API_KEY;
-  process.env.MAILGUN_API_KEY = 'test-key-for-send';
+  // Set RESEND_API_KEY so the service doesn't reject the send
+  const origKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key-for-send';
 
-  // Stub the outbox service _mailgunRequest to simulate Mailgun success
-  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
-  outboxService._mailgunRequest = async (path, opts) => {
-    if (path.includes('/messages') && opts?.method === 'POST') {
-      return { status: 200, ok: true, json: { id: '<mock-mailgun-id@mailgun>', message: 'Queued' }, text: '' };
+  // Stub the outbox service _resendRequest to simulate Resend success
+  const originalRequest = outboxService._resendRequest.bind(outboxService);
+  outboxService._resendRequest = async (path, opts) => {
+    if (path === '/emails' && opts?.method === 'POST') {
+      return { status: 200, ok: true, json: { id: 're_mock123' } };
     }
     return originalRequest(path, opts);
   };
@@ -1647,7 +1642,7 @@ test('outbox send: happy path with verified domain creates outbox message', asyn
     const storedMsg = await storage.getOutboxMessage(res.body.id);
     assert.ok(storedMsg);
     assert.equal(storedMsg.status, 'sent');
-    assert.equal(storedMsg.mailgun_id, '<mock-mailgun-id@mailgun>');
+    assert.equal(storedMsg.provider_message_id, 're_mock123');
     assert.ok(storedMsg.sent_at);
 
     // Verify it appears in the agent's outbox message list
@@ -1666,9 +1661,9 @@ test('outbox send: happy path with verified domain creates outbox message', asyn
     assert.equal(getRes.body.status, 'sent');
   } finally {
     // Restore original method and env var
-    outboxService._mailgunRequest = originalRequest;
-    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
-    else process.env.MAILGUN_API_KEY = origKey;
+    outboxService._resendRequest = originalRequest;
+    if (origKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = origKey;
   }
 });
 
@@ -1679,17 +1674,17 @@ test('outbox send: constructs from address as agentId@domain', async () => {
     domain: 'mail.example.com',
     status: 'verified',
     dns_records: [],
-    mailgun_state: 'active'
+    provider_state: 'verified'
   });
 
-  const origKey = process.env.MAILGUN_API_KEY;
-  process.env.MAILGUN_API_KEY = 'test-key-for-from';
+  const origKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key-for-from';
 
-  // Stub the Mailgun send to succeed
-  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
-  outboxService._mailgunRequest = async (path, opts) => {
-    if (path.includes('/messages') && opts?.method === 'POST') {
-      return { status: 200, ok: true, json: { id: '<from-test@mailgun>' }, text: '' };
+  // Stub the Resend send to succeed
+  const originalRequest = outboxService._resendRequest.bind(outboxService);
+  outboxService._resendRequest = async (path, opts) => {
+    if (path === '/emails' && opts?.method === 'POST') {
+      return { status: 200, ok: true, json: { id: 're_from-test' } };
     }
     return originalRequest(path, opts);
   };
@@ -1709,9 +1704,9 @@ test('outbox send: constructs from address as agentId@domain', async () => {
     // From should contain agent_id-derived local part
     assert.ok(res.body.from.includes(agent.agent_id));
   } finally {
-    outboxService._mailgunRequest = originalRequest;
-    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
-    else process.env.MAILGUN_API_KEY = origKey;
+    outboxService._resendRequest = originalRequest;
+    if (origKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = origKey;
   }
 });
 
@@ -1722,16 +1717,16 @@ test('outbox send: from_name is sanitized to prevent header injection', async ()
     domain: 'sanitize.example.com',
     status: 'verified',
     dns_records: [],
-    mailgun_state: 'active'
+    provider_state: 'verified'
   });
 
-  const origKey = process.env.MAILGUN_API_KEY;
-  process.env.MAILGUN_API_KEY = 'test-key-for-sanitize';
+  const origKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key-for-sanitize';
 
-  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
-  outboxService._mailgunRequest = async (path, opts) => {
-    if (path.includes('/messages') && opts?.method === 'POST') {
-      return { status: 200, ok: true, json: { id: '<sanitize-test@mailgun>' }, text: '' };
+  const originalRequest = outboxService._resendRequest.bind(outboxService);
+  outboxService._resendRequest = async (path, opts) => {
+    if (path === '/emails' && opts?.method === 'POST') {
+      return { status: 200, ok: true, json: { id: 're_sanitize-test' } };
     }
     return originalRequest(path, opts);
   };
@@ -1753,9 +1748,9 @@ test('outbox send: from_name is sanitized to prevent header injection', async ()
     assert.ok(!res.body.from.includes('\n'), 'Should strip newline');
     assert.ok(res.body.from.includes('sanitize.example.com'));
   } finally {
-    outboxService._mailgunRequest = originalRequest;
-    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
-    else process.env.MAILGUN_API_KEY = origKey;
+    outboxService._resendRequest = originalRequest;
+    if (origKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = origKey;
   }
 });
 
@@ -1770,26 +1765,26 @@ test('outbox send: rejects invalid email address in to field', async () => {
   assert.equal(res.body.error, 'INVALID_EMAIL');
 });
 
-test('outbox send: Mailgun API failure triggers retry and eventually fails', async () => {
+test('outbox send: Resend API failure triggers retry and eventually fails', async () => {
   const agent = await registerAgent('outbox-retry');
 
   await storage.setDomainConfig(agent.agent_id, {
     domain: 'retry.example.com',
     status: 'verified',
     dns_records: [],
-    mailgun_state: 'active'
+    provider_state: 'verified'
   });
 
-  const origKey = process.env.MAILGUN_API_KEY;
-  process.env.MAILGUN_API_KEY = 'test-key-for-retry';
+  const origKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key-for-retry';
 
-  // Stub Mailgun to always fail
-  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
+  // Stub Resend to always fail
+  const originalRequest = outboxService._resendRequest.bind(outboxService);
   let callCount = 0;
-  outboxService._mailgunRequest = async (path, opts) => {
-    if (path.includes('/messages') && opts?.method === 'POST') {
+  outboxService._resendRequest = async (path, opts) => {
+    if (path === '/emails' && opts?.method === 'POST') {
       callCount++;
-      return { status: 500, ok: false, json: { message: 'Server Error' }, text: 'Server Error' };
+      return { status: 500, ok: false, json: { message: 'Server Error' } };
     }
     return originalRequest(path, opts);
   };
@@ -1810,7 +1805,7 @@ test('outbox send: Mailgun API failure triggers retry and eventually fails', asy
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // First attempt should have happened
-    assert.ok(callCount >= 1, `Expected at least 1 Mailgun call, got ${callCount}`);
+    assert.ok(callCount >= 1, `Expected at least 1 Resend call, got ${callCount}`);
 
     // Check the outbox message has attempt count > 0
     const msg = await storage.getOutboxMessage(res.body.id);
@@ -1818,15 +1813,15 @@ test('outbox send: Mailgun API failure triggers retry and eventually fails', asy
     assert.ok(msg.attempts >= 1);
     assert.ok(msg.error);
   } finally {
-    outboxService._mailgunRequest = originalRequest;
-    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
-    else process.env.MAILGUN_API_KEY = origKey;
+    outboxService._resendRequest = originalRequest;
+    if (origKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = origKey;
   }
 });
 
 test('outbox webhook: delivered event updates outbox message status', async () => {
-  // Create a sent outbox message with a known mailgun_id
-  const mailgunId = '<webhook-delivered-test@mailgun>';
+  // Create a sent outbox message with a known provider_message_id
+  const providerId = 're_webhook-delivered-test';
   await storage.createOutboxMessage({
     id: 'webhook-deliver-test',
     agent_id: 'webhook-agent',
@@ -1835,7 +1830,7 @@ test('outbox webhook: delivered event updates outbox message status', async () =
     subject: 'Webhook test',
     body: 'hello',
     status: 'sent',
-    mailgun_id: mailgunId,
+    provider_message_id: providerId,
     attempts: 1,
     max_attempts: 3,
     error: null,
@@ -1844,12 +1839,10 @@ test('outbox webhook: delivered event updates outbox message status', async () =
 
   // Send delivered webhook
   const res = await request(app)
-    .post('/api/webhooks/mailgun')
+    .post('/api/webhooks/resend')
     .send({
-      event_data: {
-        event: 'delivered',
-        message: { headers: { 'message-id': mailgunId } }
-      }
+      type: 'email.delivered',
+      data: { email_id: providerId }
     });
 
   assert.equal(res.status, 200);
@@ -1861,8 +1854,8 @@ test('outbox webhook: delivered event updates outbox message status', async () =
   assert.ok(msg.delivered_at);
 });
 
-test('outbox webhook: failed event updates outbox message status', async () => {
-  const mailgunId = '<webhook-failed-test@mailgun>';
+test('outbox webhook: bounced event updates outbox message status', async () => {
+  const providerId = 're_webhook-failed-test';
   await storage.createOutboxMessage({
     id: 'webhook-fail-test',
     agent_id: 'webhook-fail-agent',
@@ -1871,7 +1864,7 @@ test('outbox webhook: failed event updates outbox message status', async () => {
     subject: 'Will fail',
     body: 'bounce test',
     status: 'sent',
-    mailgun_id: mailgunId,
+    provider_message_id: providerId,
     attempts: 1,
     max_attempts: 3,
     error: null,
@@ -1879,20 +1872,17 @@ test('outbox webhook: failed event updates outbox message status', async () => {
   });
 
   const res = await request(app)
-    .post('/api/webhooks/mailgun')
+    .post('/api/webhooks/resend')
     .send({
-      event_data: {
-        event: 'failed',
-        message: { headers: { 'message-id': mailgunId } },
-        reason: 'Mailbox not found'
-      }
+      type: 'email.bounced',
+      data: { email_id: providerId }
     });
 
   assert.equal(res.status, 200);
 
   const msg = await storage.getOutboxMessage('webhook-fail-test');
   assert.equal(msg.status, 'failed');
-  assert.ok(msg.error.includes('Mailbox not found'));
+  assert.ok(msg.error.includes('email.bounced'));
 });
 
 test('outbox messages: list supports limit query param', async () => {
@@ -1968,7 +1958,7 @@ test('outbox domain: DELETE removes config and subsequent GET returns 404', asyn
     domain: 'delete-test.example.com',
     status: 'pending',
     dns_records: [],
-    mailgun_state: 'unverified'
+    provider_state: 'not_started'
   });
 
   // Verify domain exists
@@ -1988,26 +1978,26 @@ test('outbox domain: DELETE removes config and subsequent GET returns 404', asyn
   assert.equal(afterRes.status, 404);
 });
 
-test('outbox send: Mailgun send uses correct API path (no /domains/ prefix)', async () => {
+test('outbox send: Resend send uses correct API path (/emails)', async () => {
   const agent = await registerAgent('outbox-path-check');
 
   await storage.setDomainConfig(agent.agent_id, {
     domain: 'path-test.example.com',
     status: 'verified',
     dns_records: [],
-    mailgun_state: 'active'
+    provider_state: 'verified'
   });
 
-  const origKey = process.env.MAILGUN_API_KEY;
-  process.env.MAILGUN_API_KEY = 'test-key-for-path';
+  const origKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = 'test-key-for-path';
 
-  // Capture the URL path used in the Mailgun request
+  // Capture the URL path used in the Resend request
   let capturedPath = null;
-  const originalRequest = outboxService._mailgunRequest.bind(outboxService);
-  outboxService._mailgunRequest = async (path, opts) => {
-    if (opts?.method === 'POST' && path.includes('/messages')) {
+  const originalRequest = outboxService._resendRequest.bind(outboxService);
+  outboxService._resendRequest = async (path, opts) => {
+    if (opts?.method === 'POST' && path === '/emails') {
       capturedPath = path;
-      return { status: 200, ok: true, json: { id: '<path-test@mailgun>' }, text: '' };
+      return { status: 200, ok: true, json: { id: 're_path-test' } };
     }
     return originalRequest(path, opts);
   };
@@ -2026,16 +2016,13 @@ test('outbox send: Mailgun send uses correct API path (no /domains/ prefix)', as
     // Wait for async send
     await new Promise(resolve => setTimeout(resolve, 200));
 
-    // The path should be /{domain}/messages, NOT /domains/{domain}/messages
-    assert.ok(capturedPath, 'Mailgun request path should have been captured');
-    assert.ok(capturedPath.startsWith('/path-test.example.com/messages'),
-      `Expected path to start with /path-test.example.com/messages, got: ${capturedPath}`);
-    assert.ok(!capturedPath.includes('/domains/'),
-      `Path should NOT include /domains/ prefix, got: ${capturedPath}`);
+    // The path should be /emails
+    assert.ok(capturedPath, 'Resend request path should have been captured');
+    assert.equal(capturedPath, '/emails', `Expected path to be /emails, got: ${capturedPath}`);
   } finally {
-    outboxService._mailgunRequest = originalRequest;
-    if (origKey === undefined) delete process.env.MAILGUN_API_KEY;
-    else process.env.MAILGUN_API_KEY = origKey;
+    outboxService._resendRequest = originalRequest;
+    if (origKey === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = origKey;
   }
 });
 
@@ -2075,7 +2062,7 @@ test('storage: findOutboxMessageByProviderId returns null for unknown provider_m
 });
 
 test('outbox webhook: handleWebhook uses findOutboxMessageByProviderId to locate message', async () => {
-  const mailgunId = '<webhook-find-method-test@mailgun>';
+  const providerId = 're_webhook-find-method-test';
   const msgId = `webhook-find-${Date.now()}`;
 
   await storage.createOutboxMessage({
@@ -2086,21 +2073,19 @@ test('outbox webhook: handleWebhook uses findOutboxMessageByProviderId to locate
     subject: 'Webhook find test',
     body: 'hello',
     status: 'sent',
-    provider_message_id: mailgunId,
+    provider_message_id: providerId,
     attempts: 1,
     max_attempts: 3,
     error: null,
     sent_at: Date.now()
   });
 
-  // Send delivered webhook (still using /webhooks/mailgun until Task 2.0 renames it)
+  // Send delivered webhook via Resend route
   const res = await request(app)
-    .post('/api/webhooks/mailgun')
+    .post('/api/webhooks/resend')
     .send({
-      event_data: {
-        event: 'delivered',
-        message: { headers: { 'message-id': mailgunId } }
-      }
+      type: 'email.delivered',
+      data: { email_id: providerId }
     });
 
   assert.equal(res.status, 200);
@@ -2113,76 +2098,68 @@ test('outbox webhook: handleWebhook uses findOutboxMessageByProviderId to locate
 
 // ============ ISSUE 2: Webhook signature bypass ============
 
-test('outbox webhook: rejects request when signing key is set but signature is missing', async () => {
-  const origKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
-  process.env.MAILGUN_WEBHOOK_SIGNING_KEY = 'test-signing-key';
+test('outbox webhook: rejects request when signing key is set but svix headers are missing', async () => {
+  const origKey = process.env.RESEND_WEBHOOK_SECRET;
+  process.env.RESEND_WEBHOOK_SECRET = 'test-signing-key';
 
   try {
-    // Send webhook WITHOUT signature field - should be rejected
+    // Send webhook WITHOUT svix-id/svix-timestamp/svix-signature headers - should be rejected
     const res = await request(app)
-      .post('/api/webhooks/mailgun')
+      .post('/api/webhooks/resend')
       .send({
-        event_data: {
-          event: 'delivered',
-          message: { headers: { 'message-id': '<bypass-test@mailgun>' } }
-        }
-        // Note: no signature field at all
+        type: 'email.delivered',
+        data: { email_id: 're_bypass-test' }
+        // Note: no svix-* headers
       });
 
-    assert.equal(res.status, 400, 'Should reject with 400 when signing key is set but signature is missing');
+    assert.equal(res.status, 400, 'Should reject with 400 when signing key is set but svix headers are missing');
     assert.equal(res.body.error, 'SIGNATURE_REQUIRED');
   } finally {
-    if (origKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
-    else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = origKey;
+    if (origKey === undefined) delete process.env.RESEND_WEBHOOK_SECRET;
+    else process.env.RESEND_WEBHOOK_SECRET = origKey;
   }
 });
 
-test('outbox webhook: rejects request when signing key is set and signature is invalid', async () => {
-  const origKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
-  process.env.MAILGUN_WEBHOOK_SIGNING_KEY = 'test-signing-key';
+test('outbox webhook: rejects request when signing key is set and svix signature is invalid', async () => {
+  const origKey = process.env.RESEND_WEBHOOK_SECRET;
+  process.env.RESEND_WEBHOOK_SECRET = 'test-signing-key';
 
   try {
     const res = await request(app)
-      .post('/api/webhooks/mailgun')
+      .post('/api/webhooks/resend')
+      .set('svix-id', 'msg_123')
+      .set('svix-timestamp', '1234567890')
+      .set('svix-signature', 'v1,invalid-signature')
       .send({
-        signature: {
-          timestamp: '1234567890',
-          token: 'test-token',
-          signature: 'invalid-signature'
-        },
-        event_data: {
-          event: 'delivered',
-          message: { headers: { 'message-id': '<sig-invalid-test@mailgun>' } }
-        }
+        type: 'email.delivered',
+        data: { email_id: 're_sig-invalid-test' }
       });
 
-    assert.equal(res.status, 403, 'Should reject with 403 for invalid signature');
+    assert.equal(res.status, 403, 'Should reject with 403 for invalid svix signature');
     assert.equal(res.body.error, 'INVALID_SIGNATURE');
   } finally {
-    if (origKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
-    else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = origKey;
+    if (origKey === undefined) delete process.env.RESEND_WEBHOOK_SECRET;
+    else process.env.RESEND_WEBHOOK_SECRET = origKey;
   }
 });
 
 test('outbox webhook: allows requests when signing key is NOT set (dev mode)', async () => {
-  const origKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
-  delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+  const origKey = process.env.RESEND_WEBHOOK_SECRET;
+  delete process.env.RESEND_WEBHOOK_SECRET;
 
   try {
     const res = await request(app)
-      .post('/api/webhooks/mailgun')
+      .post('/api/webhooks/resend')
       .send({
-        event_data: {
-          event: 'delivered',
-          message: { headers: { 'message-id': '<devmode-test@mailgun>' } }
-        }
+        type: 'email.delivered',
+        data: { email_id: 're_devmode-test' }
       });
 
     assert.equal(res.status, 200, 'Should allow requests when no signing key is configured');
     assert.equal(res.body.status, 'ok');
   } finally {
-    if (origKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
-    else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = origKey;
+    if (origKey === undefined) delete process.env.RESEND_WEBHOOK_SECRET;
+    else process.env.RESEND_WEBHOOK_SECRET = origKey;
   }
 });
 
