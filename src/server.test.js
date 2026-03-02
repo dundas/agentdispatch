@@ -2039,11 +2039,11 @@ test('outbox send: Mailgun send uses correct API path (no /domains/ prefix)', as
   }
 });
 
-// ============ ISSUE 1: findOutboxMessageByMailgunId on storage backends ============
+// ============ ISSUE 1: findOutboxMessageByProviderId on storage backends ============
 
-test('storage: findOutboxMessageByMailgunId finds message by mailgun_id', async () => {
-  const mailgunId = '<find-by-mailgun-id-test@mailgun>';
-  const msgId = `find-mailgun-${Date.now()}`;
+test('storage: findOutboxMessageByProviderId finds message by provider_message_id', async () => {
+  const providerId = '<find-by-provider-id-test@resend>';
+  const msgId = `find-provider-${Date.now()}`;
 
   await storage.createOutboxMessage({
     id: msgId,
@@ -2053,28 +2053,28 @@ test('storage: findOutboxMessageByMailgunId finds message by mailgun_id', async 
     subject: 'Find test',
     body: 'hello',
     status: 'sent',
-    mailgun_id: mailgunId
+    provider_message_id: providerId
   });
 
-  // The storage backend should have findOutboxMessageByMailgunId as a method
-  assert.equal(typeof storage.findOutboxMessageByMailgunId, 'function',
-    'storage must implement findOutboxMessageByMailgunId');
+  // The storage backend should have findOutboxMessageByProviderId as a method
+  assert.equal(typeof storage.findOutboxMessageByProviderId, 'function',
+    'storage must implement findOutboxMessageByProviderId');
 
-  const found = await storage.findOutboxMessageByMailgunId(mailgunId);
-  assert.ok(found, 'Should find outbox message by mailgun_id');
+  const found = await storage.findOutboxMessageByProviderId(providerId);
+  assert.ok(found, 'Should find outbox message by provider_message_id');
   assert.equal(found.id, msgId);
-  assert.equal(found.mailgun_id, mailgunId);
+  assert.equal(found.provider_message_id, providerId);
 });
 
-test('storage: findOutboxMessageByMailgunId returns null for unknown mailgun_id', async () => {
-  assert.equal(typeof storage.findOutboxMessageByMailgunId, 'function',
-    'storage must implement findOutboxMessageByMailgunId');
+test('storage: findOutboxMessageByProviderId returns null for unknown provider_message_id', async () => {
+  assert.equal(typeof storage.findOutboxMessageByProviderId, 'function',
+    'storage must implement findOutboxMessageByProviderId');
 
-  const result = await storage.findOutboxMessageByMailgunId('<nonexistent@mailgun>');
+  const result = await storage.findOutboxMessageByProviderId('<nonexistent@resend>');
   assert.equal(result, null);
 });
 
-test('outbox webhook: handleWebhook uses findOutboxMessageByMailgunId to locate message', async () => {
+test('outbox webhook: handleWebhook uses findOutboxMessageByProviderId to locate message', async () => {
   const mailgunId = '<webhook-find-method-test@mailgun>';
   const msgId = `webhook-find-${Date.now()}`;
 
@@ -2086,14 +2086,14 @@ test('outbox webhook: handleWebhook uses findOutboxMessageByMailgunId to locate 
     subject: 'Webhook find test',
     body: 'hello',
     status: 'sent',
-    mailgun_id: mailgunId,
+    provider_message_id: mailgunId,
     attempts: 1,
     max_attempts: 3,
     error: null,
     sent_at: Date.now()
   });
 
-  // Send delivered webhook
+  // Send delivered webhook (still using /webhooks/mailgun until Task 2.0 renames it)
   const res = await request(app)
     .post('/api/webhooks/mailgun')
     .send({

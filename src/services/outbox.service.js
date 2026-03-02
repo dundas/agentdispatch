@@ -235,7 +235,7 @@ export class OutboxService {
       body: body || '',
       html: html || null,
       status: 'queued',
-      mailgun_id: null,
+      provider_message_id: null,
       attempts: 0,
       max_attempts: MAX_ATTEMPTS,
       error: null,
@@ -291,7 +291,7 @@ export class OutboxService {
       if (ok) {
         await storage.updateOutboxMessage(outboxMessage.id, {
           status: 'sent',
-          mailgun_id: json?.id || null,
+          provider_message_id: json?.id || null,
           attempts: attempts + 1,
           sent_at: Date.now(),
           error: null
@@ -301,7 +301,7 @@ export class OutboxService {
 
         logger.info({
           outbox_id: outboxMessage.id,
-          mailgun_id: json?.id,
+          provider_message_id: json?.id,
           to: outboxMessage.to
         }, 'Email sent via Mailgun');
 
@@ -356,13 +356,13 @@ export class OutboxService {
 
     const eventType = event.event_data?.event;
 
-    logger.info({ event: eventType, mailgun_id: mailgunId }, 'Mailgun webhook received');
+    logger.info({ event: eventType, provider_message_id: mailgunId }, 'Mailgun webhook received');
 
-    // Find outbox message by mailgun_id via storage scan
+    // Find outbox message by provider_message_id via storage scan
     // In production with persistent storage, this would be an indexed query
-    const outboxMessage = await this._findOutboxMessageByMailgunId(mailgunId);
+    const outboxMessage = await this._findOutboxMessageByProviderId(mailgunId);
     if (!outboxMessage) {
-      logger.debug({ mailgun_id: mailgunId }, 'No outbox message found for mailgun_id');
+      logger.debug({ provider_message_id: mailgunId }, 'No outbox message found for provider_message_id');
       return;
     }
 
@@ -394,12 +394,12 @@ export class OutboxService {
     }, 'Outbox message status updated from webhook');
   }
 
-  async _findOutboxMessageByMailgunId(mailgunId) {
-    if (typeof storage.findOutboxMessageByMailgunId === 'function') {
-      return storage.findOutboxMessageByMailgunId(mailgunId);
+  async _findOutboxMessageByProviderId(providerId) {
+    if (typeof storage.findOutboxMessageByProviderId === 'function') {
+      return storage.findOutboxMessageByProviderId(providerId);
     }
 
-    logger.warn('Storage backend does not implement findOutboxMessageByMailgunId — webhook status updates will be lost');
+    logger.warn('Storage backend does not implement findOutboxMessageByProviderId — webhook status updates will be lost');
     return null;
   }
 
