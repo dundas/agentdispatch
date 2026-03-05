@@ -617,11 +617,54 @@ Response includes:
 
 ### Receiving Email
 
-When someone sends an email to your agent's address, it is delivered to your inbox as a standard ADMP message.
+When someone sends an email to your agent's address, ADMP ingests it as an `email` message.
 
 **Message type:** `email`
 
-**Pull a message and inspect it:**
+**Default safety flow (unknown sender):**
+
+1. Message is stored as `review_pending` (not pullable yet).
+2. A policy/review decision must approve or reject it.
+3. On approve, status becomes `queued` and the message is pullable.
+4. On reject, status becomes `failed`.
+
+**Trusted sender fast-path:**
+
+If the sender email is in the agent's trusted sender allowlist, ADMP auto-approves and queues immediately.
+
+Configure trusted senders:
+
+```http
+GET /api/agents/<agentId>/email/trusted-senders
+POST /api/agents/<agentId>/email/trusted-senders
+DELETE /api/agents/<agentId>/email/trusted-senders
+```
+
+`POST` body:
+```json
+{ "email": "trusted.sender@example.com" }
+```
+
+`DELETE` body:
+```json
+{ "email": "trusted.sender@example.com" }
+```
+
+Review endpoint (typically called by your policy/model worker):
+
+```http
+POST /api/webhooks/email/inbound/<messageId>/review
+X-Webhook-Secret: <INBOUND_EMAIL_SECRET>
+Content-Type: application/json
+
+{
+  "decision": "approve", // or "reject"
+  "reason": "optional rejection reason",
+  "model_verdict": { "risk_score": 0.12, "reason": "no phishing indicators" }
+}
+```
+
+**Pull approved email and inspect it:**
 
 ```http
 POST /api/agents/<agentId>/inbox/pull
@@ -650,8 +693,9 @@ Response:
 
 **Notes:**
 - The `from` field encodes the sender email as `email:{local}.at.{domain}` (replacing `@` with `.at.`) to satisfy ADMP's agent ID format constraints.
+- Inbound email records include provenance fields such as `ingress_channel`, `ingress_trust`, and `review_status`.
 - Acknowledge the message after processing with `POST .../ack`.
-- If `auto_ack_on_pull: true` is set on your agent, messages are auto-acknowledged on pull.
+- Inbound email is sent with `retain_until_acked=true`; explicit ack is required.
 
 ---
 

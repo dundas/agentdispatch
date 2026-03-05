@@ -13,6 +13,22 @@ import { storage } from '../storage/index.js';
 import { agentEmailAddress } from '../utils/email.js';
 
 const router = express.Router();
+const SIMPLE_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeTrustedSenderEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function getTrustedSenderList(agent) {
+  const configured = agent?.metadata?.email_trusted_senders;
+  if (!Array.isArray(configured)) return [];
+  return [...new Set(
+    configured
+      .filter(v => typeof v === 'string')
+      .map(normalizeTrustedSenderEmail)
+      .filter(v => SIMPLE_EMAIL_RE.test(v))
+  )];
+}
 
 /**
  * POST /api/agents/register
@@ -200,6 +216,99 @@ router.delete('/:agentId/trusted/:trustedAgentId', authenticateHttpSignature, as
   } catch (error) {
     res.status(400).json({
       error: 'REMOVE_TRUSTED_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/agents/:agentId/email/trusted-senders
+ * List trusted external email senders for inbound email policy.
+ */
+router.get('/:agentId/email/trusted-senders', authenticateHttpSignature, async (req, res) => {
+  try {
+    return res.json({
+      trusted_senders: getTrustedSenderList(req.agent)
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: 'LIST_TRUSTED_SENDERS_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/agents/:agentId/email/trusted-senders
+ * Add a trusted external email sender.
+ * Body: { email: string }
+ */
+router.post('/:agentId/email/trusted-senders', authenticateHttpSignature, async (req, res) => {
+  try {
+    const normalized = normalizeTrustedSenderEmail(req.body?.email);
+    if (!normalized) {
+      return res.status(400).json({
+        error: 'EMAIL_REQUIRED',
+        message: 'email is required'
+      });
+    }
+    if (!SIMPLE_EMAIL_RE.test(normalized)) {
+      return res.status(400).json({
+        error: 'INVALID_EMAIL',
+        message: 'email must be a valid email address'
+      });
+    }
+
+    const trustedSenders = getTrustedSenderList(req.agent);
+    if (!trustedSenders.includes(normalized)) {
+      trustedSenders.push(normalized);
+    }
+
+    const metadata = {
+      ...(req.agent.metadata || {}),
+      email_trusted_senders: trustedSenders
+    };
+    const updated = await storage.updateAgent(req.agent.agent_id, { metadata });
+
+    return res.json({
+      trusted_senders: getTrustedSenderList(updated)
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: 'ADD_TRUSTED_SENDER_FAILED',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /api/agents/:agentId/email/trusted-senders
+ * Remove a trusted external email sender.
+ * Body: { email: string }
+ */
+router.delete('/:agentId/email/trusted-senders', authenticateHttpSignature, async (req, res) => {
+  try {
+    const normalized = normalizeTrustedSenderEmail(req.body?.email);
+    if (!normalized) {
+      return res.status(400).json({
+        error: 'EMAIL_REQUIRED',
+        message: 'email is required'
+      });
+    }
+
+    const trustedSenders = getTrustedSenderList(req.agent).filter(v => v !== normalized);
+    const metadata = {
+      ...(req.agent.metadata || {}),
+      email_trusted_senders: trustedSenders
+    };
+    const updated = await storage.updateAgent(req.agent.agent_id, { metadata });
+
+    return res.json({
+      trusted_senders: getTrustedSenderList(updated)
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: 'REMOVE_TRUSTED_SENDER_FAILED',
       message: error.message
     });
   }

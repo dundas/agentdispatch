@@ -1483,10 +1483,11 @@ test('outbox messages: returns 404 for non-existent message', async () => {
 test('outbox messages: prevents accessing another agent\'s message', async () => {
   const agent1 = await registerAgent('outbox-owner');
   const agent2 = await registerAgent('outbox-intruder');
+  const messageId = `outbox-cross-agent-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // Create outbox message for agent1
   await storage.createOutboxMessage({
-    id: 'outbox-cross-agent-test',
+    id: messageId,
     agent_id: agent1.agent_id,
     to: 'someone@example.com',
     from: 'test@example.com',
@@ -1497,7 +1498,7 @@ test('outbox messages: prevents accessing another agent\'s message', async () =>
 
   // agent2 tries to access it
   const res = await request(app)
-    .get(`/api/agents/${encodeURIComponent(agent2.agent_id)}/outbox/messages/outbox-cross-agent-test`);
+    .get(`/api/agents/${encodeURIComponent(agent2.agent_id)}/outbox/messages/${encodeURIComponent(messageId)}`);
 
   assert.equal(res.status, 403);
   assert.equal(res.body.error, 'FORBIDDEN');
@@ -1534,10 +1535,11 @@ test('outbox storage: domain config CRUD via storage layer', async () => {
 
 test('outbox storage: outbox message CRUD via storage layer', async () => {
   const agentId = 'storage-outbox-test';
+  const messageId = `outbox-crud-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // Create
   const msg = await storage.createOutboxMessage({
-    id: 'outbox-crud-test',
+    id: messageId,
     agent_id: agentId,
     to: 'test@example.com',
     from: 'agent@example.com',
@@ -1545,15 +1547,15 @@ test('outbox storage: outbox message CRUD via storage layer', async () => {
     body: 'hello',
     status: 'queued'
   });
-  assert.equal(msg.id, 'outbox-crud-test');
+  assert.equal(msg.id, messageId);
   assert.ok(msg.created_at);
 
   // Get
-  const fetched = await storage.getOutboxMessage('outbox-crud-test');
+  const fetched = await storage.getOutboxMessage(messageId);
   assert.equal(fetched.subject, 'CRUD test');
 
   // Update
-  const updated = await storage.updateOutboxMessage('outbox-crud-test', {
+  const updated = await storage.updateOutboxMessage(messageId, {
     status: 'sent',
     provider_message_id: 're_test123'
   });
@@ -1563,14 +1565,14 @@ test('outbox storage: outbox message CRUD via storage layer', async () => {
   // List
   const messages = await storage.getOutboxMessages(agentId);
   assert.ok(messages.length >= 1);
-  assert.ok(messages.some(m => m.id === 'outbox-crud-test'));
+  assert.ok(messages.some(m => m.id === messageId));
 
   // List with status filter
   const sent = await storage.getOutboxMessages(agentId, { status: 'sent' });
-  assert.ok(sent.some(m => m.id === 'outbox-crud-test'));
+  assert.ok(sent.some(m => m.id === messageId));
 
   const queued = await storage.getOutboxMessages(agentId, { status: 'queued' });
-  assert.ok(!queued.some(m => m.id === 'outbox-crud-test'));
+  assert.ok(!queued.some(m => m.id === messageId));
 });
 
 test('outbox webhook: resend webhook endpoint accepts events', async () => {
@@ -1822,9 +1824,11 @@ test('outbox send: Resend API failure triggers retry and eventually fails', asyn
 
 test('outbox webhook: delivered event updates outbox message status', async () => {
   // Create a sent outbox message with a known provider_message_id
-  const providerId = 're_webhook-delivered-test';
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const providerId = `re_webhook-delivered-test-${suffix}`;
+  const messageId = `webhook-deliver-test-${suffix}`;
   await storage.createOutboxMessage({
-    id: 'webhook-deliver-test',
+    id: messageId,
     agent_id: 'webhook-agent',
     to: 'someone@example.com',
     from: 'agent@example.com',
@@ -1850,15 +1854,17 @@ test('outbox webhook: delivered event updates outbox message status', async () =
   assert.equal(res.body.status, 'ok');
 
   // Check that the outbox message was updated
-  const msg = await storage.getOutboxMessage('webhook-deliver-test');
+  const msg = await storage.getOutboxMessage(messageId);
   assert.equal(msg.status, 'delivered');
   assert.ok(msg.delivered_at);
 });
 
 test('outbox webhook: bounced event updates outbox message status', async () => {
-  const providerId = 're_webhook-failed-test';
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const providerId = `re_webhook-failed-test-${suffix}`;
+  const messageId = `webhook-fail-test-${suffix}`;
   await storage.createOutboxMessage({
-    id: 'webhook-fail-test',
+    id: messageId,
     agent_id: 'webhook-fail-agent',
     to: 'bounce@example.com',
     from: 'agent@example.com',
@@ -1881,7 +1887,7 @@ test('outbox webhook: bounced event updates outbox message status', async () => 
 
   assert.equal(res.status, 200);
 
-  const msg = await storage.getOutboxMessage('webhook-fail-test');
+  const msg = await storage.getOutboxMessage(messageId);
   assert.equal(msg.status, 'failed');
   assert.ok(msg.error.includes('email.bounced'));
 });
@@ -4773,6 +4779,46 @@ test('GET /api/agents/:agentId returns email_address field', async () => {
   assert.ok(res.body.email_address.includes('@'), 'email_address should be an email');
 });
 
+test('email trusted senders API: list/add/remove with normalization and validation', async () => {
+  const agent = await registerAgent('email-trusted-senders-api');
+
+  const listInitial = await withAgentHeader(
+    request(app).get(`/api/agents/${encodeURIComponent(agent.agent_id)}/email/trusted-senders`),
+    agent.agent_id
+  );
+  assert.equal(listInitial.status, 200);
+  assert.deepEqual(listInitial.body.trusted_senders, []);
+
+  const addOne = await withAgentHeader(
+    request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/email/trusted-senders`),
+    agent.agent_id
+  ).send({ email: 'Trusted.User@Example.com' });
+  assert.equal(addOne.status, 200);
+  assert.deepEqual(addOne.body.trusted_senders, ['trusted.user@example.com']);
+
+  // Duplicate add (different case) should be idempotent.
+  const addDuplicate = await withAgentHeader(
+    request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/email/trusted-senders`),
+    agent.agent_id
+  ).send({ email: 'trusted.user@example.com' });
+  assert.equal(addDuplicate.status, 200);
+  assert.deepEqual(addDuplicate.body.trusted_senders, ['trusted.user@example.com']);
+
+  const addInvalid = await withAgentHeader(
+    request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/email/trusted-senders`),
+    agent.agent_id
+  ).send({ email: 'not-an-email' });
+  assert.equal(addInvalid.status, 400);
+  assert.equal(addInvalid.body.error, 'INVALID_EMAIL');
+
+  const remove = await withAgentHeader(
+    request(app).delete(`/api/agents/${encodeURIComponent(agent.agent_id)}/email/trusted-senders`),
+    agent.agent_id
+  ).send({ email: 'TRUSTED.USER@example.com' });
+  assert.equal(remove.status, 200);
+  assert.deepEqual(remove.body.trusted_senders, []);
+});
+
 test('email inbound: valid request delivers message to agent inbox', async () => {
   const agent = await registerAgent('inbound-email-happy');
   const origSecret = process.env.INBOUND_EMAIL_SECRET;
@@ -4791,6 +4837,220 @@ test('email inbound: valid request delivers message to agent inbox', async () =>
 
     assert.equal(res.status, 200);
     assert.equal(res.body.ok, true);
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: message is quarantined until approved', async () => {
+  const agent = await registerAgent('inbound-email-quarantine');
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
+
+  try {
+    const ingestRes = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({
+        to_agent: agent.agent_id,
+        from_email: 'unknown@external.com',
+        subject: 'Untrusted hello',
+        text: 'Please process this'
+      });
+
+    assert.equal(ingestRes.status, 200);
+    assert.equal(ingestRes.body.ok, true);
+    assert.equal(ingestRes.body.review_status, 'pending');
+    assert.ok(ingestRes.body.message_id);
+
+    const stored = await storage.getMessage(ingestRes.body.message_id);
+    assert.equal(stored.status, 'review_pending');
+    assert.equal(stored.ingress_channel, 'email');
+    assert.equal(stored.ingress_trust, 'untrusted');
+    assert.equal(stored.review_status, 'pending');
+
+    // Quarantined messages are not pullable until approved.
+    const pullBefore = await withAgentHeader(
+      request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/inbox/pull`),
+      agent.agent_id
+    ).send({});
+    assert.equal(pullBefore.status, 204);
+
+    const approveRes = await request(app)
+      .post(`/api/webhooks/email/inbound/${encodeURIComponent(ingestRes.body.message_id)}/review`)
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({ decision: 'approve' });
+
+    assert.equal(approveRes.status, 200);
+    assert.equal(approveRes.body.status, 'queued');
+    assert.equal(approveRes.body.review_status, 'approved');
+
+    const pullAfter = await withAgentHeader(
+      request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/inbox/pull`),
+      agent.agent_id
+    ).send({});
+    assert.equal(pullAfter.status, 200);
+    assert.equal(pullAfter.body.envelope.type, 'email');
+    assert.equal(pullAfter.body.envelope.body.from_email, 'unknown@external.com');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound review: reject keeps message out of pull flow', async () => {
+  const agent = await registerAgent('inbound-email-reject');
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
+
+  try {
+    const ingestRes = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({
+        to_agent: agent.agent_id,
+        from_email: 'spam@external.com',
+        subject: 'Spam'
+      });
+
+    assert.equal(ingestRes.status, 200);
+    const messageId = ingestRes.body.message_id;
+
+    const rejectRes = await request(app)
+      .post(`/api/webhooks/email/inbound/${encodeURIComponent(messageId)}/review`)
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({ decision: 'reject', reason: 'policy_block' });
+
+    assert.equal(rejectRes.status, 200);
+    assert.equal(rejectRes.body.status, 'failed');
+    assert.equal(rejectRes.body.review_status, 'rejected');
+
+    const stored = await storage.getMessage(messageId);
+    assert.equal(stored.status, 'failed');
+    assert.equal(stored.review_status, 'rejected');
+    assert.equal(stored.review_reason, 'policy_block');
+
+    const pullRes = await withAgentHeader(
+      request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/inbox/pull`),
+      agent.agent_id
+    ).send({});
+    assert.equal(pullRes.status, 204);
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: trusted sender bypasses quarantine and is pullable immediately', async () => {
+  const agent = await registerAgent('inbound-email-trusted', {
+    email_trusted_senders: ['trusted.sender@example.com']
+  });
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
+
+  try {
+    const ingestRes = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({
+        to_agent: agent.agent_id,
+        from_email: 'Trusted.Sender@Example.com',
+        subject: 'Trusted hello',
+        text: 'Trusted channel'
+      });
+
+    assert.equal(ingestRes.status, 200);
+    assert.equal(ingestRes.body.review_status, 'approved');
+    assert.equal(ingestRes.body.trusted_sender, true);
+
+    const stored = await storage.getMessage(ingestRes.body.message_id);
+    assert.equal(stored.status, 'queued');
+    assert.equal(stored.review_status, 'approved');
+    assert.equal(stored.ingress_trust, 'trusted');
+    assert.equal(stored.review_source, 'trusted_sender_allowlist');
+
+    const pullRes = await withAgentHeader(
+      request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/inbox/pull`),
+      agent.agent_id
+    ).send({});
+    assert.equal(pullRes.status, 200);
+    assert.equal(pullRes.body.envelope.body.from_email, 'Trusted.Sender@Example.com');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound: trusted sender configured via API bypasses quarantine', async () => {
+  const agent = await registerAgent('inbound-email-trusted-api');
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
+
+  try {
+    const addTrusted = await withAgentHeader(
+      request(app).post(`/api/agents/${encodeURIComponent(agent.agent_id)}/email/trusted-senders`),
+      agent.agent_id
+    ).send({ email: 'api.trusted@example.com' });
+    assert.equal(addTrusted.status, 200);
+    assert.deepEqual(addTrusted.body.trusted_senders, ['api.trusted@example.com']);
+
+    const ingestRes = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({
+        to_agent: agent.agent_id,
+        from_email: 'API.Trusted@example.com',
+        subject: 'Trusted via API'
+      });
+
+    assert.equal(ingestRes.status, 200);
+    assert.equal(ingestRes.body.trusted_sender, true);
+    assert.equal(ingestRes.body.review_status, 'approved');
+
+    const stored = await storage.getMessage(ingestRes.body.message_id);
+    assert.equal(stored.status, 'queued');
+    assert.equal(stored.ingress_trust, 'trusted');
+    assert.equal(stored.review_source, 'trusted_sender_allowlist');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('email inbound review: stores optional model_verdict on decision', async () => {
+  const agent = await registerAgent('inbound-email-model-verdict');
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
+
+  try {
+    const ingestRes = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({
+        to_agent: agent.agent_id,
+        from_email: 'unknown-model@example.com',
+        subject: 'Needs review'
+      });
+
+    assert.equal(ingestRes.status, 200);
+    const messageId = ingestRes.body.message_id;
+
+    const verdict = {
+      risk_score: 0.12,
+      reason: 'No phishing indicators found'
+    };
+    const approveRes = await request(app)
+      .post(`/api/webhooks/email/inbound/${encodeURIComponent(messageId)}/review`)
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({ decision: 'approve', model_verdict: verdict });
+
+    assert.equal(approveRes.status, 200);
+    assert.equal(approveRes.body.review_status, 'approved');
+
+    const stored = await storage.getMessage(messageId);
+    assert.deepEqual(stored.model_verdict, verdict);
+    assert.equal(stored.review_source, 'manual_review');
   } finally {
     if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
     else process.env.INBOUND_EMAIL_SECRET = origSecret;

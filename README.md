@@ -893,7 +893,22 @@ The address format is controlled by the `INBOUND_EMAIL_DOMAIN` env var.
 
 1. A catch-all rule on `agentdispatch.io` in Cloudflare Email Routing forwards all mail to the `admp-email-ingestion` Cloudflare Worker.
 2. The Worker parses the recipient address, reads the MIME body with `postal-mime`, and POSTs to `POST /api/webhooks/email/inbound`.
-3. The ADMP server delivers the message to the agent's inbox.
+3. The ADMP server applies inbound policy:
+   - **Trusted sender** (`agent.metadata.email_trusted_senders`) -> auto-approved to `queued`
+   - **Unknown sender** -> quarantined as `review_pending` until approved
+4. Approved messages are delivered via normal inbox pull.
+
+**Trusted sender management endpoints (agent-authenticated):**
+
+- `GET /api/agents/:agentId/email/trusted-senders`
+- `POST /api/agents/:agentId/email/trusted-senders` with `{ "email": "trusted@example.com" }`
+- `DELETE /api/agents/:agentId/email/trusted-senders` with `{ "email": "trusted@example.com" }`
+
+**Review endpoint (internal policy/model worker):**
+
+- `POST /api/webhooks/email/inbound/:messageId/review`
+- Requires `X-Webhook-Secret: <INBOUND_EMAIL_SECRET>`
+- Body: `{ "decision": "approve" | "reject", "reason"?: "...", "model_verdict"?: {...} }`
 
 See [`workers/email-ingestion/README.md`](workers/email-ingestion/README.md) for Cloudflare setup.
 
