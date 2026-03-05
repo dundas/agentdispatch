@@ -395,7 +395,9 @@ export class OutboxService {
 
     const signingString = `${svixId}.${svixTimestamp}.${rawBody}`;
 
-    const hmac = crypto.createHmac('sha256', secret);
+    // Svix secrets are delivered as "whsec_<base64-bytes>" — decode to raw key bytes
+    const keyBytes = Buffer.from(secret.replace(/^whsec_/, ''), 'base64');
+    const hmac = crypto.createHmac('sha256', keyBytes);
     hmac.update(signingString);
     const computed = hmac.digest('base64');
 

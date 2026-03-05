@@ -105,7 +105,17 @@ router.post('/webhooks/email/inbound', async (req, res) => {
 
     // --- Agent resolution ---
     let agent = await storage.getAgent(to_agent);
+
+    // Namespace guard: if a namespace was parsed from the address, the agent must
+    // belong to that tenant. Without this, a tenanted agent (acme.alice@) would
+    // also be reachable at the un-namespaced address (alice@).
     if (to_namespace && agent && agent.tenant_id !== to_namespace) {
+      agent = null;
+    }
+
+    // Inverse guard: if no namespace was in the address, reject agents that
+    // require one — their canonical address includes the namespace prefix.
+    if (!to_namespace && agent && agent.tenant_id) {
       agent = null;
     }
 

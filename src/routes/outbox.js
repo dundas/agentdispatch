@@ -261,10 +261,8 @@ webhookRouter.post(
 
       res.status(200).json({ status: 'ok' });
     } catch (error) {
-      res.status(500).json({
-        error: 'WEBHOOK_FAILED',
-        message: error.message
-      });
+      console.error('Resend webhook processing error:', error);
+      res.status(500).json({ error: 'WEBHOOK_FAILED' });
     }
   }
 );

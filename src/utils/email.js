@@ -2,8 +2,6 @@
  * Email address helpers for ADMP agent email addresses
  */
 
-const DEFAULT_DOMAIN = process.env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io';
-
 /**
  * Compute the inbound email address for an agent.
  *
@@ -13,10 +11,11 @@ const DEFAULT_DOMAIN = process.env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io';
  *
  * @param {string} agentId
  * @param {string|null|undefined} tenantId
- * @param {string} [domain]
+ * @param {string} [domain] - defaults to INBOUND_EMAIL_DOMAIN env var, read at call time
  * @returns {string}
  */
-export function agentEmailAddress(agentId, tenantId, domain = DEFAULT_DOMAIN) {
+export function agentEmailAddress(agentId, tenantId, domain) {
+  const d = domain ?? (process.env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io');
   const local = tenantId ? `${tenantId}.${agentId}` : agentId;
-  return `${local}@${domain}`;
+  return `${local}@${d}`;
 }

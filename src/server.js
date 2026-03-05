@@ -50,7 +50,7 @@ if (!process.env.RESEND_API_KEY) {
   );
 }
 
-if (!process.env.RESEND_WEBHOOK_SECRET) {
+if (process.env.RESEND_API_KEY && !process.env.RESEND_WEBHOOK_SECRET) {
   console.warn(
     'WARNING: RESEND_WEBHOOK_SECRET is not set. ' +
     'Resend webhooks will accept unauthenticated requests. ' +

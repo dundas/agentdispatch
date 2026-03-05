@@ -5114,6 +5114,48 @@ test('email inbound: unknown agent returns 404', async () => {
   }
 });
 
+test('email inbound: namespace mismatch returns 404', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
+
+  // Register a tenanted agent via the correct endpoint
+  const agentId = `ns-guard-agent-${Date.now()}`;
+  const regRes = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: agentId, tenant_id: 'acme' });
+  assert.equal(regRes.status, 201);
+
+  try {
+    // Email addressed to wrong namespace — should 404
+    const res = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({
+        to_agent: agentId,
+        to_namespace: 'other-tenant',
+        from_email: 'sender@example.com',
+        subject: 'namespace mismatch test'
+      });
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error, 'AGENT_NOT_FOUND');
+
+    // Email with no namespace to a tenanted agent — should also 404
+    const res2 = await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'test-inbound-secret')
+      .send({
+        to_agent: agentId,
+        from_email: 'sender@example.com',
+        subject: 'no namespace test'
+      });
+    assert.equal(res2.status, 404);
+    assert.equal(res2.body.error, 'AGENT_NOT_FOUND');
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
 test('email inbound: missing to_agent returns 400', async () => {
   const origSecret = process.env.INBOUND_EMAIL_SECRET;
   process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
