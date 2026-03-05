@@ -104,9 +104,8 @@ app.use(cors({
   origin: process.env.CORS_ORIGIN || '*'
 }));
 
-// Mount webhook router BEFORE express.json() so express.raw() can capture the
-// raw body needed for Svix signature verification on Resend webhook deliveries.
-// Non-matching routes pass through to the global JSON parser below.
+// Mount outbox webhook router BEFORE express.json() so express.raw() can
+// capture the raw body needed for Svix HMAC verification.
 app.use('/api', outboxWebhookRouter);
 
 app.use(express.json({ limit: '10mb' }));
@@ -127,6 +126,12 @@ app.use('/api', async (req, res, next) => {
   // subsequently authenticate. The token is burned on the first non-exempt
   // API call (e.g. heartbeat, inbox pull).
   if (req.method === 'POST' && req.path.replace(/\/$/, '') === '/agents/register') return next();
+
+  // Email inbound webhook paths are authenticated by their own X-Webhook-Secret
+  // mechanism, not by an ADMP API key.  Exempt them from the API key guard so
+  // the Cloudflare Worker (and test tooling) can reach the endpoints without
+  // carrying a per-agent key.
+  if (req.path.startsWith('/webhooks/email/')) return next();
 
   // If request has a valid HTTP Signature, bypass API key requirement.
   // This lets agents authenticate with their registered Ed25519 keypair
@@ -213,7 +218,7 @@ app.use('/api/round-tables', roundTableRoutes);
 app.use('/api/agents', outboxRoutes);
 app.use('/api/keys', keysRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
-app.use('/api', emailInboundRouter);  // For /api/webhooks/email/inbound
+app.use('/api', emailInboundRouter);  // /api/webhooks/email/inbound (exempt from API key auth above)
 
 // 404 handler
 app.use((req, res) => {
