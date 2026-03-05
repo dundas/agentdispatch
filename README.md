@@ -944,6 +944,8 @@ Custom domain setup: `POST /api/agents/:agentId/outbox/domain` then `POST /api/a
 - [ ] Configure `RESEND_API_KEY` and `RESEND_WEBHOOK_SECRET` for outbound email
 - [ ] Configure `INBOUND_EMAIL_SECRET` and deploy Cloudflare Worker for inbound email
 
+See [docs/EMAIL-SETUP.md](docs/EMAIL-SETUP.md) for a step-by-step email setup checklist (env vars, Worker deploy, DNS, validation).
+
 ## Architecture
 
 ```

@@ -11,7 +11,5 @@ INBOUND_EMAIL_DOMAIN = "agentdispatch.io"
 #   INBOUND_EMAIL_SECRET - Shared secret that authenticates Worker → ADMP requests
 #                          Must match INBOUND_EMAIL_SECRET on the ADMP server
 
-[[email]]
-# Catch-all Cloudflare Email Routing trigger.
-# Configure a catch-all rule on agentdispatch.io in the Cloudflare dashboard:
-#   Action: Send to Worker → admp-email-ingestion
+# Email Routing trigger is configured in the Cloudflare dashboard:
+#   agentdispatch.io → Email → Email Routing → Catch-all → Send to Worker → admp-email-ingestion
