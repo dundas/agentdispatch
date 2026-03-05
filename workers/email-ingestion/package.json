@@ -1,0 +1,17 @@
+{
+  "name": "@agentdispatch/email-ingestion",
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "postal-mime": "^2.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

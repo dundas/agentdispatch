@@ -19,6 +19,7 @@ import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
 import roundTableRoutes from './routes/round-tables.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
+import emailInboundRouter from './routes/email-inbound.js';
 import discoveryRoutes from './routes/discovery.js';
 import keysRoutes from './routes/keys.js';
 import { requireApiKey, verifyHttpSignatureOnly } from './middleware/auth.js';
@@ -41,12 +42,27 @@ const ROUND_TABLE_PURGE_TTL_MS = (() => {
   return Number.isNaN(parsed) ? 7 * 24 * 60 * 60 * 1000 : parsed;
 })();
 
-// Warn about insecure outbox webhook configuration
-if (process.env.MAILGUN_API_KEY && !process.env.MAILGUN_WEBHOOK_SIGNING_KEY) {
+// Warn about missing Resend configuration
+if (!process.env.RESEND_API_KEY) {
   console.warn(
-    'WARNING: MAILGUN_API_KEY is set but MAILGUN_WEBHOOK_SIGNING_KEY is not. ' +
-    'Mailgun webhooks will accept unauthenticated requests. ' +
-    'Set MAILGUN_WEBHOOK_SIGNING_KEY for production use.'
+    'WARNING: RESEND_API_KEY is not set. ' +
+    'Outbound email via the outbox will not function until RESEND_API_KEY is configured.'
+  );
+}
+
+if (process.env.RESEND_API_KEY && !process.env.RESEND_WEBHOOK_SECRET) {
+  console.warn(
+    'WARNING: RESEND_WEBHOOK_SECRET is not set. ' +
+    'Resend webhooks will accept unauthenticated requests. ' +
+    'Set RESEND_WEBHOOK_SECRET for production use.'
+  );
+}
+
+if (!process.env.INBOUND_EMAIL_SECRET) {
+  console.warn(
+    'WARNING: INBOUND_EMAIL_SECRET is not set. ' +
+    'The /webhooks/email/inbound endpoint will reject all requests with 500. ' +
+    'Set INBOUND_EMAIL_SECRET to enable inbound email delivery.'
   );
 }
 
@@ -87,6 +103,12 @@ app.use(helmet());
 app.use(cors({
   origin: process.env.CORS_ORIGIN || '*'
 }));
+
+// Mount webhook router BEFORE express.json() so express.raw() can capture the
+// raw body needed for Svix signature verification on Resend webhook deliveries.
+// Non-matching routes pass through to the global JSON parser below.
+app.use('/api', outboxWebhookRouter);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(pinoHttp({ logger }));
 
@@ -191,7 +213,7 @@ app.use('/api/round-tables', roundTableRoutes);
 app.use('/api/agents', outboxRoutes);
 app.use('/api/keys', keysRoutes);
 app.use('/api', inboxRoutes);  // For /api/messages/:id/status
-app.use('/api', outboxWebhookRouter);  // For /api/webhooks/mailgun
+app.use('/api', emailInboundRouter);  // For /api/webhooks/email/inbound
 
 // 404 handler
 app.use((req, res) => {

@@ -549,9 +549,9 @@ export class MemoryStorage {
     return updated;
   }
 
-  async findOutboxMessageByMailgunId(mailgunId) {
+  async findOutboxMessageByProviderId(providerId) {
     for (const msg of this.outboxMessages.values()) {
-      if (msg.mailgun_id === mailgunId) {
+      if (msg.provider_message_id === providerId) {
         return msg;
       }
     }

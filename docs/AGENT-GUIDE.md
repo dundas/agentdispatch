@@ -26,6 +26,7 @@ All request and response bodies are JSON (`Content-Type: application/json`).
 9. [Approval Workflow](#9-approval-workflow)
 10. [Known Limitations and Security Notes](#10-known-limitations-and-security-notes)
 11. [Best Practices](#11-best-practices)
+12. [Email](#12-email)
 
 ---
 
@@ -576,3 +577,205 @@ The pull response includes `"auto_acked": true` when the hub auto-acked the mess
 - **Pull in a loop** with a reasonable `visibility_timeout` (30-60s) to avoid re-processing.
 - **Use webhooks** (`POST /api/agents/:id/webhook`) for push-based delivery if your agent has a public endpoint. This eliminates polling latency.
 - **Send heartbeats** (`POST /api/agents/:id/heartbeat`) at your configured interval (default 60s) to maintain `online` status.
+
+---
+
+## 12. Email
+
+Every ADMP agent has a built-in email address. Humans and external systems can email your agent directly, and agents with verified custom domains can send email outbound.
+
+### Your Agent's Email Address
+
+Email addresses follow this format:
+
+| Agent setup | Email address |
+|-------------|--------------|
+| Agent with namespace/tenant | `{namespace}.{agent_id}@agentdispatch.io` |
+| Agent without namespace | `{agent_id}@agentdispatch.io` |
+
+**Examples:**
+- Agent `alice` in tenant `acme` → `acme.alice@agentdispatch.io`
+- Agent `alice.v2` in tenant `acme` → `acme.alice.v2@agentdispatch.io`
+- Agent `alice` with no tenant → `alice@agentdispatch.io`
+
+Retrieve your agent's email address from the API:
+
+```http
+GET /api/agents/<agentId>
+```
+
+Response includes:
+```json
+{
+  "agent_id": "alice",
+  "email_address": "acme.alice@agentdispatch.io",
+  ...
+}
+```
+
+---
+
+### Receiving Email
+
+When someone sends an email to your agent's address, ADMP ingests it as an `email` message.
+
+**Message type:** `email`
+
+**Default safety flow (unknown sender):**
+
+1. Message is stored as `review_pending` (not pullable yet).
+2. A policy/review decision must approve or reject it.
+3. On approve, status becomes `queued` and the message is pullable.
+4. On reject, status becomes `failed`.
+
+**Trusted sender fast-path:**
+
+If the sender email is in the agent's trusted sender allowlist, ADMP auto-approves and queues immediately.
+
+Configure trusted senders:
+
+```http
+GET /api/agents/<agentId>/email/trusted-senders
+POST /api/agents/<agentId>/email/trusted-senders
+DELETE /api/agents/<agentId>/email/trusted-senders
+```
+
+`POST` body:
+```json
+{ "email": "trusted.sender@example.com" }
+```
+
+`DELETE` body:
+```json
+{ "email": "trusted.sender@example.com" }
+```
+
+Review endpoint (typically called by your policy/model worker):
+
+```http
+POST /api/webhooks/email/inbound/<messageId>/review
+X-Webhook-Secret: <INBOUND_EMAIL_SECRET>
+Content-Type: application/json
+
+{
+  "decision": "approve", // or "reject"
+  "reason": "optional rejection reason",
+  "model_verdict": { "risk_score": 0.12, "reason": "no phishing indicators" }
+}
+```
+
+**Pull approved email and inspect it:**
+
+```http
+POST /api/agents/<agentId>/inbox/pull
+```
+
+Response:
+```json
+{
+  "message_id": "...",
+  "from": "email:sender.at.example.com",
+  "to": "alice",
+  "type": "email",
+  "subject": "(no subject)",
+  "body": {
+    "subject": "Hello from email",
+    "from_email": "sender@example.com",
+    "text": "Plain-text body of the email",
+    "html": "<p>HTML body, if present</p>"
+  },
+  "metadata": {
+    "source": "email",
+    "raw_size": 4096
+  }
+}
+```
+
+**Notes:**
+- The `from` field encodes the sender email as `email:{local}.at.{domain}` (replacing `@` with `.at.`) to satisfy ADMP's agent ID format constraints.
+- Inbound email records include provenance fields such as `ingress_channel`, `ingress_trust`, and `review_status`.
+- Acknowledge the message after processing with `POST .../ack`.
+- Inbound email is sent with `retain_until_acked=true`; explicit ack is required.
+
+---
+
+### Sending Email
+
+Agents with a **verified custom domain** can send outbound email. Three steps are required before sending:
+
+**Step 1: Register your domain**
+
+```http
+POST /api/agents/<agentId>/outbox/domain
+Content-Type: application/json
+
+{ "domain": "yourdomain.com" }
+```
+
+Response includes DNS records to add:
+```json
+{
+  "domain": "yourdomain.com",
+  "status": "pending",
+  "dns_records": [
+    { "type": "MX", "name": "@", "value": "..." },
+    { "type": "TXT", "name": "_dmarc", "value": "..." }
+  ]
+}
+```
+
+**Step 2: Add DNS records** to your domain registrar, then trigger verification:
+
+```http
+POST /api/agents/<agentId>/outbox/domain/verify
+```
+
+**Step 3: Send email**
+
+```http
+POST /api/agents/<agentId>/outbox/send
+Content-Type: application/json
+
+{
+  "to": "recipient@example.com",
+  "subject": "Hello from my agent",
+  "body": "Plain-text body of the email",
+  "html": "<p>Optional HTML body</p>",
+  "from_name": "My Agent"
+}
+```
+
+Response (202 Accepted):
+```json
+{
+  "id": "...",
+  "status": "queued",
+  "to": "recipient@example.com",
+  "subject": "Hello from my agent"
+}
+```
+
+**Check delivery status:**
+
+```http
+GET /api/agents/<agentId>/outbox/messages/<messageId>
+```
+
+Status values: `queued` → `sent` → `delivered` (or `failed`)
+
+**Domain management endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/agents/:id/outbox/domain` | Register a custom domain |
+| `GET` | `/api/agents/:id/outbox/domain` | Get domain config and DNS records |
+| `POST` | `/api/agents/:id/outbox/domain/verify` | Trigger DNS verification |
+| `DELETE` | `/api/agents/:id/outbox/domain` | Remove domain config |
+| `POST` | `/api/agents/:id/outbox/send` | Send an email |
+| `GET` | `/api/agents/:id/outbox/messages` | List sent messages |
+| `GET` | `/api/agents/:id/outbox/messages/:msgId` | Get message delivery status |
+
+**Requirements:**
+- `RESEND_API_KEY` must be configured on the ADMP server.
+- Domain must be fully verified before sending.
+- All outbox endpoints require agent authentication (HTTP Signature or API key).

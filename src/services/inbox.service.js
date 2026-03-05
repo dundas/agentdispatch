@@ -16,7 +16,7 @@ const SAFE_CHARS = /^[a-zA-Z0-9._:-]+$/;
 // Message types that always require explicit ack, regardless of the recipient's
 // auto_ack_on_pull preference. Losing a work order or fix request silently is
 // always worse than a queue backlog.
-const RETAIN_TYPES = new Set(['work_order', 'fix_request']);
+const RETAIN_TYPES = new Set(['work_order', 'fix_request', 'work_order_result']);
 // VALID_AGENT_URI is NOT a subset of SAFE_CHARS — agent://foo contains slashes which
 // are not in the allowlist. It is the only branch that accepts legacy agent:// URIs.
 // Do not delete it assuming it is a no-op; doing so would silently break backward
@@ -75,8 +75,10 @@ export class InboxService {
 
     const toAgentId = recipient.agent_id;
 
-    // Check trust list using both agent_id and DID of sender
-    if (recipient.trusted_agents && recipient.trusted_agents.length > 0) {
+    // Check trust list using both agent_id and DID of sender.
+    // System-ingested channels (for example external email) can bypass this check
+    // and be routed into quarantine for later review.
+    if (!options.bypass_trust_check && recipient.trusted_agents && recipient.trusted_agents.length > 0) {
       const senderAllowed = recipient.trusted_agents.includes(envelope.from);
       if (!senderAllowed) {
         throw new Error(`Sender ${envelope.from} is not trusted by recipient ${toAgentId}`);
@@ -113,7 +115,7 @@ export class InboxService {
         // cryptographic proof of identity, not just a claimed from value.
         throw new Error(`Sender ${envelope.from} is registered but missing signature — signature required for trust-list delivery`);
       }
-    } else if (recipient.trusted_agents?.includes(envelope.from)) {
+    } else if (!options.bypass_trust_check && recipient.trusted_agents?.includes(envelope.from)) {
       // Sender is named in the trust list but is not registered — cannot verify identity.
       // Reject rather than silently skip: an unregistered sender cannot prove they are
       // the trusted agent they claim to be (deregistered agent impersonation attack).
@@ -139,20 +141,41 @@ export class InboxService {
     // always retain — losing them silently is worse than a queue backlog.
     const retainUntilAcked = options.retain_until_acked || RETAIN_TYPES.has(envelope.type) || false;
 
+    const initialStatus = options.initial_status || 'queued';
+    const allowedInitialStatuses = new Set(['queued', 'review_pending']);
+    if (!allowedInitialStatuses.has(initialStatus)) {
+      throw new Error(`Invalid initial status: ${initialStatus}`);
+    }
+
+    const systemMetadata = options.system_metadata && typeof options.system_metadata === 'object'
+      ? options.system_metadata
+      : {};
+    const forbiddenSystemKeys = new Set([
+      'id', 'to_agent_id', 'from_agent_id', 'envelope', 'status', 'ttl_sec',
+      'lease_until', 'attempts', 'ephemeral', 'ephemeral_ttl_sec', 'expires_at',
+      'retain_until_acked', 'created_at', 'updated_at'
+    ]);
+    for (const key of Object.keys(systemMetadata)) {
+      if (forbiddenSystemKeys.has(key)) {
+        throw new Error(`system_metadata key is not allowed: ${key}`);
+      }
+    }
+
     // Create message record
     const message = {
       id: envelope.id || uuid(),
       to_agent_id: toAgentId,
       from_agent_id: envelope.from,
       envelope,
-      status: 'queued',
+      status: initialStatus,
       ttl_sec: envelope.ttl_sec || parseInt(process.env.MESSAGE_TTL_SEC) || 86400,
       lease_until: null,
       attempts: 0,
       ephemeral,
       ephemeral_ttl_sec: ephemeralTTLSec,
       expires_at: ephemeralTTLSec ? Date.now() + (ephemeralTTLSec * 1000) : null,
-      retain_until_acked: retainUntilAcked
+      retain_until_acked: retainUntilAcked,
+      ...systemMetadata
     };
 
     const created = await storage.createMessage(message);

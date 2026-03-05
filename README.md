@@ -874,6 +874,64 @@ See `.env.example` for all configuration options.
 | `API_KEY_REQUIRED` | false | Enable API key auth |
 | `MASTER_API_KEY` | - | Master API key (if auth enabled) |
 
+### Email
+
+ADMP supports bidirectional email for agents using [Resend](https://resend.com) for outbound and Cloudflare Email Routing for inbound.
+
+#### Agent Email Addresses
+
+Every agent gets a platform email address:
+
+```
+{agentId}@agentdispatch.io
+acme.alice@agentdispatch.io  ← agent "alice" in tenant/namespace "acme"
+```
+
+The address format is controlled by the `INBOUND_EMAIL_DOMAIN` env var.
+
+#### Inbound Email
+
+1. A catch-all rule on `agentdispatch.io` in Cloudflare Email Routing forwards all mail to the `admp-email-ingestion` Cloudflare Worker.
+2. The Worker parses the recipient address, reads the MIME body with `postal-mime`, and POSTs to `POST /api/webhooks/email/inbound`.
+3. The ADMP server applies inbound policy:
+   - **Trusted sender** (`agent.metadata.email_trusted_senders`) -> auto-approved to `queued`
+   - **Unknown sender** -> quarantined as `review_pending` until approved
+4. Approved messages are delivered via normal inbox pull.
+
+**Trusted sender management endpoints (agent-authenticated):**
+
+- `GET /api/agents/:agentId/email/trusted-senders`
+- `POST /api/agents/:agentId/email/trusted-senders` with `{ "email": "trusted@example.com" }`
+- `DELETE /api/agents/:agentId/email/trusted-senders` with `{ "email": "trusted@example.com" }`
+
+**Review endpoint (internal policy/model worker):**
+
+- `POST /api/webhooks/email/inbound/:messageId/review`
+- Requires `X-Webhook-Secret: <INBOUND_EMAIL_SECRET>`
+- Body: `{ "decision": "approve" | "reject", "reason"?: "...", "model_verdict"?: {...} }`
+
+See [`workers/email-ingestion/README.md`](workers/email-ingestion/README.md) for Cloudflare setup.
+
+**Required env vars:**
+
+| Variable | Description |
+|----------|-------------|
+| `INBOUND_EMAIL_SECRET` | Shared secret between Cloudflare Worker and ADMP server |
+| `INBOUND_EMAIL_DOMAIN` | Domain for agent email addresses (default: `agentdispatch.io`) |
+
+#### Outbound Email
+
+Agents can send email via `POST /api/agents/:agentId/outbox/send` after configuring a custom domain.
+
+**Required env vars:**
+
+| Variable | Description |
+|----------|-------------|
+| `RESEND_API_KEY` | Resend API key for outbound delivery |
+| `RESEND_WEBHOOK_SECRET` | Validates Resend delivery status webhooks (Svix-signed) |
+
+Custom domain setup: `POST /api/agents/:agentId/outbox/domain` then `POST /api/agents/:agentId/outbox/domain/verify`.
+
 ### Production Checklist
 
 - [ ] Set `NODE_ENV=production`
@@ -883,6 +941,10 @@ See `.env.example` for all configuration options.
 - [ ] Set up log aggregation (JSON logs via `pino`)
 - [ ] Configure resource limits (memory, CPU)
 - [ ] Set up HTTPS reverse proxy (nginx, Caddy)
+- [ ] Configure `RESEND_API_KEY` and `RESEND_WEBHOOK_SECRET` for outbound email
+- [ ] Configure `INBOUND_EMAIL_SECRET` and deploy Cloudflare Worker for inbound email
+
+See [docs/EMAIL-SETUP.md](docs/EMAIL-SETUP.md) for a step-by-step email setup checklist (env vars, Worker deploy, DNS, validation).
 
 ## Architecture
 

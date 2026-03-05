@@ -1,0 +1,15 @@
+name = "admp-email-ingestion"
+main = "index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Inbound email domain — used to strip the @domain suffix when parsing recipient
+INBOUND_EMAIL_DOMAIN = "agentdispatch.io"
+
+# Required secrets (set via `wrangler secret put`, never hardcode here):
+#   ADMP_URL            - Base URL of the ADMP server, e.g. https://api.agentdispatch.io
+#   INBOUND_EMAIL_SECRET - Shared secret that authenticates Worker → ADMP requests
+#                          Must match INBOUND_EMAIL_SECRET on the ADMP server
+
+# Email Routing trigger is configured in the Cloudflare dashboard:
+#   agentdispatch.io → Email → Email Routing → Catch-all → Send to Worker → admp-email-ingestion
