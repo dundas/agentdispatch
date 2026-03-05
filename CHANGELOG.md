@@ -8,6 +8,9 @@ with enhanced attribution to track which AI model/CLI made each change.
 ## [Unreleased]
 
 ### Added
+- Inbound and outbound email via Resend + Cloudflare (Claude Code, 2026-03-05)
+  - **Context:** PR #24
+  - **Details:** Full Mailgun → Resend migration for outbound email. New inbound pipeline: Cloudflare Email Routing → Worker (`admp-email-ingestion`) → ADMP inbox. Inbound messages enter `review_pending` quarantine by default; trusted senders auto-queued. Review endpoint (`POST /api/webhooks/email/inbound/:messageId/review`) with approve/reject/model_verdict. Trusted senders API (`GET/POST/DELETE /api/agents/:agentId/email/trusted-senders`). Namespace guard prevents tenanted agents from receiving bare-address email. Cloudflare DNS client (`src/lib/cloudflare.js`) and `scripts/provision-resend-dns.js` for one-command DNS setup. `docs/EMAIL-SETUP.md` operator checklist.
 - Ephemeral messages with TTL and auto-purge for secure credential distribution (Claude Code, 2026-02-17)
   - **Context:** PR #8
   - **Details:** Messages can auto-delete on ack (`ephemeral: true`) and/or expire after a sender-configured TTL (`ttl: "24h"`). Delivery log preserves metadata (from, subject, purge_reason) after body is purged. Returns 410 Gone for purged messages. Pull-time filtering prevents serving expired secrets. Includes `parseTTL` utility, background purge sweep, and both memory/mech storage backend support.
