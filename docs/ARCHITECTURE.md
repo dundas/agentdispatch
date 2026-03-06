@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-26T00:00:00Z -->
+<!-- Generated: 2026-03-06T00:00:00Z -->
 <!-- Source: Automated architecture analysis of agentdispatch codebase -->
 
 # Agent Dispatch (ADMP) Architecture
@@ -33,10 +33,11 @@ ADMP is a messaging protocol for autonomous AI agents built on two principles:
 1. Every agent has an **inbox**.
 2. Every message follows the same **contract** regardless of transport.
 
-The server provides HTTP REST endpoints for agent registration, message send/pull/ack/nack/reply, group messaging with fanout, outbound email via Mailgun, DID-based identity discovery, and a full approval workflow for agent onboarding. Authentication uses Ed25519 HTTP Signatures with fallback to API key authentication. Federation is supported through DID:web resolution with SSRF-hardened outbound fetches.
+The server provides HTTP REST endpoints for agent registration, message send/pull/ack/nack/reply, group messaging with fanout, inbound email via Cloudflare Worker, outbound email via Resend, DID-based identity discovery, and a full approval workflow for agent onboarding. Authentication uses Ed25519 HTTP Signatures with fallback to API key authentication. Federation is supported through DID:web resolution with SSRF-hardened outbound fetches.
 
 ---
 
+<!-- === GENERATED: Component Diagram === -->
 ## Component Diagram
 
 ```mermaid
@@ -48,30 +49,35 @@ graph TB
         A4[External DID:web Agent<br/>Federated]
     end
 
+    subgraph "Cloudflare"
+        CF_WORKER[Cloudflare Email Worker<br/>Receives SMTP, parses email,<br/>POSTs to ADMP webhook]
+    end
+
     subgraph "Fly.io — agentdispatch"
         subgraph "Express Server :8080"
             MW_HELMET[helmet<br/>Security Headers]
             MW_CORS[cors<br/>Origin Control]
             MW_JSON[express.json<br/>10MB limit]
             MW_PINO[pino-http<br/>Structured Logging]
-            MW_AUTH[Global Auth Gate<br/>HTTP Signature → API Key]
+            MW_AUTH[Global Auth Gate<br/>HTTP Signature → API Key<br/>(email webhooks exempt)]
 
             MW_HELMET --> MW_CORS --> MW_JSON --> MW_PINO --> MW_AUTH
 
             subgraph "Route Handlers"
-                R_AGENTS["/api/agents/*"<br/>Registration, Heartbeat,<br/>Trust, Webhook, Identity,<br/>Key Rotation, Tenants,<br/>Approval Workflow]
-                R_INBOX["/api/agents/:id/inbox/*"<br/>Send, Pull, Ack,<br/>Nack, Reply, Stats"]
+                R_AGENTS["/api/agents/*"<br/>Registration, Heartbeat,<br/>Trust, Webhook, Identity,<br/>Key Rotation, Tenants,<br/>Approval Workflow,<br/>Email Trusted Senders]
+                R_INBOX["/api/agents/:id/inbox/*"<br/>Send, Pull, Ack,<br/>Nack, Reply, Stats]
                 R_GROUPS["/api/groups/*"<br/>CRUD, Membership,<br/>Join/Leave, Fanout]
                 R_OUTBOX["/api/agents/:id/outbox/*"<br/>Domain Config, Send,<br/>Message Queries]
                 R_DISCOVERY["/.well-known/agent-keys.json"<br/>"/api/agents/:id/did.json"<br/>Key Directory & DID Docs]
-                R_WEBHOOKS["/api/webhooks/mailgun"<br/>Delivery Status"]
+                R_EMAIL_IN["/api/webhooks/email/inbound"<br/>Inbound email from CF Worker<br/>"/api/webhooks/email/inbound/:id/review"<br/>Review quarantined email<br/>"/api/health/inbound"<br/>Pipeline health]
+                R_WEBHOOKS["/api/webhooks/resend"<br/>Resend Delivery Status]
             end
 
             subgraph "Services"
                 S_AGENT[AgentService<br/>Registration, Heartbeat,<br/>Trust, Key Rotation,<br/>Approval Workflow]
                 S_INBOX[InboxService<br/>Send, Pull, Ack,<br/>Nack, Reply, TTL,<br/>Ephemeral Messages]
                 S_GROUP[GroupService<br/>CRUD, Membership,<br/>RBAC, Message Fanout]
-                S_OUTBOX[OutboxService<br/>Mailgun Send,<br/>Domain Management,<br/>Webhook Handling]
+                S_OUTBOX[OutboxService<br/>Resend Send,<br/>Domain Management,<br/>Webhook Handling]
                 S_IDENTITY[IdentityService<br/>GitHub Linking,<br/>Cryptographic Tier]
                 S_WEBHOOK[WebhookService<br/>Push Delivery,<br/>Retry with Backoff]
             end
@@ -91,15 +97,20 @@ graph TB
 
     subgraph "External Services"
         MECH[("Mech Storage API<br/>MECH_BASE_URL")]
-        MAILGUN[("Mailgun API<br/>api.mailgun.net/v3")]
+        RESEND[("Resend API<br/>api.resend.com")]
         DID_WEB[("DID:web Servers<br/>External Domains")]
+        EMAIL_SENDERS[("Internet Email Senders")]
     end
 
     A1 & A2 -->|HTTPS + Ed25519 Sig| MW_HELMET
     A3 -->|HTTPS + Master API Key| MW_HELMET
     A4 -->|HTTPS + DID:web Sig| MW_HELMET
 
-    MW_AUTH --> R_AGENTS & R_INBOX & R_GROUPS & R_OUTBOX & R_DISCOVERY & R_WEBHOOKS
+    EMAIL_SENDERS -->|SMTP| CF_WORKER
+    CF_WORKER -->|HTTPS + X-Webhook-Secret| R_EMAIL_IN
+
+    MW_AUTH --> R_AGENTS & R_INBOX & R_GROUPS & R_OUTBOX & R_DISCOVERY
+    R_EMAIL_IN -.->|exempt from API key| MW_AUTH
 
     R_AGENTS --> S_AGENT
     R_AGENTS --> S_IDENTITY
@@ -107,6 +118,7 @@ graph TB
     R_GROUPS --> S_GROUP
     R_OUTBOX --> S_OUTBOX
     R_WEBHOOKS --> S_OUTBOX
+    R_EMAIL_IN --> S_INBOX
 
     S_INBOX --> S_WEBHOOK
     S_GROUP --> S_INBOX
@@ -116,13 +128,15 @@ graph TB
     STORE_IDX -->|STORAGE_BACKEND=mech| STORE_MECH
     STORE_MECH -->|HTTPS| MECH
 
-    S_OUTBOX -->|HTTPS + Basic Auth| MAILGUN
+    S_OUTBOX -->|HTTPS + Bearer| RESEND
+    RESEND -.->|Svix Webhook POST| R_WEBHOOKS
     MW_AUTH -->|DID:web Resolution| DID_WEB
 
     BG_CLEANUP --> S_INBOX
     BG_CLEANUP --> STORE_IDX
     BG_HEARTBEAT --> S_AGENT
 ```
+<!-- === END GENERATED: Component Diagram === -->
 
 ---
 
@@ -270,15 +284,17 @@ graph LR
 
     subgraph "External APIs"
         MECH_API["Mech Storage API<br/>https://MECH_BASE_URL<br/>(Persistent Data)"]
-        MAILGUN_API["Mailgun API<br/>https://api.mailgun.net/v3<br/>(Outbound Email)"]
+        RESEND_API["Resend API<br/>https://api.resend.com<br/>(Outbound Email)"]
         DID_SERVERS["DID:web Servers<br/>(Federation)"]
+        CF_EMAIL["Cloudflare Email Worker<br/>(Inbound Email)"]
     end
 
     AGENTS -->|HTTPS| LB
     NODE -->|HTTPS| MECH_API
-    NODE -->|HTTPS + Basic Auth| MAILGUN_API
+    NODE -->|HTTPS + Bearer| RESEND_API
     NODE -->|HTTPS (5s timeout)| DID_SERVERS
-    MAILGUN_API -.->|Webhook POST| LB
+    RESEND_API -.->|Svix Webhook POST| LB
+    CF_EMAIL -.->|HTTPS + X-Webhook-Secret| LB
 
     style NODE fill:#2d6,stroke:#333
     style LB fill:#48f,stroke:#333
@@ -322,12 +338,16 @@ src/
 
   routes/
     agents.js                 # /api/agents/* — registration, heartbeat, trust, webhook,
-                              #   identity verification, key rotation, tenants, approval
+                              #   identity verification, key rotation, tenants, approval,
+                              #   email trusted-senders
     inbox.js                  # /api/agents/:id/inbox/* — send, pull, ack, nack, reply,
                               #   stats, reclaim; /api/messages/:id/status
     groups.js                 # /api/groups/* — CRUD, membership, join/leave, messages
     outbox.js                 # /api/agents/:id/outbox/* — domain config, send email,
-                              #   message queries; /api/webhooks/mailgun
+                              #   message queries; /api/webhooks/resend
+    email-inbound.js          # /api/webhooks/email/inbound — inbound email from CF Worker
+                              # /api/webhooks/email/inbound/:id/review — review quarantine
+                              # /api/health/inbound — pipeline staleness check
     discovery.js              # /.well-known/agent-keys.json — JWKS key directory
                               # /api/agents/:id/did.json — W3C DID document
     keys.js                   # /api/keys/* — issued key management
@@ -350,6 +370,7 @@ src/
     crypto.js                 # Ed25519 keypair generation (tweetnacl), HKDF-SHA256,
                               #   message signing/verification, HTTP request signing,
                               #   DID generation, timestamp validation, TTL parsing
+    email.js                  # agentEmailAddress() — compute {agentId}@{INBOUND_EMAIL_DOMAIN}
 
 cli/
   src/
@@ -410,13 +431,13 @@ Multi-agent group messaging with role-based access control.
 
 ### OutboxService
 
-Outbound email delivery through Mailgun.
+Outbound email delivery through Resend.
 
 | Capability | Description |
 |---|---|
 | **Domain management** | Add, verify DNS, remove custom sending domains |
-| **Send** | Constructs RFC 5322 From header, sends via Mailgun HTTP API |
-| **Webhooks** | Receives Mailgun delivery/bounce events; HMAC-SHA256 signature verification |
+| **Send** | Constructs RFC 5322 From header, sends via Resend HTTP API |
+| **Webhooks** | Receives Resend delivery/bounce events via Svix; HMAC signature verification |
 | **Status tracking** | `queued` → `sent` → `delivered` or `failed` |
 
 ### IdentityService
@@ -545,7 +566,7 @@ When a `Signature` header contains `keyId="did:web:..."`:
 | **Ed25519 signatures** | tweetnacl `nacl.sign.detached` | HTTP Signature auth, message envelope signatures |
 | **HKDF-SHA256** | Node.js `crypto.createHmac` | Deterministic key derivation for seed-based agents |
 | **SHA-256** | Node.js `crypto.createHash` | API key hashing, DID fingerprints, group join key hashing |
-| **HMAC-SHA256** | Node.js `crypto.createHmac` | Webhook payload signing, Mailgun webhook verification |
+| **HMAC-SHA256** | Node.js `crypto.createHmac` | Webhook payload signing, Resend/Svix webhook verification |
 
 ### Defenses
 
@@ -650,7 +671,7 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check (`{status, timestamp, version}`) |
+| `GET` | `/health` | Health check (`{status, timestamp, version, inbound_email: {last_inbound_at, total_accepted, total_errors}}`) |
 | `GET` | `/docs` | Swagger UI (OpenAPI documentation) |
 | `GET` | `/openapi.json` | Raw OpenAPI specification |
 | `POST` | `/api/agents/register` | Agent self-registration |
@@ -661,12 +682,15 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/agents/:agentId` | Get agent details |
+| `GET` | `/api/agents/:agentId` | Get agent details (includes `email_address`) |
 | `DELETE` | `/api/agents/:agentId` | Deregister agent |
 | `POST` | `/api/agents/:agentId/heartbeat` | Update heartbeat |
 | `GET` | `/api/agents/:agentId/trusted` | List trusted agents |
 | `POST` | `/api/agents/:agentId/trusted` | Add trusted agent |
 | `DELETE` | `/api/agents/:agentId/trusted/:trustedAgentId` | Remove trusted agent |
+| `GET` | `/api/agents/:agentId/email/trusted-senders` | List email trusted senders |
+| `POST` | `/api/agents/:agentId/email/trusted-senders` | Add email trusted sender |
+| `DELETE` | `/api/agents/:agentId/email/trusted-senders` | Remove email trusted sender |
 | `POST` | `/api/agents/:agentId/webhook` | Configure webhook |
 | `GET` | `/api/agents/:agentId/webhook` | Get webhook config |
 | `DELETE` | `/api/agents/:agentId/webhook` | Remove webhook |
@@ -734,15 +758,24 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `GET` | `/api/agents/tenants/:tenantId/agents` | List tenant agents |
 | `DELETE` | `/api/agents/tenants/:tenantId` | Delete tenant |
 
+### Inbound Email Endpoints (X-Webhook-Secret — exempt from API key auth)
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/webhooks/email/inbound` | Receive parsed email from Cloudflare Worker |
+| `POST` | `/api/webhooks/email/inbound/:messageId/review` | Approve or reject a quarantined email |
+| `GET` | `/api/health/inbound` | Email pipeline health (200 ok / 503 stale) |
+
 ### Webhook and Stats Endpoints
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| `POST` | `/api/webhooks/mailgun` | Mailgun sig | Mailgun delivery status callback |
+| `POST` | `/api/webhooks/resend` | Svix sig | Resend delivery status callback |
 | `GET` | `/api/stats` | API Key | System-wide statistics |
 
 ---
 
+<!-- === GENERATED: Environment Variables === -->
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -762,9 +795,12 @@ Two `setInterval` timers started after the server begins listening. Both run eve
 | `MECH_BASE_URL` | *(deployment-specific)* | Mech Storage API base URL (when `STORAGE_BACKEND=mech`) |
 | `REGISTRATION_POLICY` | `approval_required` (fly.toml) / `open` (code default) | Agent registration policy: `open` or `approval_required`. Tenant-level policy overrides. |
 | `DID_WEB_ALLOWED_DOMAINS` | *(none)* | Comma-separated domain allowlist for DID:web federation. When set, only listed domains can federate. |
-| `MAILGUN_API_KEY` | *(none)* | Mailgun API key for outbound email. **Secret.** |
-| `MAILGUN_API_URL` | `https://api.mailgun.net/v3` | Mailgun API base URL (override for EU regions or testing) |
-| `MAILGUN_WEBHOOK_SIGNING_KEY` | *(none)* | Mailgun webhook signing key for verifying delivery callbacks. **Secret.** When unset, webhooks accept unauthenticated requests (warning logged). |
+| `RESEND_API_KEY` | *(none)* | Resend API key for outbound email. **Secret.** Warning logged on startup if missing. |
+| `RESEND_WEBHOOK_SECRET` | *(none)* | Resend/Svix webhook signing secret for verifying delivery callbacks. **Secret.** When unset, webhooks accept unauthenticated requests (warning logged). |
+| `INBOUND_EMAIL_SECRET` | *(none)* | Shared secret for Cloudflare Worker → ADMP inbound webhook (`X-Webhook-Secret` header). **Secret.** Without this, the inbound endpoint rejects all requests with 500. |
+| `INBOUND_EMAIL_DOMAIN` | `agentdispatch.io` | Domain suffix for agent email addresses. Used by `agentEmailAddress()` to compute `{agentId}@{domain}`. |
+| `INBOUND_STALE_THRESHOLD_MS` | `7200000` (2h) | Staleness threshold for `GET /api/health/inbound`. Returns 503 if no inbound email accepted within this window. |
+<!-- === END GENERATED: Environment Variables === -->
 
 ---
 

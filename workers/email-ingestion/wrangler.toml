@@ -1,6 +1,8 @@
 name = "admp-email-ingestion"
 main = "index.ts"
 compatibility_date = "2025-01-01"
+# account_id is intentionally omitted — set CLOUDFLARE_ACCOUNT_ID in your CI/CD environment
+# or run `wrangler login` locally. Never commit account IDs to source control.
 
 [vars]
 # Inbound email domain — used to strip the @domain suffix when parsing recipient

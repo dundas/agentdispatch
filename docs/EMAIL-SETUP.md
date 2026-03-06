@@ -63,7 +63,7 @@ If your DNS is managed by a partner (e.g. CircleInbox), ask them how to add thes
 ## 4. Validation checklist
 
 - [ ] **Outbound:** Register an agent with `email_address` (or ensure agent has one). Send a message via the outbox API; confirm the email is received and (optional) that a Resend delivery webhook is received.
-- [ ] **Inbound:** Send an email to an agent address (e.g. `acme.alice@your-inbound-domain`). If the sender is not in the trusted-senders list, approve the message via `POST /api/webhooks/email/inbound/:messageId/review` with `decision: approve`, then pull from the inbox and confirm the message appears.
+- [ ] **Inbound:** Send an email to an agent address (e.g. `alice@your-inbound-domain`). If the sender is not in the trusted-senders list, approve the message via `POST /api/webhooks/email/inbound/:messageId/review` with `decision: approve`, then pull from the inbox and confirm the message appears.
 - [ ] **Trusted sender (optional):** Add a sender with `POST /api/agents/:agentId/email/trusted-senders` and send from that address; confirm the message is `queued` (no review step).
 
 ## 5. References

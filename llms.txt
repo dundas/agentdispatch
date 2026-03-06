@@ -1,5 +1,5 @@
 # Agent Dispatch (ADMP)
-<!-- Generated: 2026-03-01T00:00:00Z -->
+<!-- Generated: 2026-03-06T00:00:00Z -->
 
 > Universal inbox for autonomous AI agents — at-least-once delivery, Ed25519 auth, DID federation
 
@@ -20,6 +20,16 @@ admp ack <message-id>                                                  # 4. Ack
 
 `agent_id` must be 255 chars or fewer AND match `^[a-zA-Z0-9._:-]+$` AND must not start with `did:` or `agent:` (reserved prefixes). Length checked first (O(1) guard), then regex, then reserved-prefix check. Auto-generated IDs are `agent-<uuid>`.
 `agent://` URIs are rejected at registration but still accepted in envelope `from`/`to` for backward compatibility; unrecognised `agent://` senders skip signature verification and are treated as untrusted.
+
+## Agent Email Address
+
+Every agent has a globally unique email address:
+```
+{agentId}@agentdispatch.io
+```
+Tenant/org grouping is internal — never encoded in the address. Domain defaults to `agentdispatch.io` (override via `INBOUND_EMAIL_DOMAIN`).
+
+Examples: `alice@agentdispatch.io`, `my-support-bot@agentdispatch.io`
 
 ## Message Envelope
 
@@ -53,11 +63,12 @@ Or: `Authorization: Bearer <key>`
 
 DID:web Federation: External agents auth via did:web DIDs. Auto-creates shadow agent.
 
+<!-- === GENERATED: Server API Endpoints === -->
 ## Server API Endpoints
 
 ### Public (no auth)
 ```
-GET  /health                                       Health check
+GET  /health                                       Health check (includes inbound_email stats)
 GET  /docs                                         Swagger UI
 GET  /openapi.json                                 OpenAPI spec
 POST /api/agents/register                          Register agent
@@ -67,7 +78,7 @@ GET  /api/agents/:agentId/did.json                 W3C DID document
 
 ### Agent Management [HTTP Sig]
 ```
-GET    /api/agents/:agentId                        Get agent details
+GET    /api/agents/:agentId                        Get agent details (includes email_address)
 DELETE /api/agents/:agentId                        Deregister agent
 POST   /api/agents/:agentId/heartbeat              Heartbeat (body: {metadata?})
 POST   /api/agents/:agentId/rotate-key             Rotate key (body: {seed, tenant_id})
@@ -80,6 +91,9 @@ DELETE /api/agents/:agentId/webhook                Remove webhook
 POST   /api/agents/:agentId/verify/github          Link GitHub (body: {github_handle})
 POST   /api/agents/:agentId/verify/cryptographic   Confirm crypto tier
 GET    /api/agents/:agentId/identity               Verification status
+GET    /api/agents/:agentId/email/trusted-senders  List email trusted senders
+POST   /api/agents/:agentId/email/trusted-senders  Add trusted sender (body: {email})
+DELETE /api/agents/:agentId/email/trusted-senders  Remove trusted sender (body: {email})
 ```
 
 ### Inbox
@@ -132,9 +146,28 @@ POST   /api/agents/:agentId/outbox/domain          Set domain (body: {domain})
 GET    /api/agents/:agentId/outbox/domain          Get domain config
 POST   /api/agents/:agentId/outbox/domain/verify   Verify DNS
 DELETE /api/agents/:agentId/outbox/domain          Remove domain
-POST   /api/agents/:agentId/outbox/send            Send email (body: {to, subject, body?, html?})
+POST   /api/agents/:agentId/outbox/send            Send email via Resend (body: {to, subject, body?, html?})
 GET    /api/agents/:agentId/outbox/messages        List sent (?status=&limit=)
 GET    /api/agents/:agentId/outbox/messages/:msgId Get status
+```
+
+### Inbound Email Webhooks [X-Webhook-Secret — exempt from API key auth]
+```
+POST /api/webhooks/email/inbound                   Receive parsed email from Cloudflare Worker
+  Header: X-Webhook-Secret: <INBOUND_EMAIL_SECRET>
+  Body: {to_agent, from_email, subject, text?, html?, raw_size?}
+  Response: {ok, message_id, review_status, trusted_sender}
+POST /api/webhooks/email/inbound/:messageId/review Approve/reject quarantined email
+  Header: X-Webhook-Secret: <INBOUND_EMAIL_SECRET>
+  Body: {decision: "approve"|"reject", reason?, model_verdict?}
+  Response: {ok, message_id, decision, status, review_status}
+GET  /api/health/inbound                           Email pipeline health check
+  200 ok / 503 stale (if no email within INBOUND_STALE_THRESHOLD_MS, default 2h)
+```
+
+### Resend Webhook [No agent auth — Resend calls this]
+```
+POST /api/webhooks/resend                          Resend delivery status callback (Svix signed)
 ```
 
 ### Tenants [API Key] / Admin [Master Key]
@@ -148,6 +181,7 @@ POST   /api/agents/:agentId/approve                Approve agent [Master]
 POST   /api/agents/:agentId/reject                 Reject (body: {reason?}) [Master]
 GET    /api/stats                                  System statistics [API Key]
 ```
+<!-- === END GENERATED: Server API Endpoints === -->
 
 ## CLI Commands
 
@@ -165,7 +199,7 @@ admp groups create --name <n> --access <type>      Create group
 admp groups list | join <id> [--key] | leave <id>  Group membership
 admp groups send <id> --subject <s> --body <json>  Broadcast to group
 admp outbox domain set --domain <d> | verify | delete  Domain config
-admp outbox send --to <email> --subject <s>        Send email
+admp outbox send --to <email> --subject <s>        Send email via Resend
 admp outbox messages [--status] [--limit]          List sent emails
 ```
 
@@ -200,6 +234,7 @@ File: `~/.admp/config.json` (mode 0600)
 | `ADMP_TIMEOUT` | request timeout ms | `30000` |
 | `ADMP_CONFIG_PATH` | config file path | `~/.admp/config.json` |
 
+<!-- === GENERATED: Server env vars === -->
 ### Server env vars
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -207,10 +242,16 @@ File: `~/.admp/config.json` (mode 0600)
 | `MASTER_API_KEY` | _(none)_ | Admin endpoints (secret) |
 | `STORAGE_BACKEND` | `memory` | `memory` or `mech` |
 | `REGISTRATION_POLICY` | `open` | `open` or `approval_required` |
-| `MAILGUN_API_KEY` | _(none)_ | Outbound email (secret) |
+| `RESEND_API_KEY` | _(none)_ | Outbound email via Resend (secret) |
+| `RESEND_WEBHOOK_SECRET` | _(none)_ | Resend webhook Svix signing secret |
+| `INBOUND_EMAIL_SECRET` | _(none)_ | Shared secret for Cloudflare Worker → ADMP inbound webhook |
+| `INBOUND_EMAIL_DOMAIN` | `agentdispatch.io` | Domain for agent email addresses |
+| `INBOUND_STALE_THRESHOLD_MS` | `7200000` (2h) | Staleness threshold for GET /api/health/inbound |
 | `DID_WEB_ALLOWED_DOMAINS` | _(none)_ | Comma-separated DID:web allowlist |
 | `ROUND_TABLE_PURGE_TTL_MS` | `604800000` (7d) | Purge TTL for resolved/expired Round Tables |
+<!-- === END GENERATED: Server env vars === -->
 
+<!-- === GENERATED: Error Codes === -->
 ## Error Codes
 
 Format: `{"error": "CODE", "message": "description"}`
@@ -232,6 +273,13 @@ Format: `{"error": "CODE", "message": "description"}`
 | `SEND_FAILED` | 400 | Yes | Message or email send failed |
 | `NOT_FOUND` | 404 | No | Endpoint does not exist |
 | `INTERNAL_ERROR` | 500 | Yes | Server error (backoff: 1s, 2s, 4s, 8s, 16s, 30s cap) |
+| `INBOUND_FAILED` | 500 | Yes | Email inbound webhook internal error |
+| `TO_AGENT_REQUIRED` | 400 | No | `to_agent` field missing in inbound email payload |
+| `FROM_EMAIL_REQUIRED` | 400 | No | `from_email` field missing in inbound email payload |
+| `INVALID_DECISION` | 400 | No | Review decision must be "approve" or "reject" |
+| `NOT_EMAIL_INGRESS` | 400 | No | Message is not an inbound email (wrong ingress_channel) |
+| `INVALID_REVIEW_STATE` | 409 | No | Message is not pending review |
+| `REVIEW_FAILED` | 500 | Yes | Email review webhook internal error |
 | `INVALID_TOPIC / TOPIC_TOO_LONG` | 400 | No | topic missing, empty, or > 500 chars |
 | `INVALID_GOAL / GOAL_TOO_LONG` | 400 | No | goal missing, empty, or > 500 chars |
 | `INVALID_PARTICIPANTS / INVALID_PARTICIPANT_ID` | 400 | No | participants missing, empty, or IDs invalid |
@@ -242,5 +290,6 @@ Format: `{"error": "CODE", "message": "description"}`
 | `SPEAK_FAILED` | 403/404/409 | No | Not a participant / not found / thread full (200 entries) |
 | `RESOLVE_FAILED` | 400/403/404/409 | No | Bad request / not facilitator / not found / already closed |
 | `LIST_ROUND_TABLES_FAILED` | 500 | Yes | Transient storage error listing sessions |
+<!-- === END GENERATED: Error Codes === -->
 
 Full error reference: docs/ERROR-CODES.md

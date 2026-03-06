@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-01T00:00:00Z -->
+<!-- Generated: 2026-03-06T00:00:00Z -->
 <!-- Source: Extracted from Agent Dispatch (ADMP) source files -->
 
 # ADMP Error Codes Reference
@@ -15,6 +15,7 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 - [Group Errors](#group-errors)
 - [Round Table Errors](#round-table-errors)
 - [Outbox (Email) Errors](#outbox-email-errors)
+- [Inbound Email Errors](#inbound-email-errors)
 - [Tenant Errors](#tenant-errors)
 - [System Errors](#system-errors)
 - [Identity Verification Errors](#identity-verification-errors)
@@ -69,6 +70,11 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `REJECT_FAILED` | 400 | No | Agent rejection failed | Check agent exists |
 | `INVALID_REASON` | 400 | No | Rejection reason not a string | Must be a string |
 | `REASON_TOO_LONG` | 400 | No | Rejection reason too long | Max 500 characters |
+| `LIST_TRUSTED_SENDERS_FAILED` | 400 | No | Failed to list email trusted senders | Check agent exists |
+| `ADD_TRUSTED_SENDER_FAILED` | 400 | No | Failed to add email trusted sender | Check agent exists and email is valid |
+| `REMOVE_TRUSTED_SENDER_FAILED` | 400 | No | Failed to remove email trusted sender | Check agent exists |
+| `EMAIL_REQUIRED` | 400 | No | No email address provided to trusted-senders endpoint | Include `email` in request body |
+| `INVALID_EMAIL` | 400 | No | Email address format is invalid | Use valid email: `user@domain.com` |
 
 ---
 
@@ -158,6 +164,26 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 
 ---
 
+<!-- === GENERATED: Inbound Email Errors === -->
+## Inbound Email Errors
+
+These codes are returned by the inbound email webhook endpoints (`POST /api/webhooks/email/inbound` and `POST /api/webhooks/email/inbound/:messageId/review`). These endpoints are authenticated via `X-Webhook-Secret` header, not by an ADMP API key.
+
+| Code | HTTP | Retryable | Description | Hint |
+|------|------|-----------|-------------|------|
+| `SERVER_MISCONFIGURATION` | 500 | No | `INBOUND_EMAIL_SECRET` is not configured | Set `INBOUND_EMAIL_SECRET` environment variable on the server |
+| `UNAUTHORIZED` | 401 | No | `X-Webhook-Secret` header missing or value does not match | Ensure the Cloudflare Worker and ADMP server use the same `INBOUND_EMAIL_SECRET` |
+| `TO_AGENT_REQUIRED` | 400 | No | `to_agent` field missing in request body | Include `to_agent` in the payload sent by the Cloudflare Worker |
+| `FROM_EMAIL_REQUIRED` | 400 | No | `from_email` field missing in request body | Include `from_email` in the payload sent by the Cloudflare Worker |
+| `INBOUND_FAILED` | 500 | Yes | Internal error processing the inbound email | Transient — retry with backoff. Check server logs for details |
+| `INVALID_DECISION` | 400 | No | Review `decision` must be `"approve"` or `"reject"` | Use exactly `"approve"` or `"reject"` |
+| `NOT_EMAIL_INGRESS` | 400 | No | The target message was not delivered via inbound email | Only use the review endpoint for messages with `ingress_channel: "email"` |
+| `INVALID_REVIEW_STATE` | 409 | No | Message is not in `review_pending` state | Message has already been reviewed or is not pending review |
+| `REVIEW_FAILED` | 500 | Yes | Internal error processing the review decision | Transient — retry with backoff |
+
+---
+<!-- === END GENERATED: Inbound Email Errors === -->
+
 ## Tenant Errors
 
 | Code | HTTP | Retryable | Description | Hint |
@@ -183,8 +209,8 @@ Complete reference of all error codes returned by the Agent Dispatch Messaging P
 | `STATS_FAILED` | 500 | Yes | System stats retrieval failed | Transient error. **Note:** This code also appears in [Message and Inbox Errors](#message-and-inbox-errors) for `GET /api/agents/:agentId/inbox/stats` |
 | `DISCOVERY_FAILED` | 500 | Yes | Public key directory failed | Transient error |
 | `DID_DOCUMENT_FAILED` | 500 | Yes | DID document generation failed | Transient error |
-| `WEBHOOK_FAILED` | 500 | Yes | Mailgun webhook processing failed | Transient error |
-| `SIGNATURE_REQUIRED` | 400 | No | Mailgun webhook missing signature | Signing key is configured but no signature in request |
+| `WEBHOOK_FAILED` | 500 | Yes | Resend webhook processing failed | Transient error |
+| `SIGNATURE_REQUIRED` | 400 | No | Resend webhook missing Svix signature headers | `RESEND_WEBHOOK_SECRET` is configured but no Svix headers in request |
 
 ---
 

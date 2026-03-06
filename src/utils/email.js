@@ -5,17 +5,15 @@
 /**
  * Compute the inbound email address for an agent.
  *
- * Format:
- *   With tenant:    {tenantId}.{agentId}@{domain}
- *   Without tenant: {agentId}@{domain}
+ * Format: {agentId}@{domain}
+ *
+ * Tenant/org grouping is an internal concept and is never encoded in the address.
  *
  * @param {string} agentId
- * @param {string|null|undefined} tenantId
- * @param {string} [domain] - defaults to INBOUND_EMAIL_DOMAIN env var, read at call time
+ * @param {string} [domain] - defaults to INBOUND_EMAIL_DOMAIN env var
  * @returns {string}
  */
-export function agentEmailAddress(agentId, tenantId, domain) {
+export function agentEmailAddress(agentId, domain) {
   const d = domain ?? (process.env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io');
-  const local = tenantId ? `${tenantId}.${agentId}` : agentId;
-  return `${local}@${d}`;
+  return `${agentId}@${d}`;
 }

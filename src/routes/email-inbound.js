@@ -11,6 +11,17 @@ import { storage } from '../storage/index.js';
 
 const logger = pino();
 
+// In-process counters for the inbound email health endpoint.
+// These reset on process restart — suitable for operational visibility,
+// not for billing/audit. Persistent metrics belong in the storage layer.
+export const inboundStats = {
+  last_inbound_at: null,       // ISO timestamp of last successfully accepted inbound
+  last_error_at: null,         // ISO timestamp of last 5xx internal error (catch block only)
+  total_accepted: 0,           // accepted since last restart
+  total_rejected: 0,           // 404 (unknown agent) since last restart
+  total_errors: 0,             // 5xx errors since last restart
+};
+
 const router = Router();
 
 function getInboundSecret() {
@@ -70,8 +81,7 @@ function isTrustedEmailSender(agent, fromEmail) {
  * Receive a parsed inbound email from the Cloudflare Worker.
  *
  * Expected body:
- *   to_agent      {string}           - Agent ID parsed from email local part
- *   to_namespace  {string|undefined} - Tenant/namespace parsed from email local part
+ *   to_agent      {string}           - Agent ID parsed from email local part (= full local part)
  *   from_email    {string}           - Sender email address
  *   subject       {string}           - Email subject
  *   text          {string|undefined} - Plain-text body
@@ -87,7 +97,7 @@ router.post('/webhooks/email/inbound', async (req, res) => {
     }
 
     // --- Input validation ---
-    const { to_agent, to_namespace, from_email, subject, text, html, raw_size } = req.body;
+    const { to_agent, from_email, subject, text, html, raw_size } = req.body;
 
     if (!to_agent) {
       return res.status(400).json({
@@ -104,22 +114,10 @@ router.post('/webhooks/email/inbound', async (req, res) => {
     }
 
     // --- Agent resolution ---
-    let agent = await storage.getAgent(to_agent);
-
-    // Namespace guard: if a namespace was parsed from the address, the agent must
-    // belong to that tenant. Without this, a tenanted agent (acme.alice@) would
-    // also be reachable at the un-namespaced address (alice@).
-    if (to_namespace && agent && agent.tenant_id !== to_namespace) {
-      agent = null;
-    }
-
-    // Inverse guard: if no namespace was in the address, reject agents that
-    // require one — their canonical address includes the namespace prefix.
-    if (!to_namespace && agent && agent.tenant_id) {
-      agent = null;
-    }
+    const agent = await storage.getAgent(to_agent);
 
     if (!agent) {
+      inboundStats.total_rejected++;
       return res.status(404).json({
         error: 'AGENT_NOT_FOUND',
         message: `Agent ${to_agent} not found`
@@ -158,6 +156,9 @@ router.post('/webhooks/email/inbound', async (req, res) => {
       }
     });
 
+    inboundStats.last_inbound_at = new Date().toISOString();
+    inboundStats.total_accepted++;
+
     res.status(200).json({
       ok: true,
       message_id: created.id,
@@ -165,6 +166,8 @@ router.post('/webhooks/email/inbound', async (req, res) => {
       trusted_sender: trustedSender
     });
   } catch (error) {
+    inboundStats.last_error_at = new Date().toISOString();
+    inboundStats.total_errors++;
     logger.error({ error: error.message }, 'Email inbound webhook failed');
     res.status(500).json({
       error: 'INBOUND_FAILED',
@@ -240,6 +243,40 @@ router.post('/webhooks/email/inbound/:messageId/review', async (req, res) => {
       message: 'Internal server error'
     });
   }
+});
+
+/**
+ * GET /api/health/inbound
+ * Liveness check for the email inbound path.
+ * Returns 200 with stats while the process is up.
+ * Returns 503 if no email has been accepted within INBOUND_STALE_THRESHOLD_MS
+ * (default 2 hours) — useful for uptime monitors that want a non-200 on staleness.
+ */
+router.get('/health/inbound', (req, res) => {
+  const defaultThresholdMs = 2 * 60 * 60 * 1000;
+  const parsedThresholdMs = Number.parseInt(process.env.INBOUND_STALE_THRESHOLD_MS ?? '', 10);
+  const thresholdMs = Number.isFinite(parsedThresholdMs) && parsedThresholdMs > 0
+    ? parsedThresholdMs
+    : defaultThresholdMs;
+  const now = Date.now();
+  const lastAt = inboundStats.last_inbound_at ? new Date(inboundStats.last_inbound_at).getTime() : null;
+  const ageMs = lastAt ? now - lastAt : null;
+  const stale = ageMs === null || ageMs > thresholdMs;
+
+  const body = {
+    status: stale ? 'stale' : 'ok',
+    last_inbound_at: inboundStats.last_inbound_at,
+    age_seconds: ageMs !== null ? Math.floor(ageMs / 1000) : null,
+    stale_threshold_seconds: Math.floor(thresholdMs / 1000),
+    since_restart: {
+      accepted: inboundStats.total_accepted,
+      rejected: inboundStats.total_rejected,
+      errors: inboundStats.total_errors,
+    },
+    last_error_at: inboundStats.last_error_at,
+  };
+
+  res.status(stale ? 503 : 200).json(body);
 });
 
 export default router;

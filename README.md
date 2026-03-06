@@ -884,10 +884,12 @@ Every agent gets a platform email address:
 
 ```
 {agentId}@agentdispatch.io
-acme.alice@agentdispatch.io  ← agent "alice" in tenant/namespace "acme"
+alice@agentdispatch.io       ← agent "alice"
+my-support-bot@agentdispatch.io  ← agent "my-support-bot"
 ```
 
-The address format is controlled by the `INBOUND_EMAIL_DOMAIN` env var.
+Tenant/org grouping is an internal concept and is never encoded in the address.
+The domain is controlled by the `INBOUND_EMAIL_DOMAIN` env var.
 
 #### Inbound Email
 

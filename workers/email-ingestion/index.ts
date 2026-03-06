@@ -6,40 +6,56 @@ interface Env {
   ADMP_URL: string;
   INBOUND_EMAIL_SECRET: string;
   INBOUND_EMAIL_DOMAIN: string;
-}
-
-interface ParsedRecipient {
-  namespace: string | null;
-  agentId: string;
+  // Optional: agent ID that receives worker error alerts via the inbound webhook.
+  // If unset, errors are only logged (ephemeral). Set to a registered monitor agent.
+  MONITOR_AGENT_ID?: string;
 }
 
 // ============ ADDRESS PARSER ============
 
 /**
- * Parse an ADMP agent email address into namespace and agentId.
+ * Extract the agent ID from an inbound email address.
  *
- * Format: {namespace}.{agentId}@{domain}  → namespace + agentId
- *         {agentId}@{domain}              → null namespace + agentId
+ * Format: {agentId}@{domain}
  *
- * Edge case: dots in agentId are preserved.
- *   acme.alice       → { namespace: 'acme', agentId: 'alice' }
- *   acme.alice.v2    → { namespace: 'acme', agentId: 'alice.v2' }
- *   alice            → { namespace: null,   agentId: 'alice' }
+ * The local part is the agent ID verbatim. No namespace prefix, no splitting.
+ * Tenant/org grouping is an internal concept and is never encoded in the address.
+ *
+ * Domain validation is handled by Cloudflare Email Routing — only traffic
+ * explicitly routed to this worker reaches here, so we don't re-validate the domain.
  */
-export function parseRecipient(address: string, domain: string): ParsedRecipient {
-  // Strip @domain suffix (case-insensitive)
+export function parseRecipient(address: string): string {
   const atIdx = address.lastIndexOf('@');
-  const local = atIdx !== -1 ? address.slice(0, atIdx) : address;
+  return atIdx !== -1 ? address.slice(0, atIdx) : address;
+}
 
-  // Split on first '.' only
-  const dotIdx = local.indexOf('.');
-  if (dotIdx === -1) {
-    return { namespace: null, agentId: local };
+// ============ ERROR REPORTING ============
+
+/**
+ * Report a worker error to the ADMP monitor agent inbox (if MONITOR_AGENT_ID is set).
+ * This persists errors beyond ephemeral Cloudflare Worker logs.
+ * Call via ctx.waitUntil(reportError(...)) so it doesn't block email delivery.
+ */
+async function reportError(env: Env, errorType: string, detail: string): Promise<void> {
+  if (!env.MONITOR_AGENT_ID) return;
+  try {
+    await fetch(`${env.ADMP_URL}/api/webhooks/email/inbound`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Webhook-Secret': env.INBOUND_EMAIL_SECRET
+      },
+      body: JSON.stringify({
+        to_agent: env.MONITOR_AGENT_ID,
+        from_email: `worker-error@${env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io'}`,
+        subject: `[email-worker] ${errorType}`,
+        text: detail,
+        metadata: { error_type: errorType, worker: 'admp-email-ingestion' }
+      })
+    });
+  } catch {
+    // Swallow — if the monitor agent itself is unreachable, don't recurse
   }
-
-  const namespace = local.slice(0, dotIdx);
-  const agentId = local.slice(dotIdx + 1);
-  return { namespace, agentId };
 }
 
 // ============ EMAIL EVENT HANDLER ============
@@ -50,17 +66,16 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    const domain = env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io';
-    const { namespace, agentId } = parseRecipient(message.to, domain);
+    const agentId = parseRecipient(message.to);
 
     // Read and parse raw MIME
-    const raw = await message.raw.arrayBuffer();
+    // message.raw is a ReadableStream — convert to ArrayBuffer for postal-mime
+    const raw = await new Response(message.raw).arrayBuffer();
     const parsed = await new PostalMime().parse(raw);
 
     // Forward to ADMP inbound webhook
     const payload = {
       to_agent: agentId,
-      to_namespace: namespace ?? undefined,
       from_email: parsed.from?.address ?? message.from,
       subject: parsed.subject ?? '(no subject)',
       text: parsed.text,
@@ -79,8 +94,10 @@ export default {
         body: JSON.stringify(payload)
       });
     } catch (err) {
-      // Network error — don't reject the email, log and let Cloudflare retry
-      console.error('[email-ingestion] Network error forwarding to ADMP:', err);
+      // Network error — don't reject the email, log and report persistently
+      const detail = `Network error forwarding to ADMP for recipient ${message.to}: ${err}`;
+      console.error('[email-ingestion]', detail);
+      ctx.waitUntil(reportError(env, 'NETWORK_ERROR', detail));
       return;
     }
 
@@ -91,11 +108,11 @@ export default {
     }
 
     if (!response.ok) {
-      // Transient error — log but don't reject to avoid bouncing on server issues
+      // Transient server error — log and report persistently, don't bounce
       const body = await response.text().catch(() => '');
-      console.error(
-        `[email-ingestion] ADMP returned ${response.status}: ${body}`
-      );
+      const detail = `ADMP returned ${response.status} for recipient ${message.to}: ${body}`;
+      console.error('[email-ingestion]', detail);
+      ctx.waitUntil(reportError(env, `ADMP_${response.status}`, detail));
     }
   }
 };

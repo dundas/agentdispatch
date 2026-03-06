@@ -19,7 +19,7 @@ import inboxRoutes from './routes/inbox.js';
 import groupRoutes from './routes/groups.js';
 import roundTableRoutes from './routes/round-tables.js';
 import outboxRoutes, { outboxWebhookRouter } from './routes/outbox.js';
-import emailInboundRouter from './routes/email-inbound.js';
+import emailInboundRouter, { inboundStats } from './routes/email-inbound.js';
 import discoveryRoutes from './routes/discovery.js';
 import keysRoutes from './routes/keys.js';
 import { requireApiKey, verifyHttpSignatureOnly } from './middleware/auth.js';
@@ -190,7 +190,12 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.0'
+    version: '1.0.0',
+    inbound_email: {
+      last_inbound_at: inboundStats.last_inbound_at,
+      total_accepted: inboundStats.total_accepted,
+      total_errors: inboundStats.total_errors,
+    }
   });
 });
 
