@@ -16,7 +16,7 @@ const logger = pino();
 // not for billing/audit. Persistent metrics belong in the storage layer.
 export const inboundStats = {
   last_inbound_at: null,       // ISO timestamp of last successfully accepted inbound
-  last_error_at: null,         // ISO timestamp of last error (4xx/5xx from this handler)
+  last_error_at: null,         // ISO timestamp of last 5xx internal error (catch block only)
   total_accepted: 0,           // accepted since last restart
   total_rejected: 0,           // 404 (unknown agent) since last restart
   total_errors: 0,             // 5xx errors since last restart
