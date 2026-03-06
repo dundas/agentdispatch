@@ -4748,21 +4748,21 @@ test('round table: facilitator cannot be listed as a participant', async () => {
 
 // ============ TASK 3.0: EMAIL ADDRESS HELPER + INBOUND WEBHOOK ============
 
-test('agentEmailAddress: with tenant returns {tenant}.{agentId}@{domain}', () => {
-  assert.equal(agentEmailAddress('alice', 'acme', 'agentdispatch.io'), 'acme.alice@agentdispatch.io');
+test('agentEmailAddress: returns {agentId}@{domain}', () => {
+  assert.equal(agentEmailAddress('alice', 'agentdispatch.io'), 'alice@agentdispatch.io');
 });
 
-test('agentEmailAddress: without tenant returns {agentId}@{domain}', () => {
-  assert.equal(agentEmailAddress('alice', null, 'agentdispatch.io'), 'alice@agentdispatch.io');
-  assert.equal(agentEmailAddress('alice', undefined, 'agentdispatch.io'), 'alice@agentdispatch.io');
+test('agentEmailAddress: tenant is not encoded in the address', () => {
+  // Tenant/org is an internal concept only — never part of the email address.
+  assert.equal(agentEmailAddress('alice', 'agentdispatch.io'), 'alice@agentdispatch.io');
+  assert.equal(agentEmailAddress('alice.v2', 'agentdispatch.io'), 'alice.v2@agentdispatch.io');
 });
 
 test('agentEmailAddress: domain defaults to INBOUND_EMAIL_DOMAIN env var', () => {
   const orig = process.env.INBOUND_EMAIL_DOMAIN;
   process.env.INBOUND_EMAIL_DOMAIN = 'mail.example.com';
-  // Note: module-level default captured at import time; test the explicit domain arg
-  const addr = agentEmailAddress('bob', 'corp', 'mail.example.com');
-  assert.equal(addr, 'corp.bob@mail.example.com');
+  const addr = agentEmailAddress('bob', 'mail.example.com');
+  assert.equal(addr, 'bob@mail.example.com');
   if (orig === undefined) delete process.env.INBOUND_EMAIL_DOMAIN;
   else process.env.INBOUND_EMAIL_DOMAIN = orig;
 });
@@ -5114,11 +5114,12 @@ test('email inbound: unknown agent returns 404', async () => {
   }
 });
 
-test('email inbound: namespace mismatch returns 404', async () => {
+test('email inbound: tenant-scoped agent receives email at agentId@domain (no namespace prefix)', async () => {
   const origSecret = process.env.INBOUND_EMAIL_SECRET;
   process.env.INBOUND_EMAIL_SECRET = 'test-inbound-secret';
 
-  // Register a tenanted agent via the correct endpoint
+  // Tenant is an internal concept only — it is never part of the email address.
+  // Agents registered with tenant_id are reachable at {agentId}@domain directly.
   const agentId = `ns-guard-agent-${Date.now()}`;
   const regRes = await request(app)
     .post('/api/agents/register')
@@ -5126,30 +5127,16 @@ test('email inbound: namespace mismatch returns 404', async () => {
   assert.equal(regRes.status, 201);
 
   try {
-    // Email addressed to wrong namespace — should 404
     const res = await request(app)
       .post('/api/webhooks/email/inbound')
       .set('x-webhook-secret', 'test-inbound-secret')
       .send({
         to_agent: agentId,
-        to_namespace: 'other-tenant',
         from_email: 'sender@example.com',
-        subject: 'namespace mismatch test'
+        subject: 'delivery to tenant-scoped agent'
       });
-    assert.equal(res.status, 404);
-    assert.equal(res.body.error, 'AGENT_NOT_FOUND');
-
-    // Email with no namespace to a tenanted agent — should also 404
-    const res2 = await request(app)
-      .post('/api/webhooks/email/inbound')
-      .set('x-webhook-secret', 'test-inbound-secret')
-      .send({
-        to_agent: agentId,
-        from_email: 'sender@example.com',
-        subject: 'no namespace test'
-      });
-    assert.equal(res2.status, 404);
-    assert.equal(res2.body.error, 'AGENT_NOT_FOUND');
+    assert.equal(res.status, 200);
+    assert.ok(res.body.message_id);
   } finally {
     if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
     else process.env.INBOUND_EMAIL_SECRET = origSecret;

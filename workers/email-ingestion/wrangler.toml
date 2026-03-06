@@ -1,6 +1,7 @@
 name = "admp-email-ingestion"
 main = "index.ts"
 compatibility_date = "2025-01-01"
+account_id = "52530a420a8dc50c739929f163c73623"
 
 [vars]
 # Inbound email domain — used to strip the @domain suffix when parsing recipient

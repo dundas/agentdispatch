@@ -1,32 +1,23 @@
 import { test, expect } from 'bun:test';
 import { parseRecipient } from './index';
 
-test('parseRecipient: namespace.agentId@domain', () => {
-  const result = parseRecipient('acme.alice@agentdispatch.io', 'agentdispatch.io');
-  expect(result.namespace).toBe('acme');
-  expect(result.agentId).toBe('alice');
+test('parseRecipient: agentId@domain', () => {
+  expect(parseRecipient('alice@agentdispatch.io', 'agentdispatch.io')).toBe('alice');
 });
 
-test('parseRecipient: namespace.agentId.with.dots@domain (preserves dots in agentId)', () => {
-  const result = parseRecipient('acme.alice.v2@agentdispatch.io', 'agentdispatch.io');
-  expect(result.namespace).toBe('acme');
-  expect(result.agentId).toBe('alice.v2');
+test('parseRecipient: agentId with dots@domain (dots are preserved, no splitting)', () => {
+  expect(parseRecipient('alice.v2@agentdispatch.io', 'agentdispatch.io')).toBe('alice.v2');
 });
 
-test('parseRecipient: agentId@domain (no namespace)', () => {
-  const result = parseRecipient('alice@agentdispatch.io', 'agentdispatch.io');
-  expect(result.namespace).toBeNull();
-  expect(result.agentId).toBe('alice');
+test('parseRecipient: agentId with hyphens', () => {
+  expect(parseRecipient('my-agent-123@agentdispatch.io', 'agentdispatch.io')).toBe('my-agent-123');
 });
 
-test('parseRecipient: address without @ (bare local part)', () => {
-  const result = parseRecipient('acme.bob', 'agentdispatch.io');
-  expect(result.namespace).toBe('acme');
-  expect(result.agentId).toBe('bob');
+test('parseRecipient: bare local part without @', () => {
+  expect(parseRecipient('alice', 'agentdispatch.io')).toBe('alice');
 });
 
-test('parseRecipient: single-segment local part without @', () => {
-  const result = parseRecipient('alice', 'agentdispatch.io');
-  expect(result.namespace).toBeNull();
-  expect(result.agentId).toBe('alice');
+test('parseRecipient: UUID-style agentId', () => {
+  expect(parseRecipient('agent-5ad2f6d4-5c81-4475-b91f-f70070a6d27b@agentdispatch.io', 'agentdispatch.io'))
+    .toBe('agent-5ad2f6d4-5c81-4475-b91f-f70070a6d27b');
 });

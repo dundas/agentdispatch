@@ -127,7 +127,7 @@ router.get('/:agentId', authenticateHttpSignature, async (req, res) => {
 
     res.json({
       ...publicAgent,
-      email_address: agentEmailAddress(agent.agent_id, agent.tenant_id)
+      email_address: agentEmailAddress(agent.agent_id)
     });
   } catch (error) {
     res.status(404).json({
