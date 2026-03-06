@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-26T00:00:00Z -->
+<!-- Generated: 2026-03-06T00:00:00Z -->
 <!-- Source: Agent Dispatch (ADMP) server and CLI source files -->
 
 # ADMP Agent Integration Guide
@@ -616,42 +616,62 @@ Response includes:
 
 ---
 
+<!-- === GENERATED: Receiving Email === -->
 ### Receiving Email
 
-When someone sends an email to your agent's address, ADMP ingests it as an `email` message.
+When someone sends an email to your agent's address, ADMP ingests it as an `email` message via the inbound pipeline.
+
+**Inbound pipeline overview:**
+
+```
+External sender → email → Cloudflare Email Worker
+    → POST /api/webhooks/email/inbound (X-Webhook-Secret: INBOUND_EMAIL_SECRET)
+    → ADMP stores message (review_pending or queued)
+    → Agent pulls via /inbox/pull
+```
 
 **Message type:** `email`
 
 **Default safety flow (unknown sender):**
 
-1. Message is stored as `review_pending` (not pullable yet).
-2. A policy/review decision must approve or reject it.
-3. On approve, status becomes `queued` and the message is pullable.
-4. On reject, status becomes `failed`.
+1. Cloudflare Worker POSTs to `POST /api/webhooks/email/inbound` with parsed email fields.
+2. Message is stored as `review_pending` (not pullable yet).
+3. A policy/review worker calls the review endpoint to approve or reject.
+4. On approve, status becomes `queued` and the message is pullable.
+5. On reject, status becomes `failed`.
 
 **Trusted sender fast-path:**
 
-If the sender email is in the agent's trusted sender allowlist, ADMP auto-approves and queues immediately.
+If the sender email is in the agent's trusted sender allowlist, ADMP auto-approves and queues immediately without a review step.
 
-Configure trusted senders:
+#### Trusted Senders API
+
+All three endpoints require HTTP Signature auth (must be the agent itself).
 
 ```http
 GET /api/agents/<agentId>/email/trusted-senders
+```
+Response: `{ "trusted_senders": ["trusted@example.com"] }`
+
+```http
 POST /api/agents/<agentId>/email/trusted-senders
+Content-Type: application/json
+
+{ "email": "trusted.sender@example.com" }
+```
+Response: `{ "trusted_senders": ["trusted.sender@example.com"] }`
+
+```http
 DELETE /api/agents/<agentId>/email/trusted-senders
-```
+Content-Type: application/json
 
-`POST` body:
-```json
 { "email": "trusted.sender@example.com" }
 ```
+Response: `{ "trusted_senders": [] }`
 
-`DELETE` body:
-```json
-{ "email": "trusted.sender@example.com" }
-```
+#### Review Endpoint
 
-Review endpoint (typically called by your policy/model worker):
+Called by your policy/model worker to release or reject quarantined messages. Authenticated with `X-Webhook-Secret` header (value: `INBOUND_EMAIL_SECRET` env var). This endpoint is exempt from ADMP API key authentication.
 
 ```http
 POST /api/webhooks/email/inbound/<messageId>/review
@@ -659,11 +679,28 @@ X-Webhook-Secret: <INBOUND_EMAIL_SECRET>
 Content-Type: application/json
 
 {
-  "decision": "approve", // or "reject"
-  "reason": "optional rejection reason",
+  "decision": "approve",
+  "reason": "optional rejection reason (only used when decision is reject)",
   "model_verdict": { "risk_score": 0.12, "reason": "no phishing indicators" }
 }
 ```
+
+Response:
+```json
+{
+  "ok": true,
+  "message_id": "uuid",
+  "decision": "approve",
+  "status": "queued",
+  "review_status": "approved"
+}
+```
+
+Error codes from the review endpoint:
+- `INVALID_DECISION` — decision must be `"approve"` or `"reject"`
+- `NOT_EMAIL_INGRESS` — message is not an inbound email
+- `INVALID_REVIEW_STATE` — message is not currently pending review (status or review_status mismatch)
+<!-- === END GENERATED: Receiving Email === -->
 
 **Pull approved email and inspect it:**
 

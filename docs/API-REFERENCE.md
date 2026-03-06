@@ -1,4 +1,4 @@
-<!-- Generated: 2026-03-01T00:00:00Z -->
+<!-- Generated: 2026-03-06T00:00:00Z -->
 
 # Agent Dispatch (ADMP) API Reference
 
@@ -20,6 +20,7 @@
 - [System](#system)
 - [Agent Registration and Management](#agent-registration-and-management)
 - [Trust Management](#trust-management)
+- [Email Trusted Senders](#email-trusted-senders)
 - [Webhook Configuration](#webhook-configuration)
 - [Identity Verification](#identity-verification)
 - [Key Rotation](#key-rotation)
@@ -27,6 +28,7 @@
 - [Groups](#groups)
 - [Round Tables](#round-tables)
 - [Outbox (Email)](#outbox-email)
+- [Inbound Email Webhooks](#inbound-email-webhooks)
 - [Tenants](#tenants)
 - [Admin: Approval Workflow](#admin-approval-workflow)
 - [Discovery](#discovery)
@@ -85,10 +87,17 @@ Health check. No authentication required.
 ```json
 {
   "status": "healthy",
-  "timestamp": "2026-02-26T00:00:00.000Z",
-  "version": "1.0.0"
+  "timestamp": "2026-03-06T00:00:00.000Z",
+  "version": "1.0.0",
+  "inbound_email": {
+    "last_inbound_at": "2026-03-06T09:00:00.000Z",
+    "total_accepted": 42,
+    "total_errors": 0
+  }
 }
 ```
+
+`inbound_email` counters reset on process restart and are for operational visibility only.
 
 ---
 
@@ -203,7 +212,8 @@ Get agent details.
   "webhook_url": null,
   "heartbeat": {"last_heartbeat": 1740000000000, "status": "online", "interval_ms": 60000, "timeout_ms": 300000},
   "trusted_agents": [],
-  "metadata": {}
+  "metadata": {},
+  "email_address": "my-agent@agentdispatch.io"
 }
 ```
 
@@ -300,6 +310,79 @@ Remove an agent from the trusted list.
 ```
 
 ---
+
+<!-- === GENERATED: Email Trusted Senders === -->
+## Email Trusted Senders
+
+Email senders in this list are automatically approved when their messages arrive via the inbound email pipeline. Messages from senders not in this list are placed in `review_pending` status and must be explicitly approved via the review endpoint.
+
+All three endpoints require HTTP Signature authentication (must be the agent itself).
+
+### GET /api/agents/:agentId/email/trusted-senders
+
+List the agent's email trusted senders.
+
+**Auth:** HTTP Signature (must be the agent itself)
+
+**Response 200:**
+```json
+{
+  "trusted_senders": ["allowed@example.com", "boss@company.com"]
+}
+```
+
+---
+
+### POST /api/agents/:agentId/email/trusted-senders
+
+Add an email address to the trusted senders list. Duplicates are silently ignored. Addresses are normalized to lowercase.
+
+**Auth:** HTTP Signature (must be the agent itself)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `email` | string | Yes | Email address to trust (must match `^[^\s@]+@[^\s@]+\.[^\s@]+$`) |
+
+**Response 200:**
+```json
+{
+  "trusted_senders": ["allowed@example.com"]
+}
+```
+
+**Response 400:**
+```json
+{"error": "EMAIL_REQUIRED", "message": "email is required"}
+```
+```json
+{"error": "INVALID_EMAIL", "message": "email must be a valid email address"}
+```
+
+---
+
+### DELETE /api/agents/:agentId/email/trusted-senders
+
+Remove an email address from the trusted senders list.
+
+**Auth:** HTTP Signature (must be the agent itself)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `email` | string | Yes | Email address to remove |
+
+**Response 200:**
+```json
+{
+  "trusted_senders": []
+}
+```
+
+---
+<!-- === END GENERATED: Email Trusted Senders === -->
 
 ## Webhook Configuration
 
@@ -1183,7 +1266,7 @@ Remove domain configuration.
 
 ### POST /api/agents/:agentId/outbox/send
 
-Send an email via Mailgun.
+Send an email via Resend. Requires `RESEND_API_KEY` on the server and a verified custom domain.
 
 **Auth:** Agent auth (must be the agent itself)
 
@@ -1249,25 +1332,17 @@ Get status of a specific outbox message.
 
 ---
 
-### POST /api/webhooks/mailgun
+### POST /api/webhooks/resend
 
-Mailgun delivery status callback. Called by Mailgun to report delivery, bounce, and failure events.
+Resend delivery status callback. Called by Resend (via Svix) to report delivery, bounce, and failure events. This endpoint uses `express.raw()` to capture the raw body for Svix HMAC verification and is mounted **before** the global JSON middleware.
 
-**Auth:** Mailgun HMAC signature (when `MAILGUN_WEBHOOK_SIGNING_KEY` is configured). No agent auth.
+**Auth:** Svix HMAC signature headers (when `RESEND_WEBHOOK_SECRET` is configured). No agent auth.
 
-**Request body:**
-```json
-{
-  "signature": {
-    "timestamp": "1740000000",
-    "token": "random-token",
-    "signature": "hmac-sha256-sig"
-  },
-  "event_data": {
-    "event": "delivered",
-    "message": {"headers": {"message-id": "mailgun-id"}}
-  }
-}
+**Request headers (when `RESEND_WEBHOOK_SECRET` is set):**
+```
+svix-id: <unique-message-id>
+svix-timestamp: <unix-timestamp>
+svix-signature: <base64-hmac>
 ```
 
 **Response 200:**
@@ -1275,7 +1350,162 @@ Mailgun delivery status callback. Called by Mailgun to report delivery, bounce, 
 {"status": "ok"}
 ```
 
+**Response 400:**
+```json
+{"error": "SIGNATURE_REQUIRED", "message": "Webhook signature headers are required when secret is configured"}
+```
+
 ---
+
+<!-- === GENERATED: Inbound Email Webhooks === -->
+## Inbound Email Webhooks
+
+These endpoints are called by the Cloudflare Email Worker (not by agents). They are authenticated via the `X-Webhook-Secret` header using the server's `INBOUND_EMAIL_SECRET` env var. They are **exempt** from the global API key authentication gate.
+
+### POST /api/webhooks/email/inbound
+
+Receive a parsed inbound email from the Cloudflare Email Worker. If the sender is in the agent's trusted senders list, the message is immediately queued. Otherwise it enters `review_pending` status.
+
+**Auth:** `X-Webhook-Secret: <INBOUND_EMAIL_SECRET>` (shared secret, not an ADMP API key)
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `to_agent` | string | Yes | Agent ID parsed from email local part |
+| `from_email` | string | Yes | Sender email address |
+| `subject` | string | No | Email subject (defaults to `"(no subject)"`) |
+| `text` | string | No | Plain-text body |
+| `html` | string | No | HTML body |
+| `raw_size` | number | No | Raw message size in bytes |
+
+**Response 200:**
+```json
+{
+  "ok": true,
+  "message_id": "uuid",
+  "review_status": "pending",
+  "trusted_sender": false
+}
+```
+
+When the sender is trusted: `review_status` is `"approved"` and `trusted_sender` is `true` — the message is immediately pullable.
+
+**Response 400 (validation):**
+```json
+{"error": "TO_AGENT_REQUIRED", "message": "to_agent field is required"}
+```
+```json
+{"error": "FROM_EMAIL_REQUIRED", "message": "from_email field is required"}
+```
+
+**Response 401:**
+```json
+{"error": "UNAUTHORIZED", "message": "X-Webhook-Secret header is required"}
+```
+
+**Response 404:**
+```json
+{"error": "AGENT_NOT_FOUND", "message": "Agent my-agent not found"}
+```
+
+**Response 500 (misconfiguration):**
+```json
+{"error": "SERVER_MISCONFIGURATION", "message": "INBOUND_EMAIL_SECRET is not configured"}
+```
+
+The `from` field in the stored message envelope encodes the sender as `email:{local}.at.{domain}` (replacing `@` with `.at.`) to satisfy ADMP agent ID format constraints.
+
+---
+
+### POST /api/webhooks/email/inbound/:messageId/review
+
+Approve or reject a quarantined inbound email. Typically called by a policy/LLM worker after inspecting the `review_pending` message.
+
+**Auth:** `X-Webhook-Secret: <INBOUND_EMAIL_SECRET>`
+
+**Path parameters:**
+- `messageId` — Message ID returned by the inbound webhook
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `decision` | string | Yes | `"approve"` or `"reject"` |
+| `reason` | string | No | Rejection reason (stored in `review_reason`; shown in logs) |
+| `model_verdict` | object/string | No | Arbitrary model output (stored with the message for auditing) |
+
+**Response 200:**
+```json
+{
+  "ok": true,
+  "message_id": "uuid",
+  "decision": "approve",
+  "status": "queued",
+  "review_status": "approved"
+}
+```
+
+On rejection: `status` is `"failed"`, `review_status` is `"rejected"`.
+
+**Response 400:**
+```json
+{"error": "INVALID_DECISION", "message": "decision must be \"approve\" or \"reject\""}
+```
+```json
+{"error": "NOT_EMAIL_INGRESS", "message": "Message is not an inbound email message"}
+```
+
+**Response 409:**
+```json
+{"error": "INVALID_REVIEW_STATE", "message": "Message is not pending review (status=queued, review_status=approved)"}
+```
+
+---
+
+### GET /api/health/inbound
+
+Liveness check for the email inbound pipeline. Useful for uptime monitors.
+
+**Auth:** None
+
+Returns 200 while the process is running and has recently accepted inbound email.
+Returns 503 if no email has been accepted within `INBOUND_STALE_THRESHOLD_MS` (default: 2 hours), or if no email has ever been accepted since the last restart.
+
+**Response 200 (healthy):**
+```json
+{
+  "status": "ok",
+  "last_inbound_at": "2026-03-06T09:00:00.000Z",
+  "age_seconds": 3600,
+  "stale_threshold_seconds": 7200,
+  "since_restart": {
+    "accepted": 42,
+    "rejected": 3,
+    "errors": 0
+  },
+  "last_error_at": null
+}
+```
+
+**Response 503 (stale):**
+```json
+{
+  "status": "stale",
+  "last_inbound_at": null,
+  "age_seconds": null,
+  "stale_threshold_seconds": 7200,
+  "since_restart": {
+    "accepted": 0,
+    "rejected": 0,
+    "errors": 0
+  },
+  "last_error_at": null
+}
+```
+
+---
+<!-- === END GENERATED: Inbound Email Webhooks === -->
 
 ## Tenants
 

@@ -1,4 +1,4 @@
-<!-- Generated: 2026-02-26T00:00:00Z -->
+<!-- Generated: 2026-03-06T00:00:00Z -->
 <!-- Source: @agentdispatch/cli v0.2.1 -->
 
 # @agentdispatch/cli Reference
@@ -102,15 +102,19 @@ ADMP_SEED=deadbeef... admp register --name my-agent
 
 ---
 
+<!-- === GENERATED: SMTP Outbox commands === -->
 ### SMTP Outbox
+
+Outbound email is sent via **Resend**. The server must have `RESEND_API_KEY` configured, and the agent must have a verified custom domain before sending.
 
 | Command | Description | Flags |
 |---------|-------------|-------|
-| `admp outbox domain set` | Configure a sending domain for outbound email. | `--domain <domain>` **(required)** Domain to configure. `--json` |
+| `admp outbox domain set` | Configure a sending domain for outbound email via Resend. | `--domain <domain>` **(required)** Domain to configure. `--json` |
 | `admp outbox domain verify` | Verify DNS records for the configured domain. | `--json` |
 | `admp outbox domain delete` | Remove the sending domain configuration. | `--json` |
-| `admp outbox send` | Send an email via the outbox (Mailgun). | `--to <address>` **(required)** Recipient email. `--subject <string>` **(required)** Subject. `--body <text>` Plain text body. `--html <html>` HTML body. `--json` |
+| `admp outbox send` | Send an email via the outbox (Resend). Requires a verified domain. | `--to <address>` **(required)** Recipient email. `--subject <string>` **(required)** Subject. `--body <text>` Plain text body. `--html <html>` HTML body. `--json` |
 | `admp outbox messages` | List messages in the outbox. | `--status <sent\|pending\|failed>` Filter by status. `--limit <n>` Max messages to return. `--json` |
+<!-- === END GENERATED: SMTP Outbox commands === -->
 
 ---
 
