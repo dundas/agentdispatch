@@ -5199,10 +5199,10 @@ test('email inbound: no INBOUND_EMAIL_SECRET configured returns 500', async () =
   }
 });
 
-test('GET /api/health/inbound returns 503 with stale status when threshold is 0', async () => {
+test('GET /api/health/inbound returns 503 with stale status when threshold is 1ms', async () => {
   const origThreshold = process.env.INBOUND_STALE_THRESHOLD_MS;
-  // A zero threshold guarantees stale even if emails were received during earlier tests
-  process.env.INBOUND_STALE_THRESHOLD_MS = '0';
+  // 1ms threshold guarantees stale — any previously accepted email is already older than 1ms
+  process.env.INBOUND_STALE_THRESHOLD_MS = '1';
 
   try {
     const res = await request(app).get('/api/health/inbound');

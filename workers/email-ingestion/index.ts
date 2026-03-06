@@ -47,7 +47,7 @@ async function reportError(env: Env, errorType: string, detail: string): Promise
       },
       body: JSON.stringify({
         to_agent: env.MONITOR_AGENT_ID,
-        from_email: 'worker-error@agentdispatch.io',
+        from_email: `worker-error@${env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io'}`,
         subject: `[email-worker] ${errorType}`,
         text: detail,
         metadata: { error_type: errorType, worker: 'admp-email-ingestion' }

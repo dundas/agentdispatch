@@ -588,7 +588,7 @@ Every ADMP agent has a built-in email address. Humans and external systems can e
 
 Email addresses follow this format:
 
-```
+```text
 {agentId}@agentdispatch.io
 ```
 

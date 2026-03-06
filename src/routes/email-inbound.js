@@ -253,7 +253,11 @@ router.post('/webhooks/email/inbound/:messageId/review', async (req, res) => {
  * (default 2 hours) — useful for uptime monitors that want a non-200 on staleness.
  */
 router.get('/health/inbound', (req, res) => {
-  const thresholdMs = parseInt(process.env.INBOUND_STALE_THRESHOLD_MS || String(2 * 60 * 60 * 1000), 10);
+  const defaultThresholdMs = 2 * 60 * 60 * 1000;
+  const parsedThresholdMs = Number.parseInt(process.env.INBOUND_STALE_THRESHOLD_MS ?? '', 10);
+  const thresholdMs = Number.isFinite(parsedThresholdMs) && parsedThresholdMs > 0
+    ? parsedThresholdMs
+    : defaultThresholdMs;
   const now = Date.now();
   const lastAt = inboundStats.last_inbound_at ? new Date(inboundStats.last_inbound_at).getTime() : null;
   const ageMs = lastAt ? now - lastAt : null;
