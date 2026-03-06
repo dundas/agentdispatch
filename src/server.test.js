@@ -95,6 +95,9 @@ test('GET /health returns healthy status', async () => {
   assert.equal(res.body.status, 'healthy');
   assert.ok(typeof res.body.timestamp === 'string');
   assert.ok(typeof res.body.version === 'string');
+  assert.ok('inbound_email' in res.body, 'health response should include inbound_email');
+  assert.ok('total_accepted' in res.body.inbound_email);
+  assert.ok('total_errors' in res.body.inbound_email);
 });
 
 test('GET /api/stats returns stats object', async () => {
@@ -5193,5 +5196,59 @@ test('email inbound: no INBOUND_EMAIL_SECRET configured returns 500', async () =
   } finally {
     if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
     else process.env.INBOUND_EMAIL_SECRET = origSecret;
+  }
+});
+
+test('GET /api/health/inbound returns 503 with stale status when threshold is 0', async () => {
+  const origThreshold = process.env.INBOUND_STALE_THRESHOLD_MS;
+  // A zero threshold guarantees stale even if emails were received during earlier tests
+  process.env.INBOUND_STALE_THRESHOLD_MS = '0';
+
+  try {
+    const res = await request(app).get('/api/health/inbound');
+
+    assert.equal(res.status, 503);
+    assert.equal(res.body.status, 'stale');
+    assert.strictEqual(res.body.stale_threshold_seconds, 0);
+    assert.ok('since_restart' in res.body);
+    assert.ok(typeof res.body.since_restart.accepted === 'number');
+    assert.ok(typeof res.body.since_restart.rejected === 'number');
+    assert.ok(typeof res.body.since_restart.errors === 'number');
+  } finally {
+    if (origThreshold === undefined) delete process.env.INBOUND_STALE_THRESHOLD_MS;
+    else process.env.INBOUND_STALE_THRESHOLD_MS = origThreshold;
+  }
+});
+
+test('GET /api/health/inbound returns 200 with ok status after email accepted', async () => {
+  const origSecret = process.env.INBOUND_EMAIL_SECRET;
+  const origThreshold = process.env.INBOUND_STALE_THRESHOLD_MS;
+  process.env.INBOUND_EMAIL_SECRET = 'health-test-secret';
+  // Use a generous threshold so we don't race
+  process.env.INBOUND_STALE_THRESHOLD_MS = String(60 * 60 * 1000);
+
+  const agentId = `health-inbound-agent-${Date.now()}`;
+  const regRes = await request(app)
+    .post('/api/agents/register')
+    .send({ agent_id: agentId });
+  assert.equal(regRes.status, 201);
+
+  try {
+    await request(app)
+      .post('/api/webhooks/email/inbound')
+      .set('x-webhook-secret', 'health-test-secret')
+      .send({ to_agent: agentId, from_email: 'tester@example.com', subject: 'health check' });
+
+    const res = await request(app).get('/api/health/inbound');
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'ok');
+    assert.ok(typeof res.body.last_inbound_at === 'string');
+    assert.ok(res.body.since_restart.accepted >= 1);
+  } finally {
+    if (origSecret === undefined) delete process.env.INBOUND_EMAIL_SECRET;
+    else process.env.INBOUND_EMAIL_SECRET = origSecret;
+    if (origThreshold === undefined) delete process.env.INBOUND_STALE_THRESHOLD_MS;
+    else process.env.INBOUND_STALE_THRESHOLD_MS = origThreshold;
   }
 });
