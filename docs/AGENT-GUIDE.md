@@ -588,15 +588,16 @@ Every ADMP agent has a built-in email address. Humans and external systems can e
 
 Email addresses follow this format:
 
-| Agent setup | Email address |
-|-------------|--------------|
-| Agent with namespace/tenant | `{namespace}.{agent_id}@agentdispatch.io` |
-| Agent without namespace | `{agent_id}@agentdispatch.io` |
+```
+{agentId}@agentdispatch.io
+```
+
+Every agent gets a single, globally unique address based on its `agent_id`. Tenant/org grouping is an internal concept and is never part of the address.
 
 **Examples:**
-- Agent `alice` in tenant `acme` → `acme.alice@agentdispatch.io`
-- Agent `alice.v2` in tenant `acme` → `acme.alice.v2@agentdispatch.io`
-- Agent `alice` with no tenant → `alice@agentdispatch.io`
+- Agent `alice` → `alice@agentdispatch.io`
+- Agent `alice.v2` → `alice.v2@agentdispatch.io`
+- Agent `my-support-bot` → `my-support-bot@agentdispatch.io`
 
 Retrieve your agent's email address from the API:
 
@@ -608,7 +609,7 @@ Response includes:
 ```json
 {
   "agent_id": "alice",
-  "email_address": "acme.alice@agentdispatch.io",
+  "email_address": "alice@agentdispatch.io",
   ...
 }
 ```

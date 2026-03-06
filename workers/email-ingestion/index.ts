@@ -20,8 +20,11 @@ interface Env {
  *
  * The local part is the agent ID verbatim. No namespace prefix, no splitting.
  * Tenant/org grouping is an internal concept and is never encoded in the address.
+ *
+ * Domain validation is handled by Cloudflare Email Routing — only traffic
+ * explicitly routed to this worker reaches here, so we don't re-validate the domain.
  */
-export function parseRecipient(address: string, _domain: string): string {
+export function parseRecipient(address: string): string {
   const atIdx = address.lastIndexOf('@');
   return atIdx !== -1 ? address.slice(0, atIdx) : address;
 }
@@ -31,9 +34,9 @@ export function parseRecipient(address: string, _domain: string): string {
 /**
  * Report a worker error to the ADMP monitor agent inbox (if MONITOR_AGENT_ID is set).
  * This persists errors beyond ephemeral Cloudflare Worker logs.
- * Uses waitUntil so it doesn't block email delivery.
+ * Call via ctx.waitUntil(reportError(...)) so it doesn't block email delivery.
  */
-async function reportError(env: Env, ctx: ExecutionContext, errorType: string, detail: string): Promise<void> {
+async function reportError(env: Env, errorType: string, detail: string): Promise<void> {
   if (!env.MONITOR_AGENT_ID) return;
   try {
     await fetch(`${env.ADMP_URL}/api/webhooks/email/inbound`, {
@@ -63,8 +66,7 @@ export default {
     env: Env,
     ctx: ExecutionContext
   ): Promise<void> {
-    const domain = env.INBOUND_EMAIL_DOMAIN || 'agentdispatch.io';
-    const agentId = parseRecipient(message.to, domain);
+    const agentId = parseRecipient(message.to);
 
     // Read and parse raw MIME
     // message.raw is a ReadableStream — convert to ArrayBuffer for postal-mime
@@ -95,7 +97,7 @@ export default {
       // Network error — don't reject the email, log and report persistently
       const detail = `Network error forwarding to ADMP for recipient ${message.to}: ${err}`;
       console.error('[email-ingestion]', detail);
-      ctx.waitUntil(reportError(env, ctx, 'NETWORK_ERROR', detail));
+      ctx.waitUntil(reportError(env, 'NETWORK_ERROR', detail));
       return;
     }
 
@@ -110,7 +112,7 @@ export default {
       const body = await response.text().catch(() => '');
       const detail = `ADMP returned ${response.status} for recipient ${message.to}: ${body}`;
       console.error('[email-ingestion]', detail);
-      ctx.waitUntil(reportError(env, ctx, `ADMP_${response.status}`, detail));
+      ctx.waitUntil(reportError(env, `ADMP_${response.status}`, detail));
     }
   }
 };
